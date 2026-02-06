@@ -50,7 +50,7 @@ After installation, you need to sign in:
 ## Step 5: Authenticate with GitHub
 
 1. A **browser window** will open automatically (or you'll see a URL to copy).
-2. **Sign in to GitHub** in the browser (use your account: `amandey688-png`).
+2. **Sign in to GitHub** in the browser (use your GitHub account).
 3. Click **"Authorize CodeRabbit"** or **"Authorize coderabbitai"**.
 4. You may be redirected back to Cursor automatically, or you'll see a success message.
 
@@ -59,8 +59,7 @@ After installation, you need to sign in:
 ## Step 6: Connect Your Repository
 
 1. Back in **Cursor**, the CodeRabbit panel should show your repositories.
-2. If prompted, select your repository: **`IP-Internal-manage-Software`**.
-   - Or it may auto-detect the current workspace.
+2. If prompted, select your repository (or it may auto-detect the current workspace).
 3. Confirm the connection.
 
 ---
@@ -78,7 +77,7 @@ After installation, you need to sign in:
 
 | Problem | Solution |
 |---------|----------|
-| **Extension not found** | Make sure you're searching in the Cursor Extensions marketplace, not VS Code. |
+| **Extension not found** | Cursor uses the VS Code marketplace and Open VSX registry. Make sure you're searching in the Extensions panel (`Ctrl+Shift+X`). If still not found, check your internet connection or try restarting Cursor. |
 | **"Sign In" button doesn't work** | Try the Command Palette method (`Ctrl+Shift+P` → "CodeRabbit: Sign In"). |
 | **Browser doesn't open** | Copy the URL shown in Cursor and paste it into your browser manually. |
 | **Repository not detected** | Make sure you have a Git repository initialized (`git init`). Open the folder that contains `.git`. |
@@ -115,5 +114,4 @@ After installation, you need to sign in:
 
 ---
 
-**Your Repository:** `amandey688-png/IP-Internal-manage-Software`  
-**GitHub:** https://github.com/amandey688-png/IP-Internal-manage-Software
+**Note:** Replace `YOUR_USERNAME` and `YOUR_REPO_NAME` with your actual GitHub username and repository name when following these steps.
