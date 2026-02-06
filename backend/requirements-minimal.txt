@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic[email]
+supabase-auth==2.27.2
+httpx<0.29,>=0.26
+postgrest==2.27.2
+gotrue==2.11.0

@@ -1,0 +1,56 @@
+export type UserRole = 'user' | 'admin' | 'master_admin' | 'approver'
+
+export interface User {
+  id: string
+  email: string
+  full_name: string
+  display_name?: string
+  avatar_url?: string
+  role: UserRole
+  is_active: boolean
+  created_at: string
+  last_login?: string
+}
+
+export interface AuthState {
+  user: User | null
+  token: string | null
+  isAuthenticated: boolean
+  isLoading: boolean
+}
+
+export interface RegisterRequest {
+  email: string
+  password: string
+  full_name: string
+}
+
+export interface RegisterResponse {
+  user_id: string
+  email: string
+  confirmation_sent: boolean
+  message: string
+}
+
+export interface LoginRequest {
+  email: string
+  password: string
+}
+
+export interface LoginResponse {
+  access_token: string
+  refresh_token?: string
+  user: User
+  requires_otp?: boolean
+}
+
+export interface OTPVerifyRequest {
+  email: string
+  otp: string
+}
+
+export interface OTPVerifyResponse {
+  access_token: string
+  refresh_token?: string
+  user: User
+}

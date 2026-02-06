@@ -1,0 +1,57 @@
+# CodeRabbit – AI code review before production
+# https://docs.coderabbit.ai/configure-coderabbit
+# Schema: https://coderabbit.ai/integrations/schema.v2.json
+
+language: "en-US"
+early_access: false
+
+reviews:
+  profile: "assertive"
+  request_changes_workflow: true
+  high_level_summary: true
+  high_level_summary_placeholder: "@coderabbitai summary"
+  review_status: true
+  review_details: true
+  commit_status: true
+  fail_commit_status: true
+  collapse_walkthrough: true
+  changed_files_summary: true
+  poem: false
+  path_filters:
+    - "backend/**"
+    - "fms-frontend/src/**"
+    - "database/*.sql"
+    - "*.md"
+    - "!**/node_modules/**"
+    - "!**/__pycache__/**"
+    - "!**/.venv/**"
+    - "!**/venv/**"
+  path_instructions:
+    - path: "backend/**"
+      instructions: "Python FastAPI backend. Check security (auth, RLS), error handling, and API contracts."
+    - path: "fms-frontend/src/**"
+      instructions: "React + TypeScript + Vite + Ant Design. Check hooks order, types, and accessibility."
+    - path: "database/*.sql"
+      instructions: "Supabase/PostgreSQL. Check migrations, RLS policies, and indexes."
+
+auto_review:
+  enabled: true
+  drafts: false
+  auto_incremental_review: true
+
+pre_merge_checks:
+  description:
+    mode: "warning"
+  title:
+    mode: "warning"
+
+tools:
+  ruff:
+    enabled: true
+  eslint:
+    enabled: true
+  gitleaks:
+    enabled: true
+
+chat:
+  auto_reply: true

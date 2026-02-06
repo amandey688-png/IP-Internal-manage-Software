@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic[email]
+python-multipart
+supabase
+httpx
+psycopg2-binary

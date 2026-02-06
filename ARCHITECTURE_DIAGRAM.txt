@@ -1,0 +1,158 @@
+================================================================================
+                    FMS TO APPLICATION - SYSTEM ARCHITECTURE
+================================================================================
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              CLIENT LAYER                                    │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────┐    │
+│  │                    Next.js Frontend Application                    │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │    │
+│  │  │   Dashboard  │  │   Tickets    │  │  Approvals   │            │    │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘            │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │    │
+│  │  │   Staging    │  │   Analytics  │  │   Profile    │            │    │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘            │    │
+│  │                                                                     │    │
+│  │  - Server-Side Rendering (SSR)                                     │    │
+│  │  - Static Site Generation (SSG)                                    │    │
+│  │  - Real-time Updates (Supabase Subscriptions)                      │    │
+│  │  - Authentication UI                                                │    │
+│  └────────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ HTTPS/REST API
+                                    │ JWT Authentication
+                                    │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           API GATEWAY LAYER                                 │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────┐    │
+│  │                    FastAPI Backend Service                         │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │    │
+│  │  │  Auth        │  │  Tickets     │  │  SLA         │            │    │
+│  │  │  Module      │  │  Module      │  │  Module      │            │    │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘            │    │
+│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐            │    │
+│  │  │  Approvals   │  │  Staging     │  │  Dashboard   │            │    │
+│  │  │  Module      │  │  Module      │  │  Module      │            │    │
+│  │  └──────────────┘  └──────────────┘  └──────────────┘            │    │
+│  │                                                                     │    │
+│  │  - Request Validation (Pydantic)                                   │    │
+│  │  - Authentication Middleware                                        │    │
+│  │  - Authorization Middleware (RBAC)                                 │    │
+│  │  - Rate Limiting                                                   │    │
+│  │  - Error Handling                                                  │    │
+│  └────────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ Supabase Client SDK
+                                    │
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        SUPABASE BACKEND LAYER                               │
+│                                                                              │
+│  ┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐  │
+│  │   PostgreSQL     │      │   Auth Service   │      │  Storage Service│  │
+│  │   Database       │      │                  │      │                  │  │
+│  │                  │      │  - Email         │      │  - Attachments   │  │
+│  │  ┌────────────┐ │      │    Confirmation  │      │  - Documents     │  │
+│  │  │  Tables    │ │      │  - JWT Tokens    │      │  - Media Files   │  │
+│  │  │  Views     │ │      │  - Sessions      │      │                  │  │
+│  │  │  Functions │ │      │  - Password      │      │  - Access        │  │
+│  │  │  Triggers  │ │      │    Management    │      │    Control       │  │
+│  │  │  RLS       │ │      │                  │      │                  │  │
+│  │  └────────────┘ │      └──────────────────┘      └──────────────────┘  │
+│  │                  │                                                      │
+│  │  Core Tables:                                                          │
+│  │  - users, tickets, comments, history                                  │  │
+│  │  - sla_rules, sla_tracking, sla_breaches                              │  │
+│  │  - feature_approvals, staging_environments, deployments               │  │
+│  │  - notifications, file_metadata                                        │  │
+│  └──────────────────┘                                                      │
+│                                                                              │
+│  ┌────────────────────────────────────────────────────────────────────┐    │
+│  │                    Supabase Realtime                               │    │
+│  │  - Real-time subscriptions                                         │    │
+│  │  - Live updates for tickets, comments, notifications              │    │
+│  └────────────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+                            DATA FLOW EXAMPLES
+================================================================================
+
+TICKET CREATION FLOW:
+─────────────────────
+User → Next.js Form → FastAPI Validation → Supabase DB (RLS Check) → Insert
+  → Real-time Update → Frontend Refresh
+
+FEATURE APPROVAL FLOW:
+──────────────────────
+User → Feature Request → FastAPI → DB Status Update → Notification
+  → Approver → Approval Action → Staging Workflow → Deployment
+
+SLA CALCULATION FLOW:
+─────────────────────
+Ticket Created → Trigger → SLA Tracking Created → Deadline Calculated
+  → Status Updates → Delay Calculated → Breach Detection → Notification
+
+================================================================================
+                            SECURITY LAYERS
+================================================================================
+
+Layer 1: Network Security
+  ├─ HTTPS/TLS Encryption
+  ├─ CORS Configuration
+  └─ Rate Limiting
+
+Layer 2: Authentication
+  ├─ Supabase Auth (Email Confirmation)
+  ├─ JWT Tokens
+  └─ Session Management
+
+Layer 3: Authorization (RBAC)
+  ├─ User Role
+  ├─ Approver Role
+  ├─ Admin Role
+  └─ Master Admin Role
+
+Layer 4: Data Security (RLS)
+  ├─ Row Level Security Policies
+  ├─ Policy-Based Access Control
+  └─ Dynamic User Context
+
+Layer 5: Application Security
+  ├─ Input Validation
+  ├─ SQL Injection Prevention
+  ├─ XSS Prevention
+  └─ CSRF Protection
+
+================================================================================
+                            ROLE PERMISSIONS
+================================================================================
+
+USER (Default):
+  ├─ Create tickets
+  ├─ View own/assigned tickets
+  ├─ Add comments
+  └─ Request feature approvals
+
+APPROVER:
+  ├─ All User permissions
+  ├─ View all tickets (read-only)
+  └─ Approve/reject feature requests
+
+ADMIN:
+  ├─ All Approver permissions
+  ├─ Manage all tickets
+  ├─ Configure SLA rules
+  ├─ Manage staging environments
+  └─ View all users
+
+MASTER ADMIN:
+  ├─ All Admin permissions
+  ├─ Change user roles
+  ├─ Delete users
+  └─ System-wide configuration
+
+================================================================================

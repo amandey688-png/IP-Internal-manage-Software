@@ -1,0 +1,118 @@
+import { useState, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { Card, Typography, Tag, Descriptions, Button, Space, message } from 'antd'
+import { ArrowLeftOutlined } from '@ant-design/icons'
+import { ticketsApi } from '../../api/tickets'
+import { LoadingSpinner } from '../../components/common/LoadingSpinner'
+import { formatDate } from '../../utils/helpers'
+import { ROUTES } from '../../utils/constants'
+import type { Ticket } from '../../api/tickets'
+
+const { Title } = Typography
+
+/** Ticket is in Staging workflow and not yet completed Stage 3 */
+function isStagingTicket(t: Ticket): boolean {
+  const inStaging = !!t.staging_planned || t.status_2 === 'staging'
+  const completed = t.live_review_status === 'completed'
+  return inStaging && !completed
+}
+
+export const TicketDetail = () => {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  const [loading, setLoading] = useState(true)
+  const [ticket, setTicket] = useState<Ticket | null>(null)
+
+  useEffect(() => {
+    if (id) {
+      fetchTicket()
+    }
+  }, [id])
+
+  const fetchTicket = async () => {
+    if (!id) return
+    setLoading(true)
+    try {
+      const response = await ticketsApi.get(id)
+      if (response) {
+        const t = response as Ticket
+        setTicket(t)
+        if (isStagingTicket(t)) {
+          navigate(`${ROUTES.STAGING}?open=${id}`, { replace: true })
+          return
+        }
+      }
+    } catch (error) {
+      message.error('Failed to load ticket')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) return <LoadingSpinner fullPage />
+  if (!ticket) return <div>Ticket not found</div>
+
+  const getStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      open: 'blue',
+      in_progress: 'orange',
+      resolved: 'green',
+      closed: 'default',
+      cancelled: 'red',
+      on_hold: 'purple',
+    }
+    return colors[status] || 'default'
+  }
+
+  return (
+    <div>
+      <Space style={{ marginBottom: 16 }}>
+        <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(ROUTES.TICKETS)}>
+          Back
+        </Button>
+        <Title level={2} style={{ margin: 0 }}>
+          {ticket.reference_no}
+        </Title>
+      </Space>
+
+      <Card>
+        <Descriptions column={2} bordered>
+          <Descriptions.Item label="Title">{ticket.title}</Descriptions.Item>
+          <Descriptions.Item label="Status">
+            <Tag color={getStatusColor(ticket.status)}>
+              {ticket.status.replace('_', ' ').toUpperCase()}
+            </Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Type">
+            <Tag>{ticket.type.toUpperCase()}</Tag>
+          </Descriptions.Item>
+          <Descriptions.Item label="Priority">
+            {ticket.priority.toUpperCase()}
+          </Descriptions.Item>
+          <Descriptions.Item label="Created">
+            {formatDate(ticket.created_at)}
+          </Descriptions.Item>
+          {ticket.resolved_at && (
+            <Descriptions.Item label="Resolved">
+              {formatDate(ticket.resolved_at)}
+            </Descriptions.Item>
+          )}
+        </Descriptions>
+
+        {ticket.description && (
+          <div style={{ marginTop: 24 }}>
+            <Title level={4}>Description</Title>
+            <p>{ticket.description}</p>
+          </div>
+        )}
+
+        {ticket.resolution_notes && (
+          <div style={{ marginTop: 24 }}>
+            <Title level={4}>Resolution Notes</Title>
+            <p>{ticket.resolution_notes}</p>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
