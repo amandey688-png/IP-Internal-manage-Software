@@ -7,6 +7,8 @@ This guide covers **both GitHub and CodeRabbit** in one place. Use it whether yo
 
 Follow the steps in order. Replace `YOUR_USERNAME` and `support-fms` with your own GitHub username and repository name.
 
+**This repo:** `amandey688-png` / `IP-Internal-manage-Software` — https://github.com/amandey688-png/IP-Internal-manage-Software
+
 ---
 
 # PART A: GitHub & Git Setup
@@ -58,8 +60,8 @@ Git needs your name and email for every commit. Use the **same email** you used 
 
 1. Open **PowerShell** and run (replace with your real name and email):
    ```powershell
-   git config --global user.name "Your Full Name"
-   git config --global user.email "your.email@example.com"
+   git config --global user.name "Aman Dey"
+   git config --global user.email "amandey688@gmail.com"
    ```
 2. Confirm:
    ```powershell
@@ -174,7 +176,7 @@ Do this from your **project folder**.
 
 1. Add the remote (replace `YOUR_USERNAME` and `support-fms` with your username and repo name):
    ```powershell
-   git remote add origin https://github.com/YOUR_USERNAME/support-fms.git
+   git remote add origin https://github.com/amandey688-png/support-fms.git
    ```
    If you see **“remote origin already exists”**, update it instead:
    ```powershell
@@ -196,7 +198,7 @@ Do this from your **project folder**.
 
 3. **First-time push:** A browser window may open to **sign in to GitHub**. Choose **“Sign in with your browser”** and complete login. The push should then finish.
 
-4. **Verify:** Open `https://github.com/YOUR_USERNAME/support-fms` in your browser. You should see your project files (backend, fms-frontend, .coderabbit.yaml, etc.).
+4. **Verify:** Open `https://github.com/amandey688-png/support-fms` in your browser. You should see your project files (backend, fms-frontend, .coderabbit.yaml, etc.).
 
 You now have **GitHub and Git set up** and **your project on GitHub**.
 
@@ -318,6 +320,16 @@ Repo behavior is controlled by **`.coderabbit.yaml`** in the project root. Defau
 | `tools` | Ruff, ESLint, Gitleaks | Extra lint/security checks |
 
 To change behavior, edit `.coderabbit.yaml`. Full options: [Configuration reference](https://docs.coderabbit.ai/reference/configuration).
+
+---
+
+# Setup complete — what's next?
+
+You've finished **Steps 1–8**. From here:
+
+1. **Merge your test PR** (optional): Go to [Pull requests](https://github.com/amandey688-png/IP-Internal-manage-Software/pulls). If the **test-coderabbit** PR has a green CodeRabbit check, click **Merge pull request**. Then switch back to `main` locally: `git checkout main` and `git pull origin main`.
+2. **Use the daily workflow (Step 9)** for all new work: create a branch → make changes → push → open PR → wait for CodeRabbit → merge when green.
+3. **(Optional) Step 10:** Tweak `.coderabbit.yaml` if you want different review behavior (e.g. chill vs assertive, path filters).
 
 ---
 
