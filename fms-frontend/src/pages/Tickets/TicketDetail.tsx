@@ -4,6 +4,7 @@ import { Card, Typography, Tag, Descriptions, Button, Space, message } from 'ant
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
 import { LoadingSpinner } from '../../components/common/LoadingSpinner'
+import { PrintExport } from '../../components/common/PrintExport'
 import { formatDate } from '../../utils/helpers'
 import { ROUTES } from '../../utils/constants'
 import type { Ticket } from '../../api/tickets'
@@ -66,13 +67,14 @@ export const TicketDetail = () => {
 
   return (
     <div>
-      <Space style={{ marginBottom: 16 }}>
+      <Space style={{ marginBottom: 16 }} wrap>
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(ROUTES.TICKETS)}>
           Back
         </Button>
         <Title level={2} style={{ margin: 0 }}>
           {ticket.reference_no}
         </Title>
+        <PrintExport pageTitle={`Ticket ${ticket.reference_no}`} />
       </Space>
 
       <Card>

@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Table, Card, Typography, Tag, Space } from 'antd'
 import { solutionsApi } from '../../api/solutions'
 import { LoadingSpinner } from '../../components/common/LoadingSpinner'
+import { PrintExport } from '../../components/common/PrintExport'
 import { formatDate } from '../../utils/helpers'
 import type { Solution } from '../../api/solutions'
 
@@ -70,9 +71,27 @@ export const SolutionList = () => {
     },
   ]
 
+  const exportColumns = [
+    { key: 'solution_number', label: 'Solution' },
+    { key: 'title', label: 'Title' },
+    { key: 'is_selected', label: 'Selected' },
+    { key: 'quality_score', label: 'Quality Score' },
+    { key: 'proposed_at', label: 'Proposed' },
+  ]
+  const exportRows = solutions.map((s) => ({
+    solution_number: `Solution ${s.solution_number}`,
+    title: s.title ?? '-',
+    is_selected: s.is_selected ? 'Yes' : 'No',
+    quality_score: s.quality_score != null ? `${s.quality_score}/10` : '-',
+    proposed_at: formatDate(s.proposed_at ?? ''),
+  }))
+
   return (
     <div>
-      <Title level={2}>Solutions</Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
+        <Title level={2} style={{ margin: 0 }}>Solutions</Title>
+        <PrintExport pageTitle="Solutions" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="solutions" />
+      </div>
       <Card>
         <Table
           columns={columns}

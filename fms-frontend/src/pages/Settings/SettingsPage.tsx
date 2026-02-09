@@ -6,6 +6,7 @@ import { useRole } from '../../hooks/useRole'
 import { usersApi } from '../../api/users'
 import { approvalApi } from '../../api/approval'
 import { getInitials } from '../../utils/helpers'
+import { PrintExport } from '../../components/common/PrintExport'
 
 const { Title } = Typography
 const { TextArea } = Input
@@ -67,8 +68,10 @@ export const SettingsPage = () => {
 
   return (
     <div>
-      <Title level={2}>Settings</Title>
-
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
+        <Title level={2} style={{ margin: 0 }}>Settings</Title>
+        <PrintExport pageTitle="Settings" />
+      </div>
       <Card>
         <Space direction="vertical" size="large" style={{ width: '100%' }}>
           <div>

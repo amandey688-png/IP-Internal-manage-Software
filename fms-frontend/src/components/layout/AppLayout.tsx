@@ -15,10 +15,11 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
 
   return (
     <Layout style={{ minHeight: '100vh', background: '#f5f6f8' }}>
-      <Sidebar />
+      <Sidebar className="no-print" />
       <Layout style={{ marginLeft: 220 }}>
         <Header onAddNew={() => setSupportModalOpen(true)} />
         <Content
+          className="printable-content"
           style={{
             margin: '88px 24px 24px',
             padding: 24,

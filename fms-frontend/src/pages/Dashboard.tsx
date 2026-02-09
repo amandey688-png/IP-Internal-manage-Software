@@ -12,7 +12,8 @@ import { dashboardApi } from '../api/dashboard'
 import { ticketsApi } from '../api/tickets'
 import { useEffect, useState } from 'react'
 import { LoadingSpinner } from '../components/common/LoadingSpinner'
-import { formatDateShort } from '../utils/helpers'
+import { PrintExport } from '../components/common/PrintExport'
+import { formatDateShort, TICKET_EXPORT_COLUMNS, buildTicketExportRow, getChoresBugsCurrentStage } from '../utils/helpers'
 import { ROUTES } from '../utils/constants'
 import type { Ticket } from '../api/tickets'
 import type { DashboardMetrics } from '../api/dashboard'
@@ -90,6 +91,15 @@ export const Dashboard = () => {
     { title: 'Chores & Bug Pending', value: Number(safeMetrics.staging_pending_chores_bugs) || 0, icon: <FileTextOutlined />, color: '#52c41a' },
   ]
 
+  const exportData = recentTickets.length
+    ? {
+        columns: [...TICKET_EXPORT_COLUMNS],
+        rows: recentTickets.map((t) =>
+          buildTicketExportRow(t, (x) => getChoresBugsCurrentStage(x as Parameters<typeof getChoresBugsCurrentStage>[0]))
+        ),
+      }
+    : undefined
+
   return (
     <div
       style={{
@@ -104,6 +114,9 @@ export const Dashboard = () => {
         overflowWrap: 'break-word',
       }}
     >
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <PrintExport pageTitle="Dashboard" exportData={exportData} exportFilename="dashboard_recent_tickets" />
+      </div>
       {/* Support Overview - static informational banner (non-clickable) */}
       <div style={{ marginBottom: 28 }}>
         <Card

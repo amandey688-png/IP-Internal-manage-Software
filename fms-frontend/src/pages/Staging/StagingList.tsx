@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Table, Card, Typography, Tag } from 'antd'
+import { Table, Card, Typography, Tag, Select, Space } from 'antd'
 import { PhoneOutlined, MailOutlined, MessageOutlined, LinkOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
-import { formatDateTable, formatReplySla, getStagingCurrentStage } from '../../utils/helpers'
+import { formatDateTable, formatReplySla, getStagingCurrentStage, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
 import type { Ticket } from '../../api/tickets'
 import { StagingDetailDrawer } from '../../components/tickets/StagingDetailDrawer'
+import { PrintExport } from '../../components/common/PrintExport'
+
+const { Option } = Select
 
 const { Title } = Typography
 
@@ -243,6 +246,8 @@ export const StagingList = () => {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
   const [drawerTicketId, setDrawerTicketId] = useState<string | null>(openId || null)
+  /** Stage filter: applies to table, Export and Print */
+  const [stageFilter, setStageFilter] = useState<string>('')
 
   useEffect(() => {
     if (openId) setDrawerTicketId(openId)
@@ -272,18 +277,46 @@ export const StagingList = () => {
     }
   }
 
+  const stagingStageLabels = ['Stage 1: Staging', 'Stage 2: Live', 'Stage 3: Live Review']
+  const ticketsForDisplay =
+    stageFilter
+      ? tickets.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter)
+      : tickets
+  const getStageForExport = (t: Record<string, unknown>) => getStagingCurrentStage(t as Parameters<typeof getStagingCurrentStage>[0])
+  const exportColumns = [...TICKET_EXPORT_COLUMNS]
+  const exportRows = ticketsForDisplay.map((t) => buildTicketExportRow(t, getStageForExport))
+
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-      <Title level={2} style={{ marginBottom: 16 }}>
-        Staging
-      </Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
+        <Title level={2} style={{ margin: 0 }}>
+          Staging
+        </Title>
+        <PrintExport pageTitle="Staging" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="staging_tickets" />
+      </div>
       <Card>
-        <Typography.Paragraph type="secondary" style={{ marginBottom: 16 }}>
-          Tickets in Staging workflow (Stage 1–3). All columns up to Reference No. Click a row to open staging details.
-        </Typography.Paragraph>
+        <Space style={{ marginBottom: 16 }} wrap>
+          <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
+            Tickets in Staging workflow (Stage 1–3). All columns up to Reference No. Click a row to open staging details.
+          </Typography.Paragraph>
+          <Select
+            placeholder="Stage"
+            style={{ width: 180 }}
+            value={stageFilter || undefined}
+            onChange={(v) => {
+              setStageFilter(v ?? '')
+              setPage(1)
+            }}
+            allowClear
+          >
+            {stagingStageLabels.map((label) => (
+              <Option key={label} value={label}>{label}</Option>
+            ))}
+          </Select>
+        </Space>
         <Table
           columns={stagingTicketColumns}
-          dataSource={tickets}
+          dataSource={ticketsForDisplay}
           rowKey="id"
           loading={loading}
           scroll={{ x: 'max-content' }}
@@ -294,7 +327,7 @@ export const StagingList = () => {
           pagination={{
             current: page,
             pageSize,
-            total,
+            total: stageFilter ? ticketsForDisplay.length : total,
             showSizeChanger: true,
             showTotal: (t) => `Total ${t} tickets`,
             onChange: (newPage, newPageSize) => {

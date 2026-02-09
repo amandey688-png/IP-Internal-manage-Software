@@ -278,3 +278,60 @@ export const getInitials = (name: string): string => {
     .toUpperCase()
     .slice(0, 2)
 }
+
+/** Standard export column definitions for ticket Print & Export (all ticket-based pages) */
+export const TICKET_EXPORT_COLUMNS = [
+  { key: 'reference_no', label: 'Reference No' },
+  { key: 'title', label: 'Title' },
+  { key: 'description', label: 'Description' },
+  { key: 'attachment', label: 'Attachment' },
+  { key: 'type_of_request', label: 'Type of Request' },
+  { key: 'page', label: 'Page' },
+  { key: 'company_name', label: 'Company Name' },
+  { key: 'user_name', label: 'User Name' },
+  { key: 'division_name', label: 'Division' },
+  { key: 'communicated_through', label: 'Communicated Through' },
+  { key: 'stage', label: 'Stage' },
+  { key: 'stage_status', label: 'Stage Status' },
+] as const
+
+type StageInfo = { stageLabel: string; status: string }
+
+/**
+ * Build one export row for a ticket using standard fields.
+ * getStage(t) should return current stage label and status (e.g. from getChoresBugsCurrentStage or getStagingCurrentStage).
+ */
+export function buildTicketExportRow(
+  t: {
+    reference_no?: string
+    title?: string
+    description?: string
+    attachment_url?: string
+    type?: string
+    page_name?: string
+    company_name?: string
+    user_name?: string
+    division_name?: string
+    communicated_through?: string
+    [k: string]: unknown
+  },
+  getStage?: (t: Record<string, unknown>) => StageInfo
+): Record<string, unknown> {
+  const typeLabel = t.type === 'chore' ? 'Chores' : t.type === 'bug' ? 'Bug' : t.type === 'feature' ? 'Feature' : t.type ?? '-'
+  const commLabel = t.communicated_through === 'phone' ? 'Phone' : t.communicated_through === 'mail' ? 'Mail' : t.communicated_through === 'whatsapp' ? 'WhatsApp' : t.communicated_through ?? '-'
+  const stageInfo = getStage ? getStage(t as Record<string, unknown>) : { stageLabel: '-', status: '-' }
+  return {
+    reference_no: t.reference_no ?? '-',
+    title: t.title ?? '-',
+    description: t.description ?? '-',
+    attachment: t.attachment_url && String(t.attachment_url).trim() ? String(t.attachment_url).trim() : '-',
+    type_of_request: typeLabel,
+    page: t.page_name ?? '-',
+    company_name: t.company_name ?? '-',
+    user_name: t.user_name ?? '-',
+    division_name: t.division_name ?? '-',
+    communicated_through: commLabel,
+    stage: stageInfo.stageLabel,
+    stage_status: stageInfo.status,
+  }
+}

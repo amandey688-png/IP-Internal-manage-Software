@@ -16,7 +16,8 @@ import { ticketsApi } from '../../api/tickets'
 import { supportApi } from '../../api/support'
 import { TicketDetailDrawer } from '../../components/tickets/TicketDetailDrawer'
 import { ChoresBugsDetailDrawer } from '../../components/tickets/ChoresBugsDetailDrawer'
-import { formatDateTable, formatDuration, formatReplySla, getChoresBugsCurrentStage } from '../../utils/helpers'
+import { PrintExport } from '../../components/common/PrintExport'
+import { formatDateTable, formatDuration, formatReplySla, getChoresBugsCurrentStage, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
 import { useRole } from '../../hooks/useRole'
 import type { Ticket } from '../../api/tickets'
 import type { Company } from '../../api/support'
@@ -80,6 +81,8 @@ export const TicketList = () => {
     sort_by: 'created_at',
     sort_order: 'desc' as 'asc' | 'desc',
   })
+  /** Stage filter: applies to table, Export and Print (filters current result set) */
+  const [stageFilter, setStageFilter] = useState<string>('')
 
   useEffect(() => {
     const t = searchParams.get('type') || ''
@@ -191,6 +194,17 @@ export const TicketList = () => {
 
   const isChoresBugs = sectionFromUrl === 'chores-bugs' || sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'solutions'
   const isSolutionsSection = sectionFromUrl === 'solutions'
+
+  const showStageFilter = sectionFromUrl === 'chores-bugs'
+  /** When stage filter is set (Chores & Bugs only), filter tickets for table, Export and Print */
+  const ticketsForDisplay =
+    showStageFilter && stageFilter
+      ? tickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
+      : tickets
+
+  const getStageForExport = isChoresBugs
+    ? (t: Record<string, unknown>) => getChoresBugsCurrentStage(t as Parameters<typeof getChoresBugsCurrentStage>[0])
+    : undefined
 
   const baseColumns = [
     {
@@ -593,13 +607,16 @@ export const TicketList = () => {
 
   const isCompletedChoresBugs = sectionFromUrl === 'completed-chores-bugs'
 
+  const exportColumns = [...TICKET_EXPORT_COLUMNS]
+  const exportRows = ticketsForDisplay.map((t) => buildTicketExportRow(t, getStageForExport))
+
   return (
     <div style={{ maxWidth: 1600, margin: '0 auto' }}>
       {isCompletedChoresBugs && (
         <style>{`.completed-chores-bugs-wrap .ant-table-cell,
 .completed-chores-bugs-wrap .ant-table-thead > tr > th { white-space: normal !important; word-break: break-word !important; }`}</style>
       )}
-      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
+      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between', flexWrap: 'wrap' }}>
         <Title
           level={2}
           style={{
@@ -609,6 +626,7 @@ export const TicketList = () => {
         >
           {pageTitle}
         </Title>
+        <PrintExport pageTitle={pageTitle} exportData={{ columns: exportColumns, rows: exportRows }} exportFilename={`tickets_${sectionFromUrl || 'all'}`} />
       </Space>
 
       <Card style={cardStyle} bodyStyle={{ padding: 24 }}>
@@ -674,6 +692,23 @@ export const TicketList = () => {
             <Option value="medium">Medium</Option>
             <Option value="low">Low</Option>
           </Select>
+          {showStageFilter && (
+            <Select
+              placeholder="Stage"
+              style={{ width: 140 }}
+              value={stageFilter || undefined}
+              onChange={(v) => {
+                setStageFilter(v ?? '')
+                setPage(1)
+              }}
+              allowClear
+            >
+              <Option value="Stage 1">Stage 1</Option>
+              <Option value="Stage 2">Stage 2</Option>
+              <Option value="Stage 3">Stage 3</Option>
+              <Option value="Stage 4">Stage 4</Option>
+            </Select>
+          )}
           <RangePicker
             placeholder={['From', 'To']}
             onChange={handleDateRange}
@@ -684,7 +719,7 @@ export const TicketList = () => {
         <Table
           className={isCompletedChoresBugs ? 'completed-chores-bugs-wrap' : undefined}
           columns={columns}
-          dataSource={tickets}
+          dataSource={ticketsForDisplay}
           rowKey="id"
           loading={loading}
           locale={{ emptyText: 'No tickets yet.' }}
@@ -692,7 +727,7 @@ export const TicketList = () => {
           pagination={{
             current: page,
             pageSize,
-            total,
+            total: stageFilter && showStageFilter ? ticketsForDisplay.length : total,
             showSizeChanger: true,
             showTotal: (t) => `Total ${t} tickets`,
             pageSizeOptions: ['10', '20', '50', '100'],
