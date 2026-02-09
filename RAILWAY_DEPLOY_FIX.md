@@ -29,10 +29,12 @@ git add backend/railway.toml
 git add backend/runtime.txt
 git add GITHUB_VERIFY_AND_GO_LIVE.md
 git add RAILWAY_DEPLOY_FIX.md
+git add fms-frontend/vercel.json
+git add backend/app/main.py
 git status
 ```
 
-You should see those files under "Changes to be committed". If you see "no changes added" or "paths did not match", you are not in the project root—run `cd "C:\Support FMS to APPLICATION"` and try again.
+You should see those files under "Changes to be committed". If you only want the Railway/docs fix and not `main.py` or `vercel.json`, omit those two `git add` lines. If you see "no changes added" or "paths did not match", you are not in the project root—run `cd "C:\Support FMS to APPLICATION"` and try again.
 
 **3. Commit:**
 
@@ -46,19 +48,30 @@ git commit -m "Add Railway config and root directory fix for backend deploy"
 git push origin main
 ```
 
-If your default branch is **master** instead of **main**, use:
+If Git said **"Your branch and 'origin/main' have diverged"**, run `git pull origin main --rebase` first, then `git push origin main`. Use **main** only—do not use `master` or you'll get "src refspec master does not match any".
+
+**If you get "cannot pull with rebase: You have unstaged changes":**
+
+Git won’t pull while you have uncommitted changes. Commit everything, then pull and push:
 
 ```powershell
-git push origin master
+git add -A
+git status
+git commit -m "Add Railway config and deploy doc updates"
+git pull origin main --rebase
+git push origin main
 ```
+
+If you prefer to stash your changes, pull, push, then put them back: `git stash -u` → `git pull origin main --rebase` → `git push origin main` → `git stash pop`. Then commit and push any new changes.
 
 **If you get an error when pushing:**
 
 | Error | What to do |
 |-------|------------|
 | **"Authentication failed"** or **"Permission denied"** | Sign in to GitHub again. Use a [Personal Access Token](https://github.com/settings/tokens) as the password when Git asks. |
-| **"failed to push some refs"** / **"Updates were rejected"** | Someone else pushed first. Run `git pull origin main` (or `master`), then `git push origin main` again. |
+| **"failed to push some refs"** / **"Updates were rejected"** / **non-fast-forward** | Your local branch is behind GitHub. First fix any "unstaged changes" (see above), then run `git pull origin main --rebase`, then `git push origin main`. If rebase gives conflicts, use `git pull origin main` instead, then push. |
 | **"branch 'main' does not exist"** | Check your branch: `git branch`. Then push that branch, e.g. `git push origin master`. |
+| **"src refspec master does not match any"** | You're on `main`, not `master`. Use `git push origin main` (and pull first if you got "rejected" above). |
 | **"nothing added to commit"** | The files may already be committed. Run `git status`; if it says "nothing to commit, working tree clean", you’re done—go to Step 2 (Railway). |
 | **"pathspec did not match any file(s)"** | Make sure you’re in the project root (`cd "C:\Support FMS to APPLICATION"`) and the files exist in `backend\` and the repo root. |
 
