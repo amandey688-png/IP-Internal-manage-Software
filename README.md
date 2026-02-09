@@ -1,6 +1,6 @@
 # FMS to Application - System Architecture
 
-Cloud-based Facility Management System (FMS) to Application platform with comprehensive ticket management, SLA tracking, feature approval workflows, and staging management.
+Cloud-based Facility Management System (FMS) to Application platform with comprehensive ticket management, SLA tracking, feature approval workflows, and staging management. Code reviews via CodeRabbit.
 
 ## Tech Stack
 
