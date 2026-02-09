@@ -248,14 +248,25 @@ export const StagingList = () => {
   const [drawerTicketId, setDrawerTicketId] = useState<string | null>(openId || null)
   /** Stage filter: applies to table, Export and Print */
   const [stageFilter, setStageFilter] = useState<string>('')
+  const [allStagingTicketsForStageFilter, setAllStagingTicketsForStageFilter] = useState<Ticket[]>([])
+  const [exportTickets, setExportTickets] = useState<Ticket[]>([])
 
   useEffect(() => {
     if (openId) setDrawerTicketId(openId)
   }, [openId])
 
   useEffect(() => {
-    fetchStagingTickets()
-  }, [page, pageSize])
+    if (stageFilter) {
+      // When stage filter is active, fetch all pages then filter client-side
+      fetchAllStagingTicketsForStageFilter()
+    } else {
+      // Reset stage filter state when filter is cleared
+      if (allStagingTicketsForStageFilter.length > 0) {
+        setAllStagingTicketsForStageFilter([])
+      }
+      fetchStagingTickets()
+    }
+  }, [page, pageSize, stageFilter])
 
   const fetchStagingTickets = async () => {
     setLoading(true)
@@ -277,6 +288,66 @@ export const StagingList = () => {
     }
   }
 
+  const fetchAllStagingTicketsForStageFilter = async () => {
+    setLoading(true)
+    try {
+      const allTickets: Ticket[] = []
+      let currentPage = 1
+      const limit = 100
+      let hasMore = true
+
+      while (hasMore) {
+        const response = await ticketsApi.list({
+          section: 'staging',
+          page: currentPage,
+          limit,
+          sort_by: 'created_at',
+          sort_order: 'desc',
+        })
+        const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
+        const pageTickets: Ticket[] = Array.isArray(raw) ? raw : []
+        allTickets.push(...pageTickets)
+        hasMore = pageTickets.length === limit
+        currentPage++
+      }
+
+      setAllStagingTicketsForStageFilter(allTickets)
+      const filtered = stageFilter
+        ? allTickets.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter)
+        : allTickets
+      setTickets(filtered.slice((page - 1) * pageSize, page * pageSize))
+      setTotal(filtered.length)
+    } catch (error) {
+      console.error('Failed to fetch all staging tickets for stage filter:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchAllForExport = async (): Promise<Ticket[]> => {
+    const allTickets: Ticket[] = []
+    let currentPage = 1
+    const limit = 100
+    let hasMore = true
+
+    while (hasMore) {
+      const response = await ticketsApi.list({
+        section: 'staging',
+        page: currentPage,
+        limit,
+        sort_by: 'created_at',
+        sort_order: 'desc',
+      })
+      const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
+      const pageTickets: Ticket[] = Array.isArray(raw) ? raw : []
+      allTickets.push(...pageTickets)
+      hasMore = pageTickets.length === limit
+      currentPage++
+    }
+
+    return allTickets
+  }
+
   const stagingStageLabels = ['Stage 1: Staging', 'Stage 2: Live', 'Stage 3: Live Review']
   const ticketsForDisplay =
     stageFilter
@@ -284,7 +355,15 @@ export const StagingList = () => {
       : tickets
   const getStageForExport = (t: Record<string, unknown>) => getStagingCurrentStage(t as Parameters<typeof getStagingCurrentStage>[0])
   const exportColumns = [...TICKET_EXPORT_COLUMNS]
-  const exportRows = ticketsForDisplay.map((t) => buildTicketExportRow(t, getStageForExport))
+  const exportRows = (exportTickets.length > 0 ? exportTickets : ticketsForDisplay).map((t) => buildTicketExportRow(t, getStageForExport))
+
+  const handleExportClick = async () => {
+    const allTickets = await fetchAllForExport()
+    const filteredForExport = stageFilter
+      ? allTickets.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter)
+      : allTickets
+    setExportTickets(filteredForExport)
+  }
 
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto' }}>
@@ -292,7 +371,7 @@ export const StagingList = () => {
         <Title level={2} style={{ margin: 0 }}>
           Staging
         </Title>
-        <PrintExport pageTitle="Staging" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="staging_tickets" />
+        <PrintExport pageTitle="Staging" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="staging_tickets" onExportClick={handleExportClick} />
       </div>
       <Card>
         <Space style={{ marginBottom: 16 }} wrap>
@@ -308,6 +387,7 @@ export const StagingList = () => {
               setPage(1)
             }}
             allowClear
+            aria-label="Stage filter"
           >
             {stagingStageLabels.map((label) => (
               <Option key={label} value={label}>{label}</Option>
@@ -327,7 +407,7 @@ export const StagingList = () => {
           pagination={{
             current: page,
             pageSize,
-            total: stageFilter ? ticketsForDisplay.length : total,
+            total: stageFilter ? allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter).length : total,
             showSizeChanger: true,
             showTotal: (t) => `Total ${t} tickets`,
             onChange: (newPage, newPageSize) => {

@@ -42,6 +42,7 @@ export const Dashboard = () => {
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
   const [recentTickets, setRecentTickets] = useState<Ticket[]>([])
+  const [allFetchedTickets, setAllFetchedTickets] = useState<Ticket[]>([])
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
 
@@ -61,6 +62,7 @@ export const Dashboard = () => {
       const ticketsResVal = ticketsRes.status === 'fulfilled' ? ticketsRes.value : null
       const raw = ticketsResVal && typeof ticketsResVal === 'object' ? (ticketsResVal as { data?: unknown }).data : undefined
       const tickets: Ticket[] = Array.isArray(raw) ? raw as Ticket[] : []
+      setAllFetchedTickets(tickets)
       setRecentTickets(tickets.slice(0, 8))
     } catch (err) {
       console.error('Dashboard fetch error:', err)
@@ -91,10 +93,10 @@ export const Dashboard = () => {
     { title: 'Chores & Bug Pending', value: Number(safeMetrics.staging_pending_chores_bugs) || 0, icon: <FileTextOutlined />, color: '#52c41a' },
   ]
 
-  const exportData = recentTickets.length
+  const exportData = allFetchedTickets.length
     ? {
         columns: [...TICKET_EXPORT_COLUMNS],
-        rows: recentTickets.map((t) =>
+        rows: allFetchedTickets.map((t) =>
           buildTicketExportRow(t, (x) => getChoresBugsCurrentStage(x as Parameters<typeof getChoresBugsCurrentStage>[0]))
         ),
       }

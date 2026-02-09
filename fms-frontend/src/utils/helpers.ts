@@ -295,7 +295,31 @@ export const TICKET_EXPORT_COLUMNS = [
   { key: 'stage_status', label: 'Stage Status' },
 ] as const
 
-type StageInfo = { stageLabel: string; status: string }
+] as const
+
+export type StageInfo = { stageLabel: string; status: string }
+
+const TYPE_LABELS: Record<string, string> = {
+  chore: 'Chores',
+  bug: 'Bug',
+  feature: 'Feature',
+}
+
+const COMM_LABELS: Record<string, string> = {
+  phone: 'Phone',
+  mail: 'Mail',
+  whatsapp: 'WhatsApp',
+}
+
+function getTypeLabel(type?: string): string {
+  if (!type) return '-'
+  return TYPE_LABELS[type] ?? type ?? '-'
+}
+
+function getCommLabel(communicated_through?: string): string {
+  if (!communicated_through) return '-'
+  return COMM_LABELS[communicated_through] ?? communicated_through ?? '-'
+}
 
 /**
  * Build one export row for a ticket using standard fields.
@@ -317,8 +341,8 @@ export function buildTicketExportRow(
   },
   getStage?: (t: Record<string, unknown>) => StageInfo
 ): Record<string, unknown> {
-  const typeLabel = t.type === 'chore' ? 'Chores' : t.type === 'bug' ? 'Bug' : t.type === 'feature' ? 'Feature' : t.type ?? '-'
-  const commLabel = t.communicated_through === 'phone' ? 'Phone' : t.communicated_through === 'mail' ? 'Mail' : t.communicated_through === 'whatsapp' ? 'WhatsApp' : t.communicated_through ?? '-'
+  const typeLabel = getTypeLabel(t.type)
+  const commLabel = getCommLabel(t.communicated_through)
   const stageInfo = getStage ? getStage(t as Record<string, unknown>) : { stageLabel: '-', status: '-' }
   return {
     reference_no: t.reference_no ?? '-',

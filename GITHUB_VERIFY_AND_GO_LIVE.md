@@ -8,28 +8,67 @@ Use this to **check everything is on GitHub** and then **deploy for everyone**.
 
 ### Step 1 – Commit all current work (if you have uncommitted changes)
 
-In PowerShell, from the project root:
+Open a terminal in the **project root** (the folder that contains `fms-frontend`, `backend`, `database`). If you need to change into that folder first, run one of these (use your actual path):
+
+- **Windows PowerShell:** `cd "C:\Support FMS to APPLICATION"`
+- **macOS / Linux:** `cd "/path/to/Support FMS to APPLICATION"` or `cd ./Support\ FMS\ to\ APPLICATION` if you are in the parent folder.
+
+Then run:
 
 ```powershell
-cd "c:\Support FMS to APPLICATION"
-
 # See what's not committed
 git status
+```
 
+**Example output:**
+```
+On branch main
+Your branch is ahead of 'origin/main' by 3 commits.
+  (use "git push" to publish your local commits)
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+        modified:   GITHUB_VERIFY_AND_GO_LIVE.md
+        modified:   fms-frontend/src/components/common/PrintExport.tsx
+        modified:   fms-frontend/src/pages/Dashboard.tsx
+        modified:   fms-frontend/src/pages/Staging/StagingList.tsx
+        modified:   fms-frontend/src/pages/Tickets/TicketList.tsx
+        modified:   fms-frontend/src/utils/helpers.ts
+
+no changes added to commit (use "git add" and/or "git commit -a")
+```
+
+**If you see unstaged changes** (like above), stage and commit them:
+
+```powershell
 # Add everything
 git add .
 
 # Commit with a clear message
-git commit -m "Add Print/Export standard fields, stage filter, and layout updates"
+git commit -m "Fix docs, export, stage filter, a11y, and helpers"
 
 # If nothing to commit, git will say "nothing to commit, working tree clean"
 ```
 
+**Note:** If `git status` shows "Your branch is ahead of 'origin/main' by X commits", you have local commits that haven't been pushed yet. You'll push them in Step 2.
+
 ### Step 2 – Push to GitHub
+
+**If `git status` showed "Your branch is ahead of 'origin/main' by X commits"**, you have local commits that need to be pushed. Push them now:
 
 ```powershell
 # Push main to GitHub (so everyone sees the latest code)
 git push origin main
+```
+
+**Expected output:** You should see something like:
+```
+Enumerating objects: X, done.
+Counting objects: 100% (X/X), done.
+Writing objects: 100% (X/X), done.
+To https://github.com/amandey688-png/IP-Internal-manage-Software.git
+   abc1234..def5678  main -> main
 ```
 
 If you use another branch for release (e.g. `release/production`), push that too:
@@ -57,10 +96,12 @@ git push origin main
    - **Commits** tab: Click "Commits" and confirm your recent commits (e.g. "Add Print/Export...", "Add deployment guides") are listed.
 
 5. **Optional – compare with local**  
+
    ```powershell
    git fetch origin
    git status
    ```  
+
    You want: **"Your branch is up to date with 'origin/main'."**  
    If it says "ahead of 'origin/main'" then run `git push origin main` again.
 

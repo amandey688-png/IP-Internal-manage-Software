@@ -41,7 +41,7 @@ function downloadCsv(columns: ExportColumn[], rows: Record<string, unknown>[], f
   URL.revokeObjectURL(url)
 }
 
-export function PrintExport({ pageTitle, exportData, exportFilename }: PrintExportProps) {
+export function PrintExport({ pageTitle, exportData, exportFilename, onExportClick }: PrintExportProps) {
   const handlePrint = () => {
     const prevTitle = document.title
     document.title = `${pageTitle} - ${new Date().toLocaleDateString()}`
@@ -49,7 +49,10 @@ export function PrintExport({ pageTitle, exportData, exportFilename }: PrintExpo
     document.title = prevTitle
   }
 
-  const handleExport = () => {
+  const handleExport = async () => {
+    if (onExportClick) {
+      await onExportClick()
+    }
     if (!exportData || !exportData.columns.length || !exportData.rows.length) {
       message.warning('No data to export')
       return
