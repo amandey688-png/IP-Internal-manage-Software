@@ -15,22 +15,52 @@ You still **must set Root Directory to `backend`** in the Railway dashboard so R
 
 ## Step 1 – Push the fix to GitHub
 
-From the project root (e.g. `C:\Support FMS to APPLICATION`):
+**1. Open PowerShell and go to the project root.**  
+Your prompt should look like `PS C:\Support FMS to APPLICATION>`. If not, run:
 
 ```powershell
-git add backend/railway.toml backend/runtime.txt
+cd "C:\Support FMS to APPLICATION"
+```
+
+**2. Add the files (run one line at a time):**
+
+```powershell
+git add backend/railway.toml
+git add backend/runtime.txt
+git add GITHUB_VERIFY_AND_GO_LIVE.md
+git add RAILWAY_DEPLOY_FIX.md
 git status
-git commit -m "Add Railway config and root directory fix for backend deploy"
-git push origin main
 ```
 
-If you also changed `GITHUB_VERIFY_AND_GO_LIVE.md`, add it:
+You should see those files under "Changes to be committed". If you see "no changes added" or "paths did not match", you are not in the project root—run `cd "C:\Support FMS to APPLICATION"` and try again.
+
+**3. Commit:**
 
 ```powershell
-git add backend/railway.toml backend/runtime.txt GITHUB_VERIFY_AND_GO_LIVE.md
-git commit -m "Add Railway config and deploy doc updates"
+git commit -m "Add Railway config and root directory fix for backend deploy"
+```
+
+**4. Push (use your branch name if it’s not main):**
+
+```powershell
 git push origin main
 ```
+
+If your default branch is **master** instead of **main**, use:
+
+```powershell
+git push origin master
+```
+
+**If you get an error when pushing:**
+
+| Error | What to do |
+|-------|------------|
+| **"Authentication failed"** or **"Permission denied"** | Sign in to GitHub again. Use a [Personal Access Token](https://github.com/settings/tokens) as the password when Git asks. |
+| **"failed to push some refs"** / **"Updates were rejected"** | Someone else pushed first. Run `git pull origin main` (or `master`), then `git push origin main` again. |
+| **"branch 'main' does not exist"** | Check your branch: `git branch`. Then push that branch, e.g. `git push origin master`. |
+| **"nothing added to commit"** | The files may already be committed. Run `git status`; if it says "nothing to commit, working tree clean", you’re done—go to Step 2 (Railway). |
+| **"pathspec did not match any file(s)"** | Make sure you’re in the project root (`cd "C:\Support FMS to APPLICATION"`) and the files exist in `backend\` and the repo root. |
 
 ---
 
