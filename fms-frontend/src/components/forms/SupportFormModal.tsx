@@ -293,6 +293,8 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
               <Select
                 placeholder="Select priority"
                 options={[
+                  { value: 'critical', label: 'Critical' },
+                  { value: 'urgent', label: 'Urgent' },
                   { value: 'high', label: 'Red' },
                   { value: 'medium', label: 'Yellow' },
                   { value: 'low', label: 'Green' },

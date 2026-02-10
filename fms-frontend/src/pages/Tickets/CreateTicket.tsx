@@ -25,6 +25,9 @@ export const CreateTicket = () => {
       if (ticketId) {
         message.success('Ticket created')
         navigate(`${ROUTES.TICKETS}/${ticketId}`)
+      } else {
+        message.error('Ticket created but no ID returned')
+        if (process.env.NODE_ENV !== 'production') console.error('Create ticket response:', res)
       }
     } catch (err: any) {
       const detail = err?.response?.data?.detail ?? err?.message ?? 'Failed to create ticket'

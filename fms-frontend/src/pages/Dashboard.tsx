@@ -104,9 +104,7 @@ export const Dashboard = () => {
   const exportData = allFetchedTickets.length
     ? {
         columns: [...TICKET_EXPORT_COLUMNS],
-        rows: allFetchedTickets.map((t) =>
-          buildTicketExportRow(t as unknown as Record<string, unknown>, (x) => getChoresBugsCurrentStage(x as Parameters<typeof getChoresBugsCurrentStage>[0]))
-        ),
+        rows: allFetchedTickets.map((t) => buildTicketExportRow(t, getChoresBugsCurrentStage)),
       }
     : undefined
 

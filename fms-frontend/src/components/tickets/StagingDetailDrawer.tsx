@@ -44,7 +44,7 @@ export const StagingDetailDrawer = ({
       ticketsApi
         .get(ticketId)
         .then((res) => {
-          const t = res && typeof res === 'object' && 'id' in res ? (res as Ticket) : null
+          const t = res && typeof res === 'object' && res.data && typeof res.data === 'object' && 'id' in res.data ? (res.data as Ticket) : null
           setTicket(t)
         })
         .catch(() => message.error('Failed to load ticket'))
@@ -128,6 +128,7 @@ export const StagingDetailDrawer = ({
               <Space style={{ marginTop: 8 }} wrap>
                 <Text>Staging Review Status:</Text>
                 <Select
+                  aria-label="Staging review status"
                   value={ticket.staging_review_status || undefined}
                   onChange={(v) => handleUpdate({ staging_review_status: v as 'pending' | 'completed' })}
                   style={{ width: 120 }}
@@ -170,7 +171,7 @@ export const StagingDetailDrawer = ({
             )}
             <div style={{ marginTop: 8 }}>
               <Text>Review Actual: </Text>
-              {formatDateTable(ticket.staging_review_actual) || '-'}
+              {formatDateTable(ticket.staging_review_actual)}
             </div>
             {stage1Delay > 0 && (
               <div style={{ marginTop: 8 }}>
@@ -193,6 +194,7 @@ export const StagingDetailDrawer = ({
                 <Space style={{ marginTop: 8 }} wrap>
                   <Text>Live Status:</Text>
                   <Select
+                    aria-label="Live status"
                     value={ticket.live_status || undefined}
                     onChange={(v) => handleUpdate({ live_status: v as 'pending' | 'completed' })}
                     style={{ width: 120 }}
@@ -213,7 +215,7 @@ export const StagingDetailDrawer = ({
               )}
               <div style={{ marginTop: 8 }}>
                 <Text>Live Actual: </Text>
-                {formatDateTable(ticket.live_actual) || '-'}
+                {formatDateTable(ticket.live_actual)}
               </div>
               {stage2Delay > 0 && (
                 <div style={{ marginTop: 8 }}>
@@ -237,6 +239,7 @@ export const StagingDetailDrawer = ({
                 <Space style={{ marginTop: 8 }} wrap>
                   <Text>Live Review Status:</Text>
                   <Select
+                    aria-label="Live review status"
                     value={ticket.live_review_status || undefined}
                     onChange={(v) => handleUpdate({ live_review_status: v as 'pending' | 'completed' })}
                     style={{ width: 120 }}
@@ -257,7 +260,7 @@ export const StagingDetailDrawer = ({
               )}
               <div style={{ marginTop: 8 }}>
                 <Text>Live Review Actual: </Text>
-                {formatDateTable(ticket.live_review_actual) || '-'}
+                {formatDateTable(ticket.live_review_actual)}
               </div>
               {stage3Delay > 0 && (
                 <div style={{ marginTop: 8 }}>

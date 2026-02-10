@@ -316,29 +316,32 @@ function getCommLabel(communicated_through?: string): string {
   return COMM_LABELS[communicated_through] ?? communicated_through
 }
 
+/** Minimal shape for ticket export row input; Ticket satisfies this. */
+export type TicketExportInput = {
+  reference_no?: string
+  title?: string
+  description?: string
+  attachment_url?: string
+  type?: string
+  page_name?: string
+  company_name?: string
+  user_name?: string
+  division_name?: string
+  communicated_through?: string
+  [k: string]: unknown
+}
+
 /**
  * Build one export row for a ticket using standard fields.
  * getStage(t) should return current stage label and status (e.g. from getChoresBugsCurrentStage or getStagingCurrentStage).
  */
-export function buildTicketExportRow(
-  t: {
-    reference_no?: string
-    title?: string
-    description?: string
-    attachment_url?: string
-    type?: string
-    page_name?: string
-    company_name?: string
-    user_name?: string
-    division_name?: string
-    communicated_through?: string
-    [k: string]: unknown
-  },
-  getStage?: (t: Record<string, unknown>) => StageInfo
+export function buildTicketExportRow<T extends TicketExportInput>(
+  t: T,
+  getStage?: (t: T) => StageInfo
 ): Record<string, unknown> {
   const typeLabel = getTypeLabel(t.type)
   const commLabel = getCommLabel(t.communicated_through)
-  const stageInfo = getStage ? getStage(t as Record<string, unknown>) : { stageLabel: '-', status: '-' }
+  const stageInfo = getStage ? getStage(t) : { stageLabel: '-', status: '-' }
   return {
     reference_no: t.reference_no ?? '-',
     title: t.title ?? '-',

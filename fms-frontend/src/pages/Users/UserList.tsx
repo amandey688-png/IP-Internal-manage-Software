@@ -41,7 +41,6 @@ export const UserList = () => {
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [roles, setRoles] = useState<RoleOption[]>([])
-  const [, setSectionPermissions] = useState<SectionPermission[]>([])
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
 
@@ -94,7 +93,6 @@ export const UserList = () => {
       const rolesData = (rolesRes?.data as { data?: RoleOption[] } | undefined)?.data
       if (rolesData) setRoles(rolesData)
       const perms = (permRes?.data as { data?: SectionPermission[] } | undefined)?.data ?? []
-      setSectionPermissions(perms)
       const permissionsInitial = SECTION_KEYS.map((key) => {
         const p = perms.find((x: SectionPermission) => x.section_key === key)
         return {

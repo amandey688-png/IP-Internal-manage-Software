@@ -156,6 +156,15 @@ export const authApi = {
       const response = await apiClient.post<OTPVerifyResponse>('/auth/verify-otp', data)
       return { data: response.data, error: undefined }
     } catch (err: any) {
+      if (err.code === 'ECONNREFUSED' || err.code === 'ERR_NETWORK' || err.code === 'ECONNABORTED' || !err.response) {
+        return {
+          data: undefined,
+          error: {
+            message: 'Unable to reach backend — please ensure the server is running',
+            code: 'NETWORK_ERROR',
+          },
+        }
+      }
       return {
         data: undefined,
         error: {
