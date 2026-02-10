@@ -1,0 +1,15 @@
+/* Print styles: hide sidebar, header, and Print/Export buttons; show only main content */
+@media print {
+  .no-print,
+  .ant-layout-sider,
+  .ant-layout-header {
+    display: none !important;
+  }
+  .ant-layout-content {
+    margin-left: 0 !important;
+    margin-top: 0 !important;
+    margin-right: 0 !important;
+    padding: 16px !important;
+    max-width: 100% !important;
+  }
+}

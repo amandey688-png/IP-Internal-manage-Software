@@ -1,4 +1,4 @@
-import { UserRole } from './auth'
+import type { User, UserRole } from './auth'
 
 export interface UserProfile extends User {
   phone?: string
@@ -6,4 +6,4 @@ export interface UserProfile extends User {
   division_id?: string
 }
 
-export { UserRole }
+export type { UserRole }

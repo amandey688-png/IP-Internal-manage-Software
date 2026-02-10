@@ -108,7 +108,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": f"Error: {str(exc)[:200]}"},
     )
 
-# CORS configuration - allow frontend origin (include 3002 if frontend runs there)
+# CORS configuration - allow frontend origin (dev defaults; for production set CORS_ORIGINS to your frontend URL, e.g. https://your-app.vercel.app)
 _cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002,http://127.0.0.1:3003,http://127.0.0.1:3004").split(",")
 app.add_middleware(
     CORSMiddleware,

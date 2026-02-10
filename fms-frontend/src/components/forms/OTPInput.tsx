@@ -1,5 +1,6 @@
 import { Input, Space } from 'antd'
-import { useRef, useState, KeyboardEvent, ChangeEvent } from 'react'
+import type { InputRef } from 'antd/es/input'
+import { useRef, useState, useEffect, KeyboardEvent, ChangeEvent } from 'react'
 
 interface OTPInputProps {
   value?: string
@@ -8,9 +9,19 @@ interface OTPInputProps {
   disabled?: boolean
 }
 
+function valueToDigits(value: string, length: number): string[] {
+  const digits = (value || '').split('').filter((c) => /^\d$/.test(c)).slice(0, length)
+  return Array.from({ length }, (_, i) => digits[i] ?? '')
+}
+
 export const OTPInput = ({ value = '', onChange, length = 4, disabled = false }: OTPInputProps) => {
-  const [otp, setOtp] = useState<string[]>(Array(length).fill(''))
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([])
+  const [otp, setOtp] = useState<string[]>(() => valueToDigits(value, length))
+  const inputRefs = useRef<(InputRef | null)[]>([])
+
+  // Sync internal state when parent passes a new value (controlled behavior / reset)
+  useEffect(() => {
+    setOtp(valueToDigits(value, length))
+  }, [value, length])
 
   const handleChange = (index: number, inputValue: string) => {
     // Only allow digits
@@ -40,14 +51,16 @@ export const OTPInput = ({ value = '', onChange, length = 4, disabled = false }:
 
   const handlePaste = (e: React.ClipboardEvent) => {
     e.preventDefault()
-    const pastedData = e.clipboardData.getData('text').slice(0, length)
-    const pastedArray = pastedData.split('').filter((char) => /^\d$/.test(char))
+    const raw = e.clipboardData.getData('text')
+    const digits = raw.split('').filter((char) => /^\d$/.test(char)).slice(0, length)
+    if (digits.length === 0) return
 
-    if (pastedArray.length === length) {
-      setOtp(pastedArray)
-      onChange?.(pastedArray.join(''))
-      inputRefs.current[length - 1]?.focus()
-    }
+    const newOtp = [...otp]
+    digits.forEach((d, i) => { newOtp[i] = d })
+    setOtp(newOtp)
+    onChange?.(newOtp.join(''))
+    const nextIndex = Math.min(digits.length, length) - 1
+    setTimeout(() => inputRefs.current[nextIndex]?.focus(), 0)
   }
 
   return (
@@ -55,14 +68,13 @@ export const OTPInput = ({ value = '', onChange, length = 4, disabled = false }:
       {Array.from({ length }).map((_, index) => (
         <Input
           key={index}
-          ref={(el) => {
-            inputRefs.current[index] = el
-          }}
+          ref={(el) => { inputRefs.current[index] = el as InputRef | null }}
           value={otp[index]}
           onChange={(e: ChangeEvent<HTMLInputElement>) => handleChange(index, e.target.value)}
           onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => handleKeyDown(index, e)}
           maxLength={1}
           disabled={disabled}
+          aria-label={`OTP digit ${index + 1}`}
           style={{
             width: 50,
             height: 50,

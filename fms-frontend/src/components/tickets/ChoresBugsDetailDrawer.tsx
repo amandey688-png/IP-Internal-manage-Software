@@ -56,7 +56,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
       ticketsApi
         .get(ticketId)
         .then((res) => {
-          const t = res && typeof res === 'object' && 'id' in res ? (res as Ticket) : null
+          const t = res && typeof res === 'object' && res.data && typeof res.data === 'object' && 'id' in res.data ? (res.data as Ticket) : null
           setTicket(t)
         })
         .catch(() => message.error('Failed to load ticket'))
@@ -71,8 +71,9 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
     setSaving(true)
     try {
       await ticketsApi.update(ticketId, updates)
-      const fresh = await ticketsApi.get(ticketId)
-      setTicket(fresh && typeof fresh === 'object' ? (fresh as Ticket) : null)
+      const res = await ticketsApi.get(ticketId)
+      const t = res && typeof res === 'object' && res.data && typeof res.data === 'object' && 'id' in res.data ? (res.data as Ticket) : null
+      setTicket(t)
       onUpdate?.()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string | string[] } } }
@@ -92,8 +93,9 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
     setSaving(true)
     try {
       await ticketsApi.submitQualitySolution(ticketId, solutionText.trim())
-      const fresh = await ticketsApi.get(ticketId)
-      setTicket(fresh && typeof fresh === 'object' ? (fresh as Ticket) : null)
+      const res = await ticketsApi.get(ticketId)
+      const t = res && typeof res === 'object' && res.data && typeof res.data === 'object' && 'id' in res.data ? (res.data as Ticket) : null
+      setTicket(t)
       setSolutionModalOpen(false)
       setSolutionText('')
       onUpdate?.()

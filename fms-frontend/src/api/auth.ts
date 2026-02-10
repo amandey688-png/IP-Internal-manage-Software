@@ -1,10 +1,12 @@
 import { apiClient } from './axios'
+import type { ApiResponse } from '../types/common'
 import type {
   RegisterRequest,
   RegisterResponse,
   LoginRequest,
   LoginResponse,
-  ApiResponse,
+  OTPVerifyRequest,
+  OTPVerifyResponse,
   User,
 } from '../types/auth'
 
@@ -140,6 +142,33 @@ export const authApi = {
         data: undefined,
         error: {
           message: err.response?.data?.detail || 'Failed to get user',
+          code: err.response?.status?.toString(),
+        },
+      }
+    }
+  },
+
+  /**
+   * Verify OTP (after login when requires_otp is true)
+   */
+  verifyOTP: async (data: OTPVerifyRequest): Promise<ApiResponse<OTPVerifyResponse>> => {
+    try {
+      const response = await apiClient.post<OTPVerifyResponse>('/auth/verify-otp', data)
+      return { data: response.data, error: undefined }
+    } catch (err: any) {
+      if (err.code === 'ECONNREFUSED' || err.code === 'ERR_NETWORK' || err.code === 'ECONNABORTED' || !err.response) {
+        return {
+          data: undefined,
+          error: {
+            message: 'Unable to reach backend — please ensure the server is running',
+            code: 'NETWORK_ERROR',
+          },
+        }
+      }
+      return {
+        data: undefined,
+        error: {
+          message: err.response?.data?.detail || err.response?.data?.message || 'OTP verification failed',
           code: err.response?.status?.toString(),
         },
       }

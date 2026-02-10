@@ -76,7 +76,6 @@ export const getStagingCurrentStage = (t: {
   live_review_status?: string | null
 }): { stageLabel: string; planned: string; actual: string; status: string; timeDelay: string } => {
   const fmt = (d: string | null | undefined) => (d ? formatDateTable(d) : '-')
-  const SLA_2H = 2 * 3600
 
   if (t.staging_review_status !== 'completed') {
     const delaySec = stagingDelaySeconds(t.staging_planned, t.staging_review_status, t.staging_review_actual)
@@ -156,7 +155,6 @@ export const getChoresBugsCurrentStage = (t: {
   }
   if (t.status_1 === 'no' && !t.status_2) {
     const p2 = t.actual_1 ? new Date(t.actual_1).getTime() : 0
-    const a2 = t.actual_2 ? new Date(t.actual_2).getTime() : 0
     const delaySec = p2 ? Math.max(0, Math.floor((now - p2) / 1000) - SLA_1D) : 0
     return {
       stageNum: 2,
@@ -169,7 +167,6 @@ export const getChoresBugsCurrentStage = (t: {
   }
   if (t.status_2 === 'completed' && !t.status_3) {
     const p3 = t.actual_2 ? new Date(t.actual_2).getTime() : 0
-    const a3 = t.actual_3 ? new Date(t.actual_3).getTime() : 0
     const delaySec = p3 ? Math.max(0, Math.floor((now - p3) / 1000) - SLA_2H) : 0
     return {
       stageNum: 3,
@@ -277,4 +274,86 @@ export const getInitials = (name: string): string => {
     .join('')
     .toUpperCase()
     .slice(0, 2)
+}
+
+/** Standard export column definitions for ticket Print & Export (all ticket-based pages) */
+export const TICKET_EXPORT_COLUMNS = [
+  { key: 'reference_no', label: 'Reference No' },
+  { key: 'title', label: 'Title' },
+  { key: 'description', label: 'Description' },
+  { key: 'attachment', label: 'Attachment' },
+  { key: 'type_of_request', label: 'Type of Request' },
+  { key: 'page', label: 'Page' },
+  { key: 'company_name', label: 'Company Name' },
+  { key: 'user_name', label: 'User Name' },
+  { key: 'division_name', label: 'Division' },
+  { key: 'communicated_through', label: 'Communicated Through' },
+  { key: 'stage', label: 'Stage' },
+  { key: 'stage_status', label: 'Stage Status' },
+] as const
+
+export type StageInfo = { stageLabel: string; status: string }
+
+const TYPE_LABELS: Record<string, string> = {
+  chore: 'Chores',
+  bug: 'Bug',
+  feature: 'Feature',
+}
+
+const COMM_LABELS: Record<string, string> = {
+  phone: 'Phone',
+  mail: 'Mail',
+  whatsapp: 'WhatsApp',
+}
+
+function getTypeLabel(type?: string): string {
+  if (!type) return '-'
+  return TYPE_LABELS[type] ?? type
+}
+
+function getCommLabel(communicated_through?: string): string {
+  if (!communicated_through) return '-'
+  return COMM_LABELS[communicated_through] ?? communicated_through
+}
+
+/** Minimal shape for ticket export row input; Ticket satisfies this. */
+export type TicketExportInput = {
+  reference_no?: string
+  title?: string
+  description?: string
+  attachment_url?: string
+  type?: string
+  page_name?: string
+  company_name?: string
+  user_name?: string
+  division_name?: string
+  communicated_through?: string
+  [k: string]: unknown
+}
+
+/**
+ * Build one export row for a ticket using standard fields.
+ * getStage(t) should return current stage label and status (e.g. from getChoresBugsCurrentStage or getStagingCurrentStage).
+ */
+export function buildTicketExportRow<T extends TicketExportInput>(
+  t: T,
+  getStage?: (t: T) => StageInfo
+): Record<string, unknown> {
+  const typeLabel = getTypeLabel(t.type)
+  const commLabel = getCommLabel(t.communicated_through)
+  const stageInfo = getStage ? getStage(t) : { stageLabel: '-', status: '-' }
+  return {
+    reference_no: t.reference_no ?? '-',
+    title: t.title ?? '-',
+    description: t.description ?? '-',
+    attachment: t.attachment_url && String(t.attachment_url).trim() ? String(t.attachment_url).trim() : '-',
+    type_of_request: typeLabel,
+    page: t.page_name ?? '-',
+    company_name: t.company_name ?? '-',
+    user_name: t.user_name ?? '-',
+    division_name: t.division_name ?? '-',
+    communicated_through: commLabel,
+    stage: stageInfo.stageLabel,
+    stage_status: stageInfo.status,
+  }
 }

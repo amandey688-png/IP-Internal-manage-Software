@@ -12,7 +12,8 @@ import { dashboardApi } from '../api/dashboard'
 import { ticketsApi } from '../api/tickets'
 import { useEffect, useState } from 'react'
 import { LoadingSpinner } from '../components/common/LoadingSpinner'
-import { formatDateShort } from '../utils/helpers'
+import { PrintExport } from '../components/common/PrintExport'
+import { formatDateShort, TICKET_EXPORT_COLUMNS, buildTicketExportRow, getChoresBugsCurrentStage } from '../utils/helpers'
 import { ROUTES } from '../utils/constants'
 import type { Ticket } from '../api/tickets'
 import type { DashboardMetrics } from '../api/dashboard'
@@ -41,6 +42,7 @@ export const Dashboard = () => {
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
   const [recentTickets, setRecentTickets] = useState<Ticket[]>([])
+  const [allFetchedTickets, setAllFetchedTickets] = useState<Ticket[]>([])
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
 
@@ -60,6 +62,7 @@ export const Dashboard = () => {
       const ticketsResVal = ticketsRes.status === 'fulfilled' ? ticketsRes.value : null
       const raw = ticketsResVal && typeof ticketsResVal === 'object' ? (ticketsResVal as { data?: unknown }).data : undefined
       const tickets: Ticket[] = Array.isArray(raw) ? raw as Ticket[] : []
+      setAllFetchedTickets(tickets)
       setRecentTickets(tickets.slice(0, 8))
     } catch (err) {
       console.error('Dashboard fetch error:', err)
@@ -75,7 +78,15 @@ export const Dashboard = () => {
     return <LoadingSpinner fullPage />
   }
 
-  const safeMetrics = metrics ?? {}
+  const safeMetrics: DashboardMetrics = metrics ?? {
+    all_tickets: 0,
+    response_delay: 0,
+    completion_delay: 0,
+    total_last_week: 0,
+    pending_last_week: 0,
+    staging_pending_feature: 0,
+    staging_pending_chores_bugs: 0,
+  }
 
   const metricCards = [
     { title: 'Chores & Bug (this month)', value: Number(safeMetrics.all_tickets) || 0, icon: <FileTextOutlined /> },
@@ -89,6 +100,13 @@ export const Dashboard = () => {
     { title: 'Feature Pending', value: Number(safeMetrics.staging_pending_feature) || 0, icon: <RocketOutlined />, color: '#1890ff' },
     { title: 'Chores & Bug Pending', value: Number(safeMetrics.staging_pending_chores_bugs) || 0, icon: <FileTextOutlined />, color: '#52c41a' },
   ]
+
+  const exportData = allFetchedTickets.length
+    ? {
+        columns: [...TICKET_EXPORT_COLUMNS],
+        rows: allFetchedTickets.map((t) => buildTicketExportRow(t, getChoresBugsCurrentStage)),
+      }
+    : undefined
 
   return (
     <div
@@ -104,6 +122,9 @@ export const Dashboard = () => {
         overflowWrap: 'break-word',
       }}
     >
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <PrintExport pageTitle="Dashboard" exportData={exportData} exportFilename="dashboard_recent_tickets" />
+      </div>
       {/* Support Overview - static informational banner (non-clickable) */}
       <div style={{ marginBottom: 28 }}>
         <Card

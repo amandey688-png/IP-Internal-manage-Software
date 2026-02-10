@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Card, Result, Spin, Typography } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { apiClient } from '../../api/axios'
+import { PrintExport } from '../../components/common/PrintExport'
 
 const { Text } = Typography
 
@@ -48,6 +49,9 @@ export const ApprovalConfirmPage = () => {
 
   return (
     <div style={{ maxWidth: 560, margin: '48px auto', padding: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+        <PrintExport pageTitle="Approval Confirm" />
+      </div>
       <Card>
         {status === 'success' ? (
           <Result

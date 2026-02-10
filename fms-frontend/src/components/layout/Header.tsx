@@ -56,6 +56,7 @@ export const Header = ({ onAddNew }: HeaderProps) => {
 
   return (
     <AntHeader
+      className="no-print"
       style={{
         background: '#fff',
         padding: '0 24px',

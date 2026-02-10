@@ -9,28 +9,24 @@ const { Title, Text } = Typography
 export const ConfirmationSuccess = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [confirmed, setConfirmed] = useState(false)
+  const [remainingSeconds, setRemainingSeconds] = useState(5)
 
   useEffect(() => {
-    // Check if this is coming from email confirmation link
     const token = searchParams.get('token')
     const type = searchParams.get('type')
-    
     if (token && type === 'signup') {
-      // Email confirmation callback
-      setConfirmed(true)
       message.success('Email confirmed successfully! You can now log in.')
-    } else {
-      // Coming from registration success page
-      setConfirmed(true)
     }
+  }, [searchParams])
 
-    const timer = setTimeout(() => {
+  useEffect(() => {
+    if (remainingSeconds <= 0) {
       navigate(ROUTES.LOGIN)
-    }, 5000)
-
-    return () => clearTimeout(timer)
-  }, [navigate, searchParams])
+      return
+    }
+    const timer = setInterval(() => setRemainingSeconds((s) => s - 1), 1000)
+    return () => clearInterval(timer)
+  }, [remainingSeconds, navigate])
 
   return (
     <div
@@ -44,9 +40,10 @@ export const ConfirmationSuccess = () => {
     >
       <Card style={{ width: 400, textAlign: 'center' }}>
         <CheckCircleOutlined
+          aria-hidden="true"
           style={{ fontSize: 64, color: '#52c41a', marginBottom: 24 }}
         />
-        <Title level={3}>Email Confirmed! ✅</Title>
+        <Title level={3}>Email Confirmed!</Title>
         <Text type="success" style={{ fontSize: 16, display: 'block', marginBottom: 16 }}>
           Your email has been successfully confirmed.
         </Text>
@@ -54,7 +51,7 @@ export const ConfirmationSuccess = () => {
           Your account is now active. You can log in to access the application.
         </Text>
         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 24 }}>
-          Redirecting to login page in 5 seconds...
+          Redirecting to login page in {remainingSeconds} second{remainingSeconds !== 1 ? 's' : ''}...
         </Text>
         <Button
           type="primary"

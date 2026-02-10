@@ -1,17 +1,33 @@
 import { Select, SelectProps } from 'antd'
-import { useState, useMemo } from 'react'
+import type { DefaultOptionType } from 'antd/es/select'
+import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 
-interface SearchableSelectProps<T = any> extends Omit<SelectProps, 'options' | 'filterOption'> {
+interface SearchableSelectProps<T extends string | number | null = string | number> extends Omit<SelectProps, 'options' | 'filterOption'> {
   options: Array<{ label: string; value: T }>
   debounceMs?: number
 }
 
-export const SearchableSelect = <T,>({
+export const SearchableSelect = <T extends string | number | null>({
   options,
   debounceMs = 300,
   ...props
 }: SearchableSelectProps<T>) => {
   const [searchValue, setSearchValue] = useState('')
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const setSearchDebounced = useCallback(
+    (value: string) => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(() => setSearchValue(value), debounceMs)
+    },
+    [debounceMs]
+  )
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [])
 
   const filteredOptions = useMemo(() => {
     if (!searchValue) {
@@ -24,14 +40,15 @@ export const SearchableSelect = <T,>({
     )
   }, [options, searchValue])
 
+  const selectOptions: DefaultOptionType[] = filteredOptions.map((o) => ({ label: o.label, value: o.value }))
+
   return (
     <Select
       {...props}
       showSearch
       filterOption={false}
-      onSearch={setSearchValue}
-      options={filteredOptions}
-      loading={props.loading}
+      onSearch={setSearchDebounced}
+      options={selectOptions}
       notFoundContent={props.loading ? 'Loading...' : 'No options found'}
     />
   )

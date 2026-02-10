@@ -108,8 +108,8 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
       await ticketsApi.create({
         title: toStr(values.title) ?? '',
         description: toStr(values.description),
-        type: toStr(values.type_of_request) ?? 'chore',
-        priority: toStr(values.priority) ?? 'medium',
+        type: (toStr(values.type_of_request) ?? 'chore') as 'feature' | 'chore' | 'bug',
+        priority: (toStr(values.priority) ?? 'medium') as 'medium' | 'high' | 'low' | 'critical' | 'urgent',
         company_id: toStr(values.company_id),
         page_id: toStr(values.page_id),
         division_id: toStr(values.division_id),
@@ -293,6 +293,8 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
               <Select
                 placeholder="Select priority"
                 options={[
+                  { value: 'critical', label: 'Critical' },
+                  { value: 'urgent', label: 'Urgent' },
                   { value: 'high', label: 'Red' },
                   { value: 'medium', label: 'Yellow' },
                   { value: 'low', label: 'Green' },

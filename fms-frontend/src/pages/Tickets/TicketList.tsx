@@ -16,7 +16,8 @@ import { ticketsApi } from '../../api/tickets'
 import { supportApi } from '../../api/support'
 import { TicketDetailDrawer } from '../../components/tickets/TicketDetailDrawer'
 import { ChoresBugsDetailDrawer } from '../../components/tickets/ChoresBugsDetailDrawer'
-import { formatDateTable, formatDuration, formatReplySla, getChoresBugsCurrentStage } from '../../utils/helpers'
+import { PrintExport } from '../../components/common/PrintExport'
+import { formatDateTable, formatDuration, formatReplySla, getChoresBugsCurrentStage, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
 import { useRole } from '../../hooks/useRole'
 import type { Ticket } from '../../api/tickets'
 import type { Company } from '../../api/support'
@@ -51,14 +52,17 @@ export const TicketList = () => {
   const { canAccessApproval } = useRole()
   const [loading, setLoading] = useState(true)
   const [tickets, setTickets] = useState<Ticket[]>([])
+  const [allTicketsForStageFilter, setAllTicketsForStageFilter] = useState<Ticket[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
+  const [exportTickets, setExportTickets] = useState<Ticket[]>([])
   const [searchParams] = useSearchParams()
   const location = useLocation()
   const typeFromUrl = searchParams.get('type') || new URLSearchParams(location.search).get('type') || ''
   const sectionFromUrl = searchParams.get('section') || new URLSearchParams(location.search).get('section') || ''
   const viewFromUrl = searchParams.get('view') === 'approval'
+  const showStageFilter = sectionFromUrl === 'chores-bugs'
 
   useEffect(() => {
     if (viewFromUrl && !canAccessApproval) {
@@ -80,6 +84,8 @@ export const TicketList = () => {
     sort_by: 'created_at',
     sort_order: 'desc' as 'asc' | 'desc',
   })
+  /** Stage filter: applies to table, Export and Print (filters current result set) */
+  const [stageFilter, setStageFilter] = useState<string>('')
 
   useEffect(() => {
     const t = searchParams.get('type') || ''
@@ -135,8 +141,17 @@ export const TicketList = () => {
   }, [])
 
   useEffect(() => {
-    fetchTickets()
-  }, [page, pageSize, filters, viewFromUrl])
+    if (showStageFilter && stageFilter) {
+      // When stage filter is active, fetch all pages then filter client-side
+      fetchAllTicketsForStageFilter()
+    } else {
+      // Reset stage filter state when filter is cleared
+      if (allTicketsForStageFilter.length > 0) {
+        setAllTicketsForStageFilter([])
+      }
+      fetchTickets()
+    }
+  }, [page, pageSize, filters, viewFromUrl, stageFilter, showStageFilter])
 
   const fetchTickets = async () => {
     setLoading(true)
@@ -169,6 +184,59 @@ export const TicketList = () => {
     }
   }
 
+  /** Fetches all tickets across pages with current filters/section/view. Used for stage filter and export. */
+  const fetchAllTicketsWithFilters = async (): Promise<Ticket[]> => {
+    const allTickets: Ticket[] = []
+    let currentPage = 1
+    const limit = 100
+    let hasMore = true
+    while (hasMore) {
+      const response = await ticketsApi.list({
+        page: currentPage,
+        limit,
+        ...(filters.search && { search: filters.search }),
+        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
+        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
+        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
+        ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
+        ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
+        ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
+        ...(viewFromUrl && { section: 'approval-status' }),
+        ...(filters.company_id && { company_id: filters.company_id }),
+        ...(filters.priority && { priority: filters.priority }),
+        ...(filters.date_from && { date_from: filters.date_from }),
+        ...(filters.date_to && { date_to: filters.date_to }),
+        sort_by: filters.sort_by,
+        sort_order: filters.sort_order,
+      })
+      const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
+      const pageTickets: Ticket[] = Array.isArray(raw) ? raw : []
+      allTickets.push(...pageTickets)
+      hasMore = pageTickets.length === limit
+      currentPage++
+    }
+    return allTickets
+  }
+
+  const fetchAllTicketsForStageFilter = async () => {
+    setLoading(true)
+    try {
+      const allTickets = await fetchAllTicketsWithFilters()
+      setAllTicketsForStageFilter(allTickets)
+      const filtered = stageFilter
+        ? allTickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
+        : allTickets
+      setTickets(filtered.slice((page - 1) * pageSize, page * pageSize))
+      setTotal(filtered.length)
+    } catch (error) {
+      console.error('Failed to fetch all tickets for stage filter:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchAllForExport = async (): Promise<Ticket[]> => fetchAllTicketsWithFilters()
+
   const fetchTicketsRef = useRef(fetchTickets)
   fetchTicketsRef.current = fetchTickets
   useEffect(() => {
@@ -191,6 +259,24 @@ export const TicketList = () => {
 
   const isChoresBugs = sectionFromUrl === 'chores-bugs' || sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'solutions'
   const isSolutionsSection = sectionFromUrl === 'solutions'
+
+  /** When stage filter is set (Chores & Bugs only), filter tickets for table, Export and Print */
+  const ticketsForDisplay =
+    showStageFilter && stageFilter
+      ? tickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
+      : tickets
+
+  const getStageForExport = isChoresBugs
+    ? (t: Record<string, unknown>) => getChoresBugsCurrentStage(t as Parameters<typeof getChoresBugsCurrentStage>[0])
+    : undefined
+
+  const handleExportClick = async () => {
+    const allTickets = await fetchAllForExport()
+    const filteredForExport = showStageFilter && stageFilter
+      ? allTickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
+      : allTickets
+    setExportTickets(filteredForExport)
+  }
 
   const baseColumns = [
     {
@@ -593,13 +679,16 @@ export const TicketList = () => {
 
   const isCompletedChoresBugs = sectionFromUrl === 'completed-chores-bugs'
 
+  const exportColumns = [...TICKET_EXPORT_COLUMNS]
+  const exportRows = (exportTickets.length > 0 ? exportTickets : ticketsForDisplay).map((t) => buildTicketExportRow(t as unknown as Record<string, unknown>, getStageForExport))
+
   return (
     <div style={{ maxWidth: 1600, margin: '0 auto' }}>
       {isCompletedChoresBugs && (
         <style>{`.completed-chores-bugs-wrap .ant-table-cell,
 .completed-chores-bugs-wrap .ant-table-thead > tr > th { white-space: normal !important; word-break: break-word !important; }`}</style>
       )}
-      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }}>
+      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between', flexWrap: 'wrap' }}>
         <Title
           level={2}
           style={{
@@ -609,6 +698,7 @@ export const TicketList = () => {
         >
           {pageTitle}
         </Title>
+        <PrintExport pageTitle={pageTitle} exportData={{ columns: exportColumns, rows: exportRows }} exportFilename={`tickets_${sectionFromUrl || 'all'}`} onExportClick={handleExportClick} />
       </Space>
 
       <Card style={cardStyle} bodyStyle={{ padding: 24 }}>
@@ -674,6 +764,24 @@ export const TicketList = () => {
             <Option value="medium">Medium</Option>
             <Option value="low">Low</Option>
           </Select>
+          {showStageFilter && (
+            <Select
+              placeholder="Stage"
+              style={{ width: 140 }}
+              value={stageFilter || undefined}
+              onChange={(v) => {
+                setStageFilter(v ?? '')
+                setPage(1)
+              }}
+              allowClear
+              aria-label="Filter by stage"
+            >
+              <Option value="Stage 1">Stage 1</Option>
+              <Option value="Stage 2">Stage 2</Option>
+              <Option value="Stage 3">Stage 3</Option>
+              <Option value="Stage 4">Stage 4</Option>
+            </Select>
+          )}
           <RangePicker
             placeholder={['From', 'To']}
             onChange={handleDateRange}
@@ -684,7 +792,7 @@ export const TicketList = () => {
         <Table
           className={isCompletedChoresBugs ? 'completed-chores-bugs-wrap' : undefined}
           columns={columns}
-          dataSource={tickets}
+          dataSource={ticketsForDisplay}
           rowKey="id"
           loading={loading}
           locale={{ emptyText: 'No tickets yet.' }}
@@ -692,7 +800,7 @@ export const TicketList = () => {
           pagination={{
             current: page,
             pageSize,
-            total,
+            total: showStageFilter && stageFilter ? allTicketsForStageFilter.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter).length : total,
             showSizeChanger: true,
             showTotal: (t) => `Total ${t} tickets`,
             pageSizeOptions: ['10', '20', '50', '100'],

@@ -20,7 +20,11 @@ const isSupportPage = (pathname: string) =>
   pathname.startsWith(ROUTES.TICKETS) ||
   pathname === ROUTES.STAGING
 
-export const Sidebar = () => {
+interface SidebarProps {
+  className?: string
+}
+
+export const Sidebar = ({ className }: SidebarProps) => {
   const navigate = useNavigate()
   const location = useLocation()
   const { canAccessApproval, canAccessSettings, canAccessUsers } = useRole()
@@ -91,6 +95,7 @@ export const Sidebar = () => {
 
   return (
     <Sider
+      className={className}
       width={220}
       style={{
         overflow: 'auto',

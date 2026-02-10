@@ -20,7 +20,7 @@ import type { MenuProps } from 'antd'
 import { usersApi } from '../../api/users'
 import type { User } from '../../types/auth'
 import type { SectionPermission, RoleOption } from '../../api/users'
-import { LoadingSpinner } from '../../components/common/LoadingSpinner'
+import { PrintExport } from '../../components/common/PrintExport'
 import { formatDate } from '../../utils/helpers'
 import { useRole } from '../../hooks/useRole'
 import { ROLE_DISPLAY_NAMES, SECTION_LABELS } from '../../utils/constants'
@@ -41,7 +41,6 @@ export const UserList = () => {
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
   const [roles, setRoles] = useState<RoleOption[]>([])
-  const [sectionPermissions, setSectionPermissions] = useState<SectionPermission[]>([])
   const [form] = Form.useForm()
   const [saving, setSaving] = useState(false)
 
@@ -57,11 +56,10 @@ export const UserList = () => {
         limit: pageSize,
         ...(search && { search }),
       })
-      if (response && response.data !== undefined) {
-        const list = Array.isArray(response.data) ? response.data : (response as any).data?.data ?? []
-        const totalCount = typeof response.total === 'number' ? response.total : (response as any).total ?? 0
-        setUsers(list)
-        setTotal(totalCount)
+      if (response?.data) {
+        const paginated = response.data as { data?: User[]; total?: number }
+        setUsers(Array.isArray(paginated.data) ? paginated.data : [])
+        setTotal(typeof paginated.total === 'number' ? paginated.total : 0)
       }
     } catch (error: any) {
       console.error('Failed to fetch users:', error)
@@ -92,11 +90,11 @@ export const UserList = () => {
         usersApi.listRoles(),
         usersApi.getSectionPermissions(user.id),
       ])
-      if (rolesRes?.data) setRoles(rolesRes.data)
-      const perms = permRes?.data ?? []
-      setSectionPermissions(perms)
+      const rolesData = (rolesRes?.data as { data?: RoleOption[] } | undefined)?.data
+      if (rolesData) setRoles(rolesData)
+      const perms = (permRes?.data as { data?: SectionPermission[] } | undefined)?.data ?? []
       const permissionsInitial = SECTION_KEYS.map((key) => {
-        const p = perms.find((x) => x.section_key === key)
+        const p = perms.find((x: SectionPermission) => x.section_key === key)
         return {
           section_key: key,
           can_view: p?.can_view ?? true,
@@ -114,7 +112,8 @@ export const UserList = () => {
       console.error(e)
       if (roles.length === 0) {
         const rolesRes = await usersApi.listRoles()
-        if (rolesRes?.data) setRoles(rolesRes.data)
+        const rolesData = (rolesRes?.data as { data?: RoleOption[] } | undefined)?.data
+        if (rolesData) setRoles(rolesData)
       }
       form.setFieldsValue({
         permissions: SECTION_KEYS.map((key) => ({
@@ -273,9 +272,29 @@ export const UserList = () => {
       : []),
   ]
 
+  const exportColumns = [
+    { key: 'full_name', label: 'Name' },
+    { key: 'email', label: 'Email' },
+    { key: 'display_name', label: 'User ID name' },
+    { key: 'role', label: 'Role' },
+    { key: 'is_active', label: 'Active' },
+    { key: 'created_at', label: 'Created' },
+  ]
+  const exportRows = users.map((u) => ({
+    full_name: u.full_name,
+    email: u.email,
+    display_name: (u as User & { display_name?: string }).display_name ?? u.full_name ?? '-',
+    role: u.role ?? '-',
+    is_active: u.is_active ? 'Yes' : 'No',
+    created_at: u.created_at ? formatDate(u.created_at) : '-',
+  }))
+
   return (
     <div>
-      <Title level={2}>Users</Title>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
+        <Title level={2} style={{ margin: 0 }}>Users</Title>
+        <PrintExport pageTitle="Users" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="users" />
+      </div>
       <Card>
         <Space style={{ marginBottom: 16 }}>
           <Input
