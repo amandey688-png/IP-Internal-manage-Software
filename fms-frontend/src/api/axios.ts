@@ -5,10 +5,22 @@ import { ROUTES } from "../utils/constants"
 /**
  * Backend base URL
  * MUST match FastAPI exactly
- * Defaults to http://127.0.0.1:8000 if env var not set
+ *
+ * Priority:
+ * 1) VITE_API_BASE_URL (preferred)
+ * 2) VITE_API_URL      (fallback)
+ * 3) http://127.0.0.1:8000 (local dev default)
+ *
+ * Trailing slash is stripped so Vercel env "https://...onrender.com/" works.
  */
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000"
+const _raw =
+  import.meta.env.VITE_API_BASE_URL ||
+  import.meta.env.VITE_API_URL ||
+  "http://127.0.0.1:8000"
+export const API_BASE_URL = typeof _raw === "string" ? _raw.replace(/\/+$/, "") : _raw
+
+export const isLocalBackend =
+  API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost")
 
 // Log API base URL for debugging
 console.log("🔗 API Base URL:", API_BASE_URL)
@@ -66,7 +78,7 @@ apiClient.interceptors.response.use(
         }
       }
     } else if (error.request) {
-      console.error("❌ Network error: backend not reachable")
+      console.error("❌ Network error: backend not reachable at", API_BASE_URL)
       console.error("Request details:", {
         url: error.config?.url,
         baseURL: error.config?.baseURL,

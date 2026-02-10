@@ -46,12 +46,32 @@ In the project → **Settings** → **Environment Variables**, add:
 
 | Name | Value | Notes |
 |------|--------|--------|
-| `VITE_API_BASE_URL` | `https://YOUR-RAILWAY-URL.up.railway.app` | Backend URL (set after Railway deploy). No trailing slash. |
+| `VITE_API_BASE_URL` | `https://ip-internal-manage-software.onrender.com` | **Backend URL used in production.** No trailing slash. |
 | `VITE_SUPABASE_URL` | Your Supabase project URL | From Supabase → Settings → API |
 | `VITE_SUPABASE_ANON_KEY` | Your Supabase anon key | From Supabase → Settings → API |
 
-- The frontend uses **`VITE_API_BASE_URL`** (see `fms-frontend/src/api/axios.ts`). If your docs say `VITE_API_URL`, use `VITE_API_BASE_URL` in Vercel instead.
+- The frontend reads **`VITE_API_BASE_URL`** first, then **`VITE_API_URL`** as a fallback (see `fms-frontend/src/api/axios.ts`).  
+  - If you already created `VITE_API_URL` in Vercel, you can either keep it or rename it to `VITE_API_BASE_URL`.  
+  - In all cases, the value should be: `https://ip-internal-manage-software.onrender.com` (no trailing slash).
 - After adding or changing env vars, trigger a **Redeploy** (Deployments → ⋯ → Redeploy).
+
+### Fix: "Network Error: Cannot connect to backend server" on Vercel
+
+This happens when **`VITE_API_BASE_URL`/`VITE_API_URL`** is not set (or is wrong) in Vercel. The app then falls back to `http://127.0.0.1:8000`, which does not work in production.
+
+**Fix:** In Vercel → your project → **Settings** → **Environment Variables**:
+
+1. Add or edit **`VITE_API_BASE_URL`** (preferred) or `VITE_API_URL`.
+2. Set the value to your **live backend URL**:  
+   `https://ip-internal-manage-software.onrender.com`  (no trailing slash)
+3. Save, then **Redeploy** (Deployments → ⋯ → Redeploy). **Env vars are baked in at build time** — changing them without redeploying keeps the app on 127.0.0.1.
+4. Code now strips a trailing slash, so `https://ip-internal-manage-software.onrender.com/` is fine in Vercel.
+
+**Production URLs (reference):**
+- Frontend (Vercel): `https://ip-internal-manage-software-ckpexjizo-amans-projects-56de03ce.vercel.app`
+- Backend (Render): `https://ip-internal-manage-software.onrender.com`
+
+**Backend (Render) CORS:** In Render → your service → **Environment** → add `CORS_ORIGINS` = your Vercel frontend URL (e.g. `https://ip-internal-manage-software-ckpexjizo-amans-projects-56de03ce.vercel.app`). Multiple origins: comma-separated. Then redeploy the backend.
 
 ### If builds fail
 
@@ -97,7 +117,7 @@ In the service → **Variables**, add (names and values from your Supabase and a
 ### Get your backend URL
 
 - After a successful deploy, open the service → **Settings** → **Networking** (or **Generate domain**). Copy the public URL (e.g. `https://xxx.up.railway.app`).
-- Put this URL in Vercel as **`VITE_API_BASE_URL`** (no trailing slash), then redeploy the frontend.
+- Put this URL in Vercel as **`VITE_API_BASE_URL`** (or `VITE_API_URL`) with **no trailing slash**, then redeploy the frontend.
 
 ---
 
