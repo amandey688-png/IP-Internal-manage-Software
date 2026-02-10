@@ -23,7 +23,9 @@ export interface PrintExportProps {
 
 function escapeCsvCell(value: unknown): string {
   if (value == null) return ''
-  const s = String(value)
+  let s = String(value)
+  // Mitigate CSV formula injection: cells starting with =, +, -, @ can run in spreadsheet apps
+  if (/^[=+\-@]/.test(s)) s = "'" + s
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`
   return s
 }
@@ -40,7 +42,8 @@ function downloadCsv(columns: ExportColumn[], rows: Record<string, unknown>[], f
   a.href = url
   a.download = `${filename}.csv`
   a.click()
-  URL.revokeObjectURL(url)
+  // Defer revoke so Safari/Firefox can start reading the blob before the URL is revoked
+  setTimeout(() => URL.revokeObjectURL(url), 100)
 }
 
 export function PrintExport({ pageTitle, exportData, exportFilename, onExportClick }: PrintExportProps) {

@@ -288,7 +288,7 @@ export const UserList = () => {
     display_name: (u as User & { display_name?: string }).display_name ?? u.full_name ?? '-',
     role: u.role ?? '-',
     is_active: u.is_active ? 'Yes' : 'No',
-    created_at: formatDate(u.created_at ?? ''),
+    created_at: u.created_at ? formatDate(u.created_at) : '-',
   }))
 
   return (

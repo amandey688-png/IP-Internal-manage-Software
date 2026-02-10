@@ -2,7 +2,7 @@
 
 ## The error you're seeing
 
-```
+```text
 ✖ Railpack could not determine how to build the app.
 The app contents that Railpack analyzed contains:
 ./
@@ -64,7 +64,8 @@ The app contents that Railpack analyzed contains:
 ## What you should see after Root Directory is set
 
 **Build log should show:**
-```
+
+```text
 The app contents that Railpack analyzed contains:
 ./
 ├── app/
@@ -78,7 +79,8 @@ The app contents that Railpack analyzed contains:
 ```
 
 **NOT:**
-```
+
+```text
 ./
 ├── backend/
 ├── fms-frontend/

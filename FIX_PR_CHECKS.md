@@ -56,6 +56,8 @@ If the **only** blocker is Vercel and you don’t need preview deployments for t
 
 - A **repo admin** can temporarily set the branch protection rule so that **Vercel** is not a required check, merge the PR, then turn the requirement back on.
 - Or merge via **command line** (only if your rules allow it and you’re okay skipping checks):
+
+
   ```bash
   git fetch origin
   git checkout main
@@ -63,6 +65,7 @@ If the **only** blocker is Vercel and you don’t need preview deployments for t
   git merge origin/add-railway-and-vercel-files
   git push origin main
   ```
+
   This only works if the branch protection doesn’t block pushes to `main` when checks have failed.
 
 **Best approach:** fix Vercel (Root Directory = `fms-frontend`), wait for CodeRabbit, then merge in the GitHub UI.

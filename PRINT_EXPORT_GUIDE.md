@@ -58,6 +58,7 @@ Every app page has **Print** and **Export** (where applicable). This guide expla
 
 2. **Print only (no table)**
    - Add a row with the page title and the component:
+
    ```tsx
    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
      <Title level={2}>My Page</Title>
@@ -67,6 +68,7 @@ Every app page has **Print** and **Export** (where applicable). This guide expla
 
 3. **Print + Export (with table data)**
    - Define columns and rows (same keys as your table):
+
    ```tsx
    const exportColumns = [
      { key: 'name', label: 'Name' },
@@ -77,7 +79,9 @@ Every app page has **Print** and **Export** (where applicable). This guide expla
      email: item.email,
    }))
    ```
+
    - Render the component with `exportData`:
+
    ```tsx
    <PrintExport
      pageTitle="My Page"

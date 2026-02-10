@@ -21,7 +21,8 @@ git status
 ```
 
 **Example output:**
-```
+
+```text
 On branch main
 Your branch is ahead of 'origin/main' by 3 commits.
   (use "git push" to publish your local commits)
@@ -38,6 +39,7 @@ Changes not staged for commit:
 
 no changes added to commit (use "git add" and/or "git commit -a")
 ```
+
 
 **If you see unstaged changes** (like above), stage and commit them:
 
@@ -63,7 +65,8 @@ git push origin main
 ```
 
 **Expected output:** You should see something like:
-```
+
+```text
 Enumerating objects: X, done.
 Counting objects: 100% (X/X), done.
 Writing objects: 100% (X/X), done.
@@ -80,10 +83,12 @@ git push origin main
 
 **If you get "push declined due to repository rule violations" or "Changes must be made through a pull request":**  
 Your repo requires PRs and (e.g.) CodeRabbit. Push to a **branch**, then open a **Pull Request** and merge:
+
 ```powershell
 git checkout -b deploy/railway-vercel-fix
 git push origin deploy/railway-vercel-fix
 ```
+
 Then on GitHub: **Compare & pull request** (or **Pull requests** → **New pull request**: base `main`, compare `deploy/railway-vercel-fix`) → create PR → wait for CodeRabbit → **Merge**. See **FINAL_DEPLOY_CHECKLIST.md** (Part A) for the full steps.
 
 ### Step 3 – Verify on GitHub
@@ -236,11 +241,13 @@ The app is a single-page app (SPA). Vercel must serve `index.html` for every pat
 
 1. **Commit and push the fix**
    - In your project root (e.g. `C:\Support FMS to APPLICATION`):
+
    ```powershell
    git add fms-frontend/vercel.json
    git commit -m "Add Vercel SPA rewrites to fix 404"
    git push origin main
    ```
+
 2. **Redeploy on Vercel**
    - Open **https://vercel.com** → your project (e.g. "amans-projects").
    - Vercel often auto-deploys when you push. If a new deployment appears, wait for it to finish.
@@ -272,12 +279,14 @@ This happens when Railway builds from the **repo root** instead of the `backend/
    - The repo should contain `backend/railway.toml` (start command, healthcheck) and `backend/runtime.txt` (Python 3.11). If you added them locally, commit and push (step 3).
 
 3. **Commit and push the fix (if you added or changed backend config files)**
+
    ```powershell
    git add backend/railway.toml backend/runtime.txt
    git status
    git commit -m "Add Railway config and root directory fix for backend deploy"
    git push origin main
    ```
+
    After pushing, Railway will redeploy automatically if connected to GitHub. Otherwise, click **Redeploy** in Railway.
 
 ---

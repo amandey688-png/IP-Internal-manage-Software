@@ -4,7 +4,7 @@
 
 **Railway is still building from the repo root**, not from `backend/`. The error log shows:
 
-```
+```text
 The app contents that Railpack analyzed contains:
 ./
 ├── backend/
@@ -68,7 +68,8 @@ This means Railway is analyzing the **entire repo**, not just `backend/`. Railpa
 ## What the build log should show after fix
 
 **Before (wrong):**
-```
+
+```text
 The app contents that Railpack analyzed contains:
 ./
 ├── backend/
@@ -79,7 +80,8 @@ The app contents that Railpack analyzed contains:
 ```
 
 **After (correct):**
-```
+
+```text
 The app contents that Railpack analyzed contains:
 ./
 ├── app/

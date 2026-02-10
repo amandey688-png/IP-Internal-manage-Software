@@ -12,8 +12,10 @@ Because your repo requires **Pull Requests**, use a branch and PR.
 
 ## Step 1: Open PowerShell in project root
 
+Replace `<project-root-path>` with your local project path (e.g. `C:\Support FMS to APPLICATION`).
+
 ```powershell
-cd "C:\Support FMS to APPLICATION"
+cd "<project-root-path>"
 ```
 
 ---
@@ -100,7 +102,7 @@ git push origin add-railway-and-vercel-files
 ## Quick copy-paste (all commands)
 
 ```powershell
-cd "C:\Support FMS to APPLICATION"
+cd "<project-root-path>"
 git fetch origin
 git checkout main
 git pull origin main
