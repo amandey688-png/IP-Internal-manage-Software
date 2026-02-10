@@ -8,12 +8,13 @@ Use this checklist to get your app live and fix common deployment issues.
 
 ### Push your code
 
+Run these one at a time (or paste the whole block). Use a short commit message without parentheses to avoid PowerShell errors.
+
 ```powershell
 cd "c:\Support FMS to APPLICATION"
-
 git status
 git add .
-git commit -m "Your message (e.g. Fix auth, OTP, drawers, deployment config)"
+git commit -m "Deploy checklist and config"
 git push origin main
 ```
 
