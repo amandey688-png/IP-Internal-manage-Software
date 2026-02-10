@@ -16,11 +16,13 @@ You still **must set Root Directory to `backend`** in the Railway dashboard so R
 ## Step 1 – Push the fix to GitHub
 
 **1. Open PowerShell and go to the project root.**  
-Your prompt should look like `PS C:\Support FMS to APPLICATION>`. If not, run:
+Replace `<project-root-path>` below with your local project path (e.g. `C:\Support FMS to APPLICATION`). Your prompt should look like `PS C:\...>`. Run:
 
 ```powershell
-cd "C:\Support FMS to APPLICATION"
+cd "<project-root-path>"
 ```
+
+> **Note for contributors:** Replace `<project-root-path>` with your actual project root directory.
 
 **2. Add the files (run one line at a time):**
 
@@ -34,7 +36,7 @@ git add backend/app/main.py
 git status
 ```
 
-You should see those files under "Changes to be committed". If you only want the Railway/docs fix and not `main.py` or `vercel.json`, omit those two `git add` lines. If you see "no changes added" or "paths did not match", you are not in the project root—run `cd "C:\Support FMS to APPLICATION"` and try again.
+You should see those files under "Changes to be committed". If you only want the Railway/docs fix and not `main.py` or `vercel.json`, omit those two `git add` lines. If you see "no changes added" or "paths did not match", you are not in the project root—run `cd "<project-root-path>"` (using your local path) and try again.
 
 **3. Commit:**
 
@@ -73,7 +75,7 @@ If you prefer to stash your changes, pull, push, then put them back: `git stash 
 | **"branch 'main' does not exist"** | Check your branch: `git branch`. Then push that branch, e.g. `git push origin master`. |
 | **"src refspec master does not match any"** | You're on `main`, not `master`. Use `git push origin main` (and pull first if you got "rejected" above). |
 | **"nothing added to commit"** | The files may already be committed. Run `git status`; if it says "nothing to commit, working tree clean", you’re done—go to Step 2 (Railway). |
-| **"pathspec did not match any file(s)"** | Make sure you’re in the project root (`cd "C:\Support FMS to APPLICATION"`) and the files exist in `backend\` and the repo root. |
+| **"pathspec did not match any file(s)"** | Make sure you’re in the project root (e.g. `cd "<project-root-path>"`) and the files exist in `backend\` and the repo root. |
 
 ---
 
@@ -104,9 +106,11 @@ Wait for the build to finish. The build should show **Build image** (and **Deplo
 
 2. **Health check**  
    In a browser or with curl:
+
    ```text
    https://YOUR-RAILWAY-URL/health
    ```
+
    You should see something like: `{"status":"ok","message":"Backend is running"}`.
 
 3. **Optional – test from frontend**  

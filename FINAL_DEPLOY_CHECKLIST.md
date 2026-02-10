@@ -18,30 +18,41 @@ You only need to: push to GitHub, then configure and redeploy on Railway.
 
 ## Part A – What to do on GitHub (push your code)
 
+Your repo has a rule: **changes to `main` must go through a Pull Request** and **CodeRabbit** must pass. So you push to a **branch**, then open a **PR** and merge it.
+
 Run these in **PowerShell** from the project root:  
 `cd "C:\Support FMS to APPLICATION"`
 
-**1. Stage and commit everything (Railway + Vercel + docs):**
+**If you already committed (e.g. "Add Railway config, Vercel SPA fix, and deploy docs") but push to main was rejected:**
+
+1. Create a new branch and push it (pushing to a branch is allowed):
 ```powershell
-git add backend/railway.toml backend/runtime.txt fms-frontend/vercel.json GITHUB_VERIFY_AND_GO_LIVE.md RAILWAY_DEPLOY_FIX.md FINAL_DEPLOY_CHECKLIST.md
-git add backend/app/main.py
+git checkout -b deploy/railway-vercel-fix
+git push origin deploy/railway-vercel-fix
+```
+
+2. On GitHub: open **https://github.com/amandey688-png/IP-Internal-manage-Software**
+   - You should see a yellow bar: **"deploy/railway-vercel-fix had recent pushes"** with a button **"Compare & pull request"**. Click it.
+   - Or: go to **Pull requests** → **New pull request** → set **base: main** and **compare: deploy/railway-vercel-fix** → **Create pull request**.
+   - Add a title, e.g. "Add Railway config, Vercel SPA fix, and deploy docs".
+   - Create the PR. Wait for **CodeRabbit** to finish (required check).
+   - Then click **Merge pull request** → **Confirm merge**. After merge, the new files will be on `main`.
+
+**If you have not committed yet:**
+
+1. Stage, commit, create branch, push branch:
+```powershell
+git add backend/railway.toml backend/runtime.txt fms-frontend/vercel.json GITHUB_VERIFY_AND_GO_LIVE.md RAILWAY_DEPLOY_FIX.md FINAL_DEPLOY_CHECKLIST.md backend/app/main.py
 git status
 git commit -m "Add Railway config, Vercel SPA fix, and deploy docs"
+git checkout -b deploy/railway-vercel-fix
+git push origin deploy/railway-vercel-fix
 ```
 
-**2. Pull then push (use main only, not master):**
-```powershell
-git pull origin main --rebase
-git push origin main
-```
+2. On GitHub: open a **Pull Request** from `deploy/railway-vercel-fix` into `main`, wait for CodeRabbit, then **Merge**.
 
-- If you see **"You have unstaged changes"**, run `git add -A` and `git commit -m "Add Railway config and deploy doc updates"` before the pull.
-- If **rebase has conflicts**, run `git pull origin main` (no --rebase), fix conflicts if Git tells you, then `git push origin main`.
-
-**3. Verify on GitHub:**
-- Open: https://github.com/amandey688-png/IP-Internal-manage-Software
-- Check the **Code** tab: latest commit should be “Add Railway config, Vercel SPA fix, and deploy docs” (or your message).
-- Under **Code**, confirm these exist: `backend/railway.toml`, `backend/runtime.txt`, `fms-frontend/vercel.json`.
+**3. Verify on GitHub after merge:**
+- On the **Code** tab, branch **main**: you should see `backend/railway.toml`, `backend/runtime.txt`, `fms-frontend/vercel.json`, and the deploy docs.
 
 ---
 

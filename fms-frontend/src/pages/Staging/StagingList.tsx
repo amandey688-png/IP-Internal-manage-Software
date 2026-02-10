@@ -288,48 +288,12 @@ export const StagingList = () => {
     }
   }
 
-  const fetchAllStagingTicketsForStageFilter = async () => {
-    setLoading(true)
-    try {
-      const allTickets: Ticket[] = []
-      let currentPage = 1
-      const limit = 100
-      let hasMore = true
-
-      while (hasMore) {
-        const response = await ticketsApi.list({
-          section: 'staging',
-          page: currentPage,
-          limit,
-          sort_by: 'created_at',
-          sort_order: 'desc',
-        })
-        const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
-        const pageTickets: Ticket[] = Array.isArray(raw) ? raw : []
-        allTickets.push(...pageTickets)
-        hasMore = pageTickets.length === limit
-        currentPage++
-      }
-
-      setAllStagingTicketsForStageFilter(allTickets)
-      const filtered = stageFilter
-        ? allTickets.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter)
-        : allTickets
-      setTickets(filtered.slice((page - 1) * pageSize, page * pageSize))
-      setTotal(filtered.length)
-    } catch (error) {
-      console.error('Failed to fetch all staging tickets for stage filter:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchAllForExport = async (): Promise<Ticket[]> => {
+  /** Fetches all staging tickets across pages (section: staging, fixed sort). Used for stage filter and export. */
+  const fetchAllStagingPages = async (): Promise<Ticket[]> => {
     const allTickets: Ticket[] = []
     let currentPage = 1
     const limit = 100
     let hasMore = true
-
     while (hasMore) {
       const response = await ticketsApi.list({
         section: 'staging',
@@ -344,15 +308,30 @@ export const StagingList = () => {
       hasMore = pageTickets.length === limit
       currentPage++
     }
-
     return allTickets
   }
 
+  const fetchAllStagingTicketsForStageFilter = async () => {
+    setLoading(true)
+    try {
+      const allTickets = await fetchAllStagingPages()
+      setAllStagingTicketsForStageFilter(allTickets)
+      const filtered = stageFilter
+        ? allTickets.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter)
+        : allTickets
+      setTickets(filtered.slice((page - 1) * pageSize, page * pageSize))
+      setTotal(filtered.length)
+    } catch (error) {
+      console.error('Failed to fetch all staging tickets for stage filter:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchAllForExport = async (): Promise<Ticket[]> => fetchAllStagingPages()
+
   const stagingStageLabels = ['Stage 1: Staging', 'Stage 2: Live', 'Stage 3: Live Review']
-  const ticketsForDisplay =
-    stageFilter
-      ? tickets.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter)
-      : tickets
+  const ticketsForDisplay = tickets
   const getStageForExport = (t: Record<string, unknown>) => getStagingCurrentStage(t as Parameters<typeof getStagingCurrentStage>[0])
   const exportColumns = [...TICKET_EXPORT_COLUMNS]
   const exportRows = (exportTickets.length > 0 ? exportTickets : ticketsForDisplay).map((t) => buildTicketExportRow(t, getStageForExport))

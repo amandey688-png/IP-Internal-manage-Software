@@ -62,6 +62,7 @@ export const TicketList = () => {
   const typeFromUrl = searchParams.get('type') || new URLSearchParams(location.search).get('type') || ''
   const sectionFromUrl = searchParams.get('section') || new URLSearchParams(location.search).get('section') || ''
   const viewFromUrl = searchParams.get('view') === 'approval'
+  const showStageFilter = sectionFromUrl === 'chores-bugs'
 
   useEffect(() => {
     if (viewFromUrl && !canAccessApproval) {
@@ -183,59 +184,12 @@ export const TicketList = () => {
     }
   }
 
-  const fetchAllTicketsForStageFilter = async () => {
-    setLoading(true)
-    try {
-      const allTickets: Ticket[] = []
-      let currentPage = 1
-      const limit = 100
-      let hasMore = true
-
-      while (hasMore) {
-        const response = await ticketsApi.list({
-          page: currentPage,
-          limit,
-          ...(filters.search && { search: filters.search }),
-          ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
-          ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
-          ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
-          ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
-          ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
-          ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
-          ...(viewFromUrl && { section: 'approval-status' }),
-          ...(filters.company_id && { company_id: filters.company_id }),
-          ...(filters.priority && { priority: filters.priority }),
-          ...(filters.date_from && { date_from: filters.date_from }),
-          ...(filters.date_to && { date_to: filters.date_to }),
-          sort_by: filters.sort_by,
-          sort_order: filters.sort_order,
-        })
-        const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
-        const pageTickets: Ticket[] = Array.isArray(raw) ? raw : []
-        allTickets.push(...pageTickets)
-        hasMore = pageTickets.length === limit
-        currentPage++
-      }
-
-      setAllTicketsForStageFilter(allTickets)
-      const filtered = stageFilter
-        ? allTickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
-        : allTickets
-      setTickets(filtered.slice((page - 1) * pageSize, page * pageSize))
-      setTotal(filtered.length)
-    } catch (error) {
-      console.error('Failed to fetch all tickets for stage filter:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchAllForExport = async (): Promise<Ticket[]> => {
+  /** Fetches all tickets across pages with current filters/section/view. Used for stage filter and export. */
+  const fetchAllTicketsWithFilters = async (): Promise<Ticket[]> => {
     const allTickets: Ticket[] = []
     let currentPage = 1
     const limit = 100
     let hasMore = true
-
     while (hasMore) {
       const response = await ticketsApi.list({
         page: currentPage,
@@ -261,9 +215,27 @@ export const TicketList = () => {
       hasMore = pageTickets.length === limit
       currentPage++
     }
-
     return allTickets
   }
+
+  const fetchAllTicketsForStageFilter = async () => {
+    setLoading(true)
+    try {
+      const allTickets = await fetchAllTicketsWithFilters()
+      setAllTicketsForStageFilter(allTickets)
+      const filtered = stageFilter
+        ? allTickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
+        : allTickets
+      setTickets(filtered.slice((page - 1) * pageSize, page * pageSize))
+      setTotal(filtered.length)
+    } catch (error) {
+      console.error('Failed to fetch all tickets for stage filter:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchAllForExport = async (): Promise<Ticket[]> => fetchAllTicketsWithFilters()
 
   const fetchTicketsRef = useRef(fetchTickets)
   fetchTicketsRef.current = fetchTickets
@@ -288,7 +260,6 @@ export const TicketList = () => {
   const isChoresBugs = sectionFromUrl === 'chores-bugs' || sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'solutions'
   const isSolutionsSection = sectionFromUrl === 'solutions'
 
-  const showStageFilter = sectionFromUrl === 'chores-bugs'
   /** When stage filter is set (Chores & Bugs only), filter tickets for table, Export and Print */
   const ticketsForDisplay =
     showStageFilter && stageFilter
@@ -709,7 +680,7 @@ export const TicketList = () => {
   const isCompletedChoresBugs = sectionFromUrl === 'completed-chores-bugs'
 
   const exportColumns = [...TICKET_EXPORT_COLUMNS]
-  const exportRows = ticketsForDisplay.map((t) => buildTicketExportRow(t, getStageForExport))
+  const exportRows = (exportTickets.length > 0 ? exportTickets : ticketsForDisplay).map((t) => buildTicketExportRow(t, getStageForExport))
 
   return (
     <div style={{ maxWidth: 1600, margin: '0 auto' }}>

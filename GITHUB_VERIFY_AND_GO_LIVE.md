@@ -78,6 +78,14 @@ git push origin main
 # or: git push origin your-branch-name
 ```
 
+**If you get "push declined due to repository rule violations" or "Changes must be made through a pull request":**  
+Your repo requires PRs and (e.g.) CodeRabbit. Push to a **branch**, then open a **Pull Request** and merge:
+```powershell
+git checkout -b deploy/railway-vercel-fix
+git push origin deploy/railway-vercel-fix
+```
+Then on GitHub: **Compare & pull request** (or **Pull requests** → **New pull request**: base `main`, compare `deploy/railway-vercel-fix`) → create PR → wait for CodeRabbit → **Merge**. See **FINAL_DEPLOY_CHECKLIST.md** (Part A) for the full steps.
+
 ### Step 3 – Verify on GitHub
 
 1. **Open your repo:**  

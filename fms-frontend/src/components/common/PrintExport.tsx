@@ -17,6 +17,8 @@ export interface PrintExportProps {
   }
   /** Optional custom filename (without extension) for CSV export */
   exportFilename?: string
+  /** Optional callback when Export is clicked (e.g. to fetch full dataset before export) */
+  onExportClick?: (event?: React.MouseEvent<HTMLButtonElement>) => void
 }
 
 function escapeCsvCell(value: unknown): string {

@@ -295,8 +295,6 @@ export const TICKET_EXPORT_COLUMNS = [
   { key: 'stage_status', label: 'Stage Status' },
 ] as const
 
-] as const
-
 export type StageInfo = { stageLabel: string; status: string }
 
 const TYPE_LABELS: Record<string, string> = {
@@ -313,12 +311,12 @@ const COMM_LABELS: Record<string, string> = {
 
 function getTypeLabel(type?: string): string {
   if (!type) return '-'
-  return TYPE_LABELS[type] ?? type ?? '-'
+  return TYPE_LABELS[type] ?? type
 }
 
 function getCommLabel(communicated_through?: string): string {
   if (!communicated_through) return '-'
-  return COMM_LABELS[communicated_through] ?? communicated_through ?? '-'
+  return COMM_LABELS[communicated_through] ?? communicated_through
 }
 
 /**
