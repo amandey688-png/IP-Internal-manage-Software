@@ -680,7 +680,7 @@ export const TicketList = () => {
   const isCompletedChoresBugs = sectionFromUrl === 'completed-chores-bugs'
 
   const exportColumns = [...TICKET_EXPORT_COLUMNS]
-  const exportRows = (exportTickets.length > 0 ? exportTickets : ticketsForDisplay).map((t) => buildTicketExportRow(t, getStageForExport))
+  const exportRows = (exportTickets.length > 0 ? exportTickets : ticketsForDisplay).map((t) => buildTicketExportRow(t as unknown as Record<string, unknown>, getStageForExport))
 
   return (
     <div style={{ maxWidth: 1600, margin: '0 auto' }}>

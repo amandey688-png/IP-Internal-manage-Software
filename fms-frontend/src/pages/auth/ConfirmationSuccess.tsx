@@ -9,7 +9,7 @@ const { Title, Text } = Typography
 export const ConfirmationSuccess = () => {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [confirmed, setConfirmed] = useState(false)
+  const [, setConfirmed] = useState(false)
 
   useEffect(() => {
     // Check if this is coming from email confirmation link

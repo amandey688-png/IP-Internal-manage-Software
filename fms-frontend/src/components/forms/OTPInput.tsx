@@ -8,7 +8,7 @@ interface OTPInputProps {
   disabled?: boolean
 }
 
-export const OTPInput = ({ value = '', onChange, length = 4, disabled = false }: OTPInputProps) => {
+export const OTPInput = ({ onChange, length = 4, disabled = false }: OTPInputProps) => {
   const [otp, setOtp] = useState<string[]>(Array(length).fill(''))
   const inputRefs = useRef<(HTMLInputElement | null)[]>([])
 
@@ -56,7 +56,8 @@ export const OTPInput = ({ value = '', onChange, length = 4, disabled = false }:
         <Input
           key={index}
           ref={(el) => {
-            inputRefs.current[index] = el
+            const native = (el as { input?: HTMLInputElement | null } | null)?.input ?? null
+            inputRefs.current[index] = native
           }}
           value={otp[index]}
           onChange={(e: ChangeEvent<HTMLInputElement>) => handleChange(index, e.target.value)}

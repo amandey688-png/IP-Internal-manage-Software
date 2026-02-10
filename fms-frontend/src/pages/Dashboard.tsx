@@ -78,7 +78,15 @@ export const Dashboard = () => {
     return <LoadingSpinner fullPage />
   }
 
-  const safeMetrics = metrics ?? {}
+  const safeMetrics: DashboardMetrics = metrics ?? {
+    all_tickets: 0,
+    response_delay: 0,
+    completion_delay: 0,
+    total_last_week: 0,
+    pending_last_week: 0,
+    staging_pending_feature: 0,
+    staging_pending_chores_bugs: 0,
+  }
 
   const metricCards = [
     { title: 'Chores & Bug (this month)', value: Number(safeMetrics.all_tickets) || 0, icon: <FileTextOutlined /> },
@@ -97,7 +105,7 @@ export const Dashboard = () => {
     ? {
         columns: [...TICKET_EXPORT_COLUMNS],
         rows: allFetchedTickets.map((t) =>
-          buildTicketExportRow(t, (x) => getChoresBugsCurrentStage(x as Parameters<typeof getChoresBugsCurrentStage>[0]))
+          buildTicketExportRow(t as unknown as Record<string, unknown>, (x) => getChoresBugsCurrentStage(x as Parameters<typeof getChoresBugsCurrentStage>[0]))
         ),
       }
     : undefined

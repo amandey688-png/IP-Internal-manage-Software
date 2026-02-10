@@ -334,7 +334,7 @@ export const StagingList = () => {
   const ticketsForDisplay = tickets
   const getStageForExport = (t: Record<string, unknown>) => getStagingCurrentStage(t as Parameters<typeof getStagingCurrentStage>[0])
   const exportColumns = [...TICKET_EXPORT_COLUMNS]
-  const exportRows = (exportTickets.length > 0 ? exportTickets : ticketsForDisplay).map((t) => buildTicketExportRow(t, getStageForExport))
+  const exportRows = (exportTickets.length > 0 ? exportTickets : ticketsForDisplay).map((t) => buildTicketExportRow(t as unknown as Record<string, unknown>, getStageForExport))
 
   const handleExportClick = async () => {
     const allTickets = await fetchAllForExport()

@@ -70,7 +70,8 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
     if (!ticketId) return
     setSaving(true)
     try {
-      await ticketsApi.update(ticketId, updates)
+      const payload = { ...updates, approval_status: updates.approval_status ?? undefined }
+      await ticketsApi.update(ticketId, payload)
       const fresh = await ticketsApi.get(ticketId)
       setTicket(fresh && typeof fresh === 'object' ? (fresh as Ticket) : null)
       onUpdate?.()

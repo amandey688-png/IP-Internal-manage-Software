@@ -76,7 +76,6 @@ export const getStagingCurrentStage = (t: {
   live_review_status?: string | null
 }): { stageLabel: string; planned: string; actual: string; status: string; timeDelay: string } => {
   const fmt = (d: string | null | undefined) => (d ? formatDateTable(d) : '-')
-  const SLA_2H = 2 * 3600
 
   if (t.staging_review_status !== 'completed') {
     const delaySec = stagingDelaySeconds(t.staging_planned, t.staging_review_status, t.staging_review_actual)
@@ -156,7 +155,6 @@ export const getChoresBugsCurrentStage = (t: {
   }
   if (t.status_1 === 'no' && !t.status_2) {
     const p2 = t.actual_1 ? new Date(t.actual_1).getTime() : 0
-    const a2 = t.actual_2 ? new Date(t.actual_2).getTime() : 0
     const delaySec = p2 ? Math.max(0, Math.floor((now - p2) / 1000) - SLA_1D) : 0
     return {
       stageNum: 2,
@@ -169,7 +167,6 @@ export const getChoresBugsCurrentStage = (t: {
   }
   if (t.status_2 === 'completed' && !t.status_3) {
     const p3 = t.actual_2 ? new Date(t.actual_2).getTime() : 0
-    const a3 = t.actual_3 ? new Date(t.actual_3).getTime() : 0
     const delaySec = p3 ? Math.max(0, Math.floor((now - p3) / 1000) - SLA_2H) : 0
     return {
       stageNum: 3,

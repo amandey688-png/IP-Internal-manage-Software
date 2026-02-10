@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Drawer, Descriptions, Tag, Typography, Input, Button, Space, message, Modal } from 'antd'
-import { RocketOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons'
+import { CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
 import { formatDateTable, formatDuration } from '../../utils/helpers'
 import type { Ticket } from '../../api/tickets'
@@ -24,7 +24,6 @@ const getPriorityColor = (p: string) => (p === 'high' ? 'red' : p === 'medium' ?
 export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly = false, approvalMode = false }: TicketDetailDrawerProps) => {
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [loading, setLoading] = useState(false)
-  const [markingStaging, setMarkingStaging] = useState(false)
   const [unapproveModalOpen, setUnapproveModalOpen] = useState(false)
   const [unapproveRemarks, setUnapproveRemarks] = useState('')
   const [approvalActionLoading, setApprovalActionLoading] = useState(false)

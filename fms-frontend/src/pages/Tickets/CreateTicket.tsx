@@ -15,15 +15,16 @@ export const CreateTicket = () => {
   const onFinish = async (values: Record<string, unknown>) => {
     setLoading(true)
     try {
-      const ticket = await ticketsApi.create({
+      const res = await ticketsApi.create({
         title: values.title as string,
         description: values.description as string,
         type: values.type as 'bug' | 'feature' | 'chore',
-        priority: (values.priority as string) || 'medium',
+        priority: ((values.priority as string) || 'medium') as 'medium' | 'high' | 'low' | 'critical' | 'urgent',
       })
-      if (ticket?.id) {
+      const ticketId = res?.data?.id
+      if (ticketId) {
         message.success('Ticket created')
-        navigate(`${ROUTES.TICKETS}/${ticket.id}`)
+        navigate(`${ROUTES.TICKETS}/${ticketId}`)
       }
     } catch (err: any) {
       const detail = err?.response?.data?.detail ?? err?.message ?? 'Failed to create ticket'
