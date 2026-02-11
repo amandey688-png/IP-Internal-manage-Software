@@ -22,6 +22,22 @@ from app.supabase_client import supabase, supabase_auth
 from app.auth_middleware import get_current_user
 
 # Role-based access: master_admin, admin (Super Admin), approver (Approver), user (Operator)
+def _normalize_role(name: str | None) -> str:
+    """Map DB role name to frontend role (master_admin, admin, approver, user). Handles 'master_ad' etc."""
+    if not name:
+        return "user"
+    n = (name or "").strip().lower()
+    if n in ("master_admin", "master_ad", "masteradmin"):
+        return "master_admin"
+    if n in ("admin", "super_admin", "superadmin"):
+        return "admin"
+    if n == "approver":
+        return "approver"
+    if n == "user":
+        return "user"
+    return "user"
+
+
 def _get_role_from_profile(user_id: str) -> str:
     """Fetch user profile and return frontend role name (master_admin, admin, approver, user)."""
     try:
@@ -30,8 +46,7 @@ def _get_role_from_profile(user_id: str) -> str:
             return "user"
         role_row = supabase.table("roles").select("name").eq("id", profile.data["role_id"]).single().execute()
         role_name = role_row.data["name"] if role_row.data else "user"
-        # Keep master_admin distinct so only Master Admin can edit users/roles/section permissions
-        return role_name if role_name in ("master_admin", "admin", "approver", "user") else "user"
+        return _normalize_role(role_name)
     except Exception:
         return "user"
 
@@ -436,8 +451,7 @@ def login(payload: LoginRequest):
             "id", profile.data["role_id"]
         ).single().execute()
         role_name = role_row.data["name"] if role_row.data else "user"
-        # Frontend roles: master_admin, admin, approver, user (display names in UI)
-        frontend_role = role_name if role_name in ("master_admin", "admin", "approver", "user") else "user"
+        frontend_role = _normalize_role(role_name)
 
         user = {
             "id": user_id,
@@ -486,7 +500,7 @@ def get_me(auth: dict = Depends(get_current_user)):
         "id", profile.data["role_id"]
     ).single().execute()
     role_name = role_row.data["name"] if role_row.data else "user"
-    frontend_role = role_name if role_name in ("master_admin", "admin", "approver", "user") else "user"
+    frontend_role = _normalize_role(role_name)
 
     return {
         "id": user_id,
@@ -1237,7 +1251,7 @@ def list_divisions(company_id: str | None = None, auth: dict = Depends(get_curre
 # ---------- Users (admin = view only; master_admin = view + edit role, deactivate, section permissions) ----------
 # Role name as stored in DB; frontend displays "Master Admin", "Admin", "Approver", "User"
 def _map_role(name: str) -> str:
-    return name if name in ("master_admin", "admin", "approver", "user") else "user"
+    return _normalize_role(name)
 
 
 # Section keys for user_section_permissions (match sidebar sections)
