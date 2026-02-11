@@ -68,7 +68,8 @@ export const UserList = () => {
       if (status === 403 || (typeof detail === 'string' && detail.toLowerCase().includes('permission'))) {
         message.warning('Only Admin or Master Admin can view the user list.')
       } else {
-        message.error('Failed to load users. Check that you are Admin or Master Admin.')
+        const msg = typeof detail === 'string' ? detail : 'Failed to load users. Check that you are Admin or Master Admin.'
+        message.error(msg)
       }
     } finally {
       setLoading(false)
