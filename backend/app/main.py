@@ -1277,15 +1277,26 @@ def list_users(
     auth: dict = Depends(require_roles(["admin", "master_admin"])),
 ):
     """List users. Admin and Master Admin can view; only Master Admin can edit (via PUT)."""
-    q = supabase.table("users_view").select("*", count="exact")
-    if search:
-        q = q.or_(f"full_name.ilike.%{search}%,email.ilike.%{search}%,display_name.ilike.%{search}%")
-    q = q.range((page - 1) * limit, page * limit - 1).order("created_at", desc=True)
-    r = q.execute()
-    rows = r.data or []
-    for row in rows:
-        row["role"] = _map_role(row.get("role_name", "user"))
-    return {"data": rows, "total": r.count or 0, "page": page, "limit": limit}
+    try:
+        q = supabase.table("users_view").select("*", count="exact")
+        if search and search.strip():
+            # Use only full_name and email (exist in all users_view variants; display_name may not)
+            safe_search = search.strip().replace("%", "").replace("_", "")[:100]
+            q = q.or_(f"full_name.ilike.%{safe_search}%,email.ilike.%{safe_search}%")
+        q = q.range((page - 1) * limit, page * limit - 1).order("created_at", desc=True)
+        r = q.execute()
+        rows = r.data or []
+        for row in rows:
+            row["role"] = _map_role(row.get("role_name", "user"))
+            # Ensure display_name for UI (users_view may have role_name only; use full_name as fallback)
+            if "display_name" not in row and "full_name" in row:
+                row["display_name"] = row.get("role_name") or row["full_name"]
+        return {"data": rows, "total": r.count or 0, "page": page, "limit": limit}
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to load users: {str(e)[:200]}",
+        )
 
 
 @api_router.get("/users/{user_id}")
