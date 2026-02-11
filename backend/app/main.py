@@ -1269,6 +1269,58 @@ def list_roles(auth: dict = Depends(require_roles(["admin", "master_admin"]))):
     return {"data": r.data or []}
 
 
+def _list_users_from_view(safe_search: str, page: int, limit: int):
+    """Fetch users via users_view. Raises on failure."""
+    q = supabase.table("users_view").select("*")
+    if safe_search:
+        q = q.or_(f"full_name.ilike.%{safe_search}%,email.ilike.%{safe_search}%")
+    q = q.order("id").range((page - 1) * limit, page * limit - 1)
+    r = q.execute()
+    rows = list(r.data or [])
+    count_q = supabase.table("users_view").select("id", count="exact")
+    if safe_search:
+        count_q = count_q.or_(f"full_name.ilike.%{safe_search}%,email.ilike.%{safe_search}%")
+    count_r = count_q.limit(1).execute()
+    total = getattr(count_r, "count", len(rows))
+    total = total if isinstance(total, int) and total >= 0 else len(rows)
+    return rows, total
+
+
+def _list_users_fallback(page: int, limit: int, search: str | None):
+    """Fallback when users_view fails: build list from user_profiles + roles + auth.admin."""
+    auth_resp = supabase.auth.admin.list_users(per_page=1000)
+    auth_users = getattr(auth_resp, "users", []) or []
+    auth_by_id = {str(u.id): getattr(u, "email", "") or "" for u in auth_users}
+    profiles = supabase.table("user_profiles").select("id, full_name, role_id, is_active, created_at").execute()
+    prows = profiles.data or []
+    if not prows:
+        return [], 0
+    role_ids = list({p["role_id"] for p in prows})
+    roles = supabase.table("roles").select("id, name").in_("id", role_ids).execute()
+    roles_by_id = {r["id"]: r.get("name", "user") for r in (roles.data or [])}
+    merged = []
+    for p in prows:
+        email = auth_by_id.get(str(p["id"]), "")
+        if search and search.strip():
+            s = search.strip().lower()
+            if s not in ((p.get("full_name") or "").lower(), email.lower()):
+                continue
+        merged.append({
+            "id": p["id"],
+            "email": email,
+            "full_name": p.get("full_name", ""),
+            "display_name": roles_by_id.get(p["role_id"], "user"),
+            "role_name": roles_by_id.get(p["role_id"], "user"),
+            "role": _map_role(roles_by_id.get(p["role_id"], "user")),
+            "is_active": p.get("is_active", True),
+            "created_at": str(p.get("created_at", "")),
+        })
+    merged.sort(key=lambda x: x.get("created_at", ""), reverse=True)
+    total = len(merged)
+    start = (page - 1) * limit
+    return merged[start : start + limit], total
+
+
 @api_router.get("/users")
 def list_users(
     page: int = 1,
@@ -1277,26 +1329,27 @@ def list_users(
     auth: dict = Depends(require_roles(["admin", "master_admin"])),
 ):
     """List users. Admin and Master Admin can view; only Master Admin can edit (via PUT)."""
+    safe_search = ""
+    if search and search.strip():
+        safe_search = search.strip().replace("%", "").replace("_", "")[:100]
     try:
-        q = supabase.table("users_view").select("*", count="exact")
-        if search and search.strip():
-            # Use only full_name and email (exist in all users_view variants; display_name may not)
-            safe_search = search.strip().replace("%", "").replace("_", "")[:100]
-            q = q.or_(f"full_name.ilike.%{safe_search}%,email.ilike.%{safe_search}%")
-        q = q.range((page - 1) * limit, page * limit - 1).order("created_at", desc=True)
-        r = q.execute()
-        rows = r.data or []
-        for row in rows:
-            row["role"] = _map_role(row.get("role_name", "user"))
-            # Ensure display_name for UI (users_view may have role_name only; use full_name as fallback)
-            if "display_name" not in row and "full_name" in row:
-                row["display_name"] = row.get("role_name") or row["full_name"]
-        return {"data": rows, "total": r.count or 0, "page": page, "limit": limit}
+        rows, total = _list_users_from_view(safe_search, page, limit)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to load users: {str(e)[:200]}",
-        )
+        print(f"[GET /users] users_view failed ({e}), trying fallback")
+        try:
+            rows, total = _list_users_fallback(page, limit, search)
+        except Exception as e2:
+            print(f"[GET /users] Fallback failed: {e2}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to load users: {str(e2)[:200]}",
+            )
+    for row in rows:
+        if "role" not in row:
+            row["role"] = _map_role(row.get("role_name", "user"))
+        if "display_name" not in row and "full_name" in row:
+            row["display_name"] = row.get("role_name") or row["full_name"]
+    return {"data": rows, "total": total, "page": page, "limit": limit}
 
 
 @api_router.get("/users/{user_id}")
