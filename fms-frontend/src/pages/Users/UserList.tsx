@@ -56,10 +56,13 @@ export const UserList = () => {
         limit: pageSize,
         ...(search && { search }),
       })
-      if (response?.data) {
-        const paginated = response.data as { data?: User[]; total?: number }
-        setUsers(Array.isArray(paginated.data) ? paginated.data : [])
-        setTotal(typeof paginated.total === 'number' ? paginated.total : 0)
+      // Backend returns { data: User[], total: number, page, limit } directly
+      if (response && Array.isArray(response.data)) {
+        setUsers(response.data)
+        setTotal(typeof response.total === 'number' ? response.total : response.data.length)
+      } else {
+        setUsers([])
+        setTotal(0)
       }
     } catch (error: any) {
       console.error('Failed to fetch users:', error)

@@ -67,7 +67,7 @@ export function PrintExport({ pageTitle, exportData, exportFilename, onExportCli
     message.success('Export downloaded')
   }
 
-  const canExport = exportData && exportData.columns.length > 0 && exportData.rows.length > 0
+  const canExport = exportData && exportData.columns.length > 0
 
   return (
     <Space className="no-print" size="middle" style={{ marginBottom: 16 }}>
