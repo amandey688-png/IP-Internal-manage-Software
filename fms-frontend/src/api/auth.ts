@@ -154,6 +154,14 @@ export const authApi = {
   /**
    * Verify OTP (after login when requires_otp is true)
    */
+  resendConfirmation: async (email: string): Promise<{ success?: boolean; message?: string }> => {
+    const res = await apiClient.post<{ success: boolean; message: string }>(
+      '/auth/resend-confirmation',
+      { email }
+    )
+    return res.data
+  },
+
   verifyOTP: async (data: OTPVerifyRequest): Promise<ApiResponse<OTPVerifyResponse>> => {
     try {
       const response = await apiClient.post<OTPVerifyResponse>('/auth/verify-otp', data)

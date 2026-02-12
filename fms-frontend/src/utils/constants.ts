@@ -1,4 +1,4 @@
-export const APP_NAME = 'IP Internal manage Software'
+export const APP_NAME = 'IP Internal Management Software'
 
 export const ROLES = {
   USER: 'user',
@@ -42,6 +42,9 @@ export const ROUTES = {
   TICKET_DETAIL: '/tickets/:id',
   SOLUTIONS: '/solutions/:ticketId',
   STAGING: '/staging',
+  /** Task module (separate from Support) */
+  CHECKLIST: '/task/checklist',
+  DELEGATION: '/task/delegation',
   USERS: '/users',
   SETTINGS: '/settings',
 } as const

@@ -20,7 +20,7 @@ export const Header = ({ onAddNew }: HeaderProps) => {
   const searchParams = new URLSearchParams(location.search)
   const section = searchParams.get('section')
   const viewApproval = searchParams.get('view') === 'approval'
-  const hideAddNew = section === 'chores-bugs' || section === 'completed-chores-bugs' || section === 'completed-feature' || section === 'solutions' || location.pathname === ROUTES.STAGING || viewApproval
+  const hideAddNew = section === 'chores-bugs' || section === 'completed-chores-bugs' || section === 'completed-feature' || section === 'solutions' || location.pathname === ROUTES.STAGING || location.pathname === ROUTES.CHECKLIST || location.pathname === ROUTES.DELEGATION || viewApproval
 
   const handleLogout = () => {
     logout()
@@ -52,7 +52,11 @@ export const Header = ({ onAddNew }: HeaderProps) => {
         ? 'Support / Solutions'
         : location.pathname === ROUTES.STAGING
           ? 'Support / Staging'
-          : location.pathname
+          : location.pathname === ROUTES.CHECKLIST
+            ? 'Task / Checklist'
+            : location.pathname === ROUTES.DELEGATION
+              ? 'Task / Delegation'
+              : location.pathname
 
   return (
     <AntHeader

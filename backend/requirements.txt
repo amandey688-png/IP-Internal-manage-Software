@@ -6,3 +6,4 @@ python-multipart
 supabase
 httpx
 psycopg2-binary
+aiosmtplib

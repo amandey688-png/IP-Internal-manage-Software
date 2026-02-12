@@ -7,6 +7,9 @@ import {
   SettingOutlined,
   BellOutlined,
   QuestionCircleOutlined,
+  CheckSquareOutlined,
+  SendOutlined,
+  UnorderedListOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
@@ -20,6 +23,9 @@ const isSupportPage = (pathname: string) =>
   pathname.startsWith(ROUTES.TICKETS) ||
   pathname === ROUTES.STAGING
 
+const isTaskPage = (pathname: string) =>
+  pathname === ROUTES.CHECKLIST || pathname === ROUTES.DELEGATION
+
 interface SidebarProps {
   className?: string
 }
@@ -29,9 +35,13 @@ export const Sidebar = ({ className }: SidebarProps) => {
   const location = useLocation()
   const { canAccessApproval, canAccessSettings, canAccessUsers } = useRole()
   const [supportOpen, setSupportOpen] = useState(isSupportPage(location.pathname))
+  const [taskOpen, setTaskOpen] = useState(isTaskPage(location.pathname))
 
   useEffect(() => {
     if (isSupportPage(location.pathname)) setSupportOpen(true)
+  }, [location.pathname])
+  useEffect(() => {
+    if (isTaskPage(location.pathname)) setTaskOpen(true)
   }, [location.pathname])
 
   const linkStyle = { color: 'inherit', display: 'block' }
@@ -49,6 +59,11 @@ export const Sidebar = ({ className }: SidebarProps) => {
     if (key?.includes('view=approval')) return canAccessApproval
     return true
   }) ?? []
+
+  const taskItems: MenuProps['items'] = [
+    { key: ROUTES.CHECKLIST, icon: <CheckSquareOutlined />, label: <Link to={ROUTES.CHECKLIST} style={linkStyle}>Checklist</Link> },
+    { key: ROUTES.DELEGATION, icon: <SendOutlined />, label: <Link to={ROUTES.DELEGATION} style={linkStyle}>Delegation</Link> },
+  ]
 
   const menuItems: MenuProps['items'] = [
     {
@@ -75,6 +90,13 @@ export const Sidebar = ({ className }: SidebarProps) => {
       children: supportItems,
       onTitleClick: () => setSupportOpen(!supportOpen),
     },
+    {
+      key: 'task',
+      icon: <UnorderedListOutlined />,
+      label: 'Task',
+      children: taskItems,
+      onTitleClick: () => setTaskOpen(!taskOpen),
+    },
     ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: 'Users' }] : []),
     ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: 'Settings' }] : []),
     {
@@ -91,7 +113,15 @@ export const Sidebar = ({ className }: SidebarProps) => {
   }
 
   const selectedKeys = [location.pathname, location.pathname + (location.search || '')]
-  const openKeys = supportOpen ? ['support'] : []
+  const openKeys = [
+    ...(supportOpen ? ['support'] : []),
+    ...(taskOpen ? ['task'] : []),
+  ]
+
+  const handleOpenChange = (keys: string[]) => {
+    setSupportOpen(keys.includes('support'))
+    setTaskOpen(keys.includes('task'))
+  }
 
   return (
     <Sider
@@ -126,7 +156,7 @@ export const Sidebar = ({ className }: SidebarProps) => {
         mode="inline"
         selectedKeys={selectedKeys}
         openKeys={openKeys}
-        onOpenChange={(keys) => setSupportOpen(keys.includes('support'))}
+        onOpenChange={handleOpenChange}
         items={menuItems}
         onClick={handleMenuClick}
         style={{

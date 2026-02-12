@@ -1,5 +1,9 @@
 from dotenv import load_dotenv
-load_dotenv()
+from pathlib import Path
+
+# Load .env from backend/ (works even when run from project root)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(_env_path)
 
 import os
 import sys
@@ -11,15 +15,15 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-from datetime import datetime
-from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request, UploadFile, File
+from datetime import datetime, date, timedelta
+from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request, UploadFile, File, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 import uuid
 import httpx
 from app.supabase_client import supabase, supabase_auth
-from app.auth_middleware import get_current_user
+from app.auth_middleware import get_current_user, get_current_user_optional
 
 # Role-based access: master_admin, admin (Super Admin), approver (Approver), user (Operator)
 def _normalize_role(name: str | None) -> str:
@@ -309,40 +313,49 @@ def _do_register(payload: RegisterRequest):
         result = None
         user_id = None
         user_email = payload.email
+        confirmation_sent = False
 
-        # Method 1: create_user (service_role) - backend creates user, auto-confirms
+        # Redirect URL after email confirmation (add to Supabase Auth URL config)
+        frontend_url = os.getenv("FRONTEND_URL", os.getenv("SITE_URL", "http://localhost:3000")).rstrip("/")
+        redirect_to = f"{frontend_url}/confirmation-success"
+
+        # Method 1: sign_up (anon) - sends confirmation email via Custom SMTP
         try:
-            _log("Trying create_user (Supabase admin)...")
-            result = supabase.auth.admin.create_user({
+            _log("Trying sign_up (sends confirmation email)...")
+            result = supabase_auth.auth.sign_up({
                 "email": payload.email.strip().lower(),
                 "password": payload.password,
-                "email_confirm": True,
-                "user_metadata": {"full_name": payload.full_name},
+                "options": {
+                    "data": {"full_name": payload.full_name},
+                    "emailRedirectTo": redirect_to,
+                },
             })
             if result and getattr(result, "user", None):
                 user_id = str(result.user.id)
                 user_email = getattr(result.user, "email", None) or payload.email
-                _log(f"create_user OK: {user_id}")
+                # If session is None, Supabase sent confirmation email (Confirm email enabled)
+                confirmation_sent = getattr(result, "session", None) is None
+                _log(f"sign_up OK: {user_id} confirmation_sent={confirmation_sent}")
         except Exception as e1:
-            _log(f"create_user failed: {type(e1).__name__}: {e1}")
-            # Method 2: sign_up (anon) fallback
+            _log(f"sign_up failed: {type(e1).__name__}: {e1}")
+            # Method 2: create_user (service_role) - auto-confirm, no email
             try:
-                _log("Trying sign_up (anon) fallback...")
-                result = supabase_auth.auth.sign_up({
+                _log("Trying create_user fallback...")
+                result = supabase.auth.admin.create_user({
                     "email": payload.email.strip().lower(),
                     "password": payload.password,
-                    "options": {"data": {"full_name": payload.full_name}},
+                    "email_confirm": True,
+                    "user_metadata": {"full_name": payload.full_name},
                 })
                 if result and getattr(result, "user", None):
                     user_id = str(result.user.id)
                     user_email = getattr(result.user, "email", None) or payload.email
-                    _log(f"sign_up OK: {user_id}")
+                    _log(f"create_user OK: {user_id}")
             except Exception as e2:
-                _log(f"sign_up failed: {type(e2).__name__}: {e2}")
+                _log(f"create_user failed: {type(e2).__name__}: {e2}")
                 err = str(e2).lower()
                 if "already" in err or "exists" in err or "registered" in err:
                     raise HTTPException(400, "This email is already registered. Please log in.")
-                # Return actual Supabase error so user can fix
                 raise HTTPException(400, f"Supabase error: {str(e2)[:200]}")
 
         if not user_id:
@@ -358,18 +371,23 @@ def _do_register(payload: RegisterRequest):
                 if role_id:
                     supabase.table("user_profiles").insert({
                         "id": user_id, "full_name": payload.full_name,
-                        "role_id": role_id, "is_active": True
+                        "role_id": role_id, "is_active": True,
+                        "email": (user_email or payload.email or "").strip()
                     }).execute()
                     _log("Created user_profiles")
         except Exception as pe:
             _log(f"Profile backup: {pe}")
 
         _log(f"REGISTER SUCCESS: {user_id}")
+        if confirmation_sent:
+            msg = "Registration successful. Check your email for a confirmation link. Click it to activate your account, then log in."
+        else:
+            msg = "Registration successful. You can log in now."
         return {
             "user_id": user_id,
             "email": str(user_email or payload.email),
-            "confirmation_sent": False,
-            "message": "Registration successful. You can log in now."
+            "confirmation_sent": confirmation_sent,
+            "message": msg,
         }
 
     except HTTPException as he:
@@ -526,6 +544,28 @@ def logout():
 def confirm_email(token: str, type: str = "signup"):
     """Handle email confirmation callback from Supabase."""
     return {"success": True, "message": "Email confirmed successfully"}
+
+
+class ResendConfirmRequest(BaseModel):
+    email: str
+
+
+@api_router.post("/auth/resend-confirmation")
+def resend_confirmation(payload: ResendConfirmRequest):
+    """Resend confirmation email to user who didn't receive it. Uses Supabase auth.resend."""
+    email = payload.email.strip().lower()
+    if not email:
+        raise HTTPException(400, "Email is required")
+    try:
+        supabase_auth.auth.resend({"type": "signup", "email": email})
+        return {"success": True, "message": "Confirmation email resent. Check your inbox (and spam folder)."}
+    except Exception as e:
+        err = str(e).lower()
+        if "already" in err or "confirmed" in err:
+            return {"success": True, "message": "Your email is already confirmed. You can log in."}
+        if "rate" in err or "limit" in err:
+            raise HTTPException(429, "Please wait a few minutes before requesting another email.")
+        raise HTTPException(400, f"Could not resend: {str(e)[:150]}")
 
 
 # ---------- Tickets ----------
@@ -1529,6 +1569,767 @@ def update_staging(deployment_id: str, payload: dict = None, auth: dict = Depend
         raise HTTPException(status_code=400, detail="Request body required")
     r = supabase.table("staging_deployments").update(payload).eq("id", deployment_id).execute()
     return r.data[0] if r.data else {}
+
+# ---------------------------------------------------------------------------
+# CHECKLIST MODULE (Task -> Checklist)
+# ---------------------------------------------------------------------------
+DEPARTMENTS = [
+    "Customer Support & Success",
+    "Marketing",
+    "Accounts & Admin",
+    "Internal Development",
+]
+FREQUENCY_LABELS = {"D": "Daily", "W": "Weekly", "M": "Monthly", "Q": "Quarterly", "F": "Half-yearly", "Y": "Yearly"}
+
+
+class CreateChecklistTaskRequest(BaseModel):
+    task_name: str
+    department: str
+    frequency: str  # D, W, M, Q, F, Y
+    start_date: str  # YYYY-MM-DD
+
+
+def _get_holidays_for_year(year: int) -> set:
+    """Return set of holiday dates for the year from checklist_holidays table."""
+    try:
+        r = supabase.table("checklist_holidays").select("holiday_date").eq("year", year).execute()
+        if not r.data:
+            return set()
+        return {date.fromisoformat(d["holiday_date"]) if isinstance(d["holiday_date"], str) else d["holiday_date"] for d in r.data}
+    except Exception:
+        return set()
+
+
+def _get_checklist_occurrence_dates(task: dict, year: int) -> list:
+    """Get occurrence dates for a checklist task in given year."""
+    from app.checklist_utils import get_occurrence_dates
+    start = task.get("start_date")
+    if isinstance(start, str):
+        start = date.fromisoformat(start)
+    freq = task.get("frequency", "D")
+    holidays = _get_holidays_for_year(year)
+    is_holiday = lambda d: d in holidays
+    return get_occurrence_dates(start, freq, year, is_holiday)
+
+
+@api_router.get("/checklist/departments")
+def list_checklist_departments(auth: dict = Depends(get_current_user)):
+    """List departments for checklist dropdown."""
+    return {"departments": DEPARTMENTS}
+
+
+@api_router.get("/checklist/holidays")
+def list_checklist_holidays(year: int = Query(...), auth: dict = Depends(get_current_user)):
+    """List holidays for a year."""
+    try:
+        r = supabase.table("checklist_holidays").select("holiday_date, holiday_name").eq("year", year).order("holiday_date").execute()
+        return {"holidays": r.data or []}
+    except Exception as e:
+        return {"holidays": []}
+
+
+class HolidayUploadItem(BaseModel):
+    holiday_date: str  # YYYY-MM-DD
+    holiday_name: str
+
+
+class HolidayUploadRequest(BaseModel):
+    year: int
+    holidays: list[HolidayUploadItem]
+
+
+@api_router.post("/checklist/holidays/upload")
+def upload_holiday_list(payload: HolidayUploadRequest, auth: dict = Depends(require_roles(["admin", "master_admin"]))):
+    """Upload holiday list for a year. Available from Dec 15 for next year."""
+    today = date.today()
+    if today.month < 12 or today.day < 15:
+        raise HTTPException(400, "Holiday list upload available from December 15th for the next year.")
+    if payload.year <= today.year:
+        raise HTTPException(400, "Can only upload holiday list for next year (after Dec 15).")
+    rows = [{"holiday_date": h.holiday_date, "holiday_name": h.holiday_name, "year": payload.year} for h in payload.holidays]
+    try:
+        supabase.table("checklist_holidays").upsert(rows, on_conflict="holiday_date,year").execute()
+        return {"success": True, "count": len(rows)}
+    except Exception as e:
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.post("/checklist/tasks")
+def create_checklist_task(payload: CreateChecklistTaskRequest, auth: dict = Depends(get_current_user)):
+    """Create a checklist task. Doer is the logged-in user."""
+    if payload.department not in DEPARTMENTS:
+        raise HTTPException(400, f"Invalid department. Use one of: {DEPARTMENTS}")
+    if payload.frequency not in ("D", "W", "M", "Q", "F", "Y"):
+        raise HTTPException(400, "Frequency must be D, W, M, Q, F or Y")
+    try:
+        start_d = date.fromisoformat(payload.start_date)
+    except ValueError:
+        raise HTTPException(400, "Invalid start_date. Use YYYY-MM-DD")
+    data = {
+        "task_name": payload.task_name,
+        "doer_id": auth["id"],
+        "department": payload.department,
+        "frequency": payload.frequency,
+        "start_date": payload.start_date,
+        "created_by": auth["id"],
+    }
+    try:
+        r = supabase.table("checklist_tasks").insert(data).execute()
+        return r.data[0] if r.data else {}
+    except Exception as e:
+        _log(f"checklist create_task error: {e}")
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            raise HTTPException(503, "Checklist tables not set up. Run database/CHECKLIST_MODULE.sql in Supabase SQL Editor.")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/checklist/tasks")
+def list_checklist_tasks(
+    user_id: str | None = Query(None),
+    auth: dict = Depends(get_current_user),
+    current: dict = Depends(get_current_user_with_role),
+):
+    """List checklist tasks. Regular users see only their own. Admin/Master Admin can filter by user_id or see all."""
+    try:
+        role = current.get("role", "user")
+        if role not in ("admin", "master_admin"):
+            user_id = auth["id"]
+        q = supabase.table("checklist_tasks").select("*")
+        if user_id:
+            q = q.eq("doer_id", user_id)
+        elif role not in ("admin", "master_admin"):
+            q = q.eq("doer_id", auth["id"])
+        r = q.order("created_at", desc=True).execute()
+        tasks = r.data or []
+        doer_ids = list({t["doer_id"] for t in tasks if t.get("doer_id")})
+        doer_map = {}
+        if doer_ids:
+            try:
+                pr = supabase.table("user_profiles").select("id, full_name").in_("id", doer_ids).execute()
+                doer_map = {p["id"]: p.get("full_name", "") for p in (pr.data or [])}
+            except Exception:
+                pass
+        for t in tasks:
+            t["doer_name"] = doer_map.get(t.get("doer_id"), "")
+        return {"tasks": tasks}
+    except Exception as e:
+        _log(f"checklist/tasks error: {e}")
+        return {"tasks": []}
+
+
+@api_router.get("/checklist/occurrences")
+def list_checklist_occurrences(
+    filter_type: str = Query("today", alias="filter"),
+    user_id: str | None = Query(None),
+    auth: dict = Depends(get_current_user),
+    current: dict = Depends(get_current_user_with_role),
+):
+    """
+    Get checklist occurrences. filter: today|completed|overdue|upcoming.
+    today = only today's tasks; completed = all completed; overdue = past incomplete; upcoming = future.
+    Regular users see only their tasks. Admin can filter by user_id.
+    """
+    try:
+        from app.checklist_utils import get_occurrence_dates
+        role = current.get("role", "user")
+        if role not in ("admin", "master_admin"):
+            user_id = auth["id"]
+        q = supabase.table("checklist_tasks").select("*")
+        if user_id:
+            q = q.eq("doer_id", user_id)
+        elif role not in ("admin", "master_admin"):
+            q = q.eq("doer_id", auth["id"])
+        r = q.execute()
+        tasks = r.data or []
+        doer_map = {}
+        try:
+            prof = supabase.table("user_profiles").select("id, full_name").execute()
+            doer_map = {p["id"]: p.get("full_name", "") for p in (prof.data or [])}
+        except Exception:
+            pass
+        comp = {}
+        try:
+            cr = supabase.table("checklist_completions").select("task_id, occurrence_date, completed_at").execute()
+            for row in cr.data or []:
+                comp[(row["task_id"], row["occurrence_date"])] = row.get("completed_at")
+        except Exception:
+            pass
+        today = date.today()
+        occurrences = []
+        for task in tasks:
+            t_id = task["id"]
+            start = task.get("start_date")
+            if isinstance(start, str):
+                start = date.fromisoformat(start)
+            freq = task.get("frequency", "D")
+            for yr in [today.year - 1, today.year, today.year + 1]:
+                holidays = _get_holidays_for_year(yr)
+                is_holiday = lambda d, h=holidays: d in h
+                dates = get_occurrence_dates(start, freq, yr, is_holiday)
+                for d in dates:
+                    if (today - timedelta(days=60)).year <= yr <= (today + timedelta(days=365)).year:
+                        occurrences.append({
+                            "task_id": t_id,
+                            "task_name": task.get("task_name", ""),
+                            "doer_id": task.get("doer_id"),
+                            "doer_name": doer_map.get(task.get("doer_id"), ""),
+                            "department": task.get("department", ""),
+                            "occurrence_date": d.isoformat(),
+                            "completed_at": comp.get((t_id, d.isoformat())),
+                        })
+        occurrences.sort(key=lambda x: (x["occurrence_date"], x["task_name"]))
+        today_str = today.isoformat()
+        if filter_type == "today":
+            occurrences = [o for o in occurrences if o["occurrence_date"] == today_str]
+        elif filter_type == "completed":
+            occurrences = [o for o in occurrences if o.get("completed_at")]
+        elif filter_type == "overdue":
+            occurrences = [o for o in occurrences if not o.get("completed_at") and o["occurrence_date"] < today_str]
+        elif filter_type == "upcoming":
+            occurrences = [o for o in occurrences if not o.get("completed_at") and o["occurrence_date"] > today_str]
+        return {"occurrences": occurrences}
+    except Exception as e:
+        _log(f"checklist/occurrences error: {e}")
+        return {"occurrences": []}
+
+
+class CompleteChecklistRequest(BaseModel):
+    occurrence_date: str  # YYYY-MM-DD
+
+
+@api_router.post("/checklist/tasks/{task_id}/complete")
+def complete_checklist_task(task_id: str, payload: CompleteChecklistRequest, auth: dict = Depends(get_current_user)):
+    """Mark a task as completed for the given occurrence date (Submit)."""
+    try:
+        task = supabase.table("checklist_tasks").select("doer_id").eq("id", task_id).single().execute()
+        if not task.data:
+            raise HTTPException(404, "Task not found")
+        if str(task.data["doer_id"]) != str(auth["id"]):
+            raise HTTPException(403, "Only the assigned doer can complete this task")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(404, "Task not found")
+    data = {
+        "task_id": task_id,
+        "occurrence_date": payload.occurrence_date,
+        "completed_by": auth["id"],
+    }
+    try:
+        supabase.table("checklist_completions").upsert(data, on_conflict="task_id,occurrence_date").execute()
+        return {"success": True, "message": "Task marked as completed"}
+    except Exception as e:
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/checklist/users")
+def list_checklist_users(auth: dict = Depends(get_current_user), current: dict = Depends(get_current_user_with_role)):
+    """List users for admin name filter (Master Admin & Admin only)."""
+    if current.get("role") not in ("admin", "master_admin"):
+        return {"users": []}
+    try:
+        r = supabase.table("user_profiles").select("id, full_name").eq("is_active", True).order("full_name").execute()
+        return {"users": r.data or []}
+    except Exception:
+        return {"users": []}
+
+
+# ---------------------------------------------------------------------------
+# Delegation Tasks (Task module – separate from Support)
+# ---------------------------------------------------------------------------
+class CreateDelegationTaskRequest(BaseModel):
+    title: str
+    assignee_id: str
+    due_date: str
+
+
+@api_router.get("/delegation/users")
+def list_delegation_users(auth: dict = Depends(get_current_user), current: dict = Depends(get_current_user_with_role)):
+    """List users for assignee dropdown. Level 1 & 2 (admin, approver) only."""
+    if current.get("role") not in ("admin", "master_admin", "approver"):
+        return {"users": []}
+    try:
+        r = supabase.table("user_profiles").select("id, full_name").eq("is_active", True).order("full_name").execute()
+        return {"users": r.data or []}
+    except Exception:
+        return {"users": []}
+
+
+@api_router.get("/delegation/tasks")
+def list_delegation_tasks(
+    status: str | None = Query(None),
+    assignee_id: str | None = Query(None),
+    auth: dict = Depends(get_current_user),
+    current: dict = Depends(get_current_user_with_role),
+):
+    """List delegation tasks. Admin sees all; user sees own assigned."""
+    try:
+        q = supabase.table("delegation_tasks").select("*")
+        role = current.get("role", "user")
+        if role not in ("admin", "master_admin"):
+            q = q.eq("assignee_id", auth["id"])
+        elif assignee_id:
+            q = q.eq("assignee_id", assignee_id)
+        if status:
+            q = q.eq("status", status)
+        r = q.order("due_date", desc=False).execute()
+        tasks = r.data or []
+        assignee_ids = {t["assignee_id"] for t in tasks if t.get("assignee_id")}
+        assignee_map = {}
+        if assignee_ids:
+            try:
+                pr = supabase.table("user_profiles").select("id, full_name").in_("id", list(assignee_ids)).execute()
+                assignee_map = {p["id"]: p.get("full_name", "") for p in (pr.data or [])}
+            except Exception:
+                pass
+        for t in tasks:
+            t["assignee_name"] = assignee_map.get(t.get("assignee_id"), "")
+        return {"tasks": tasks}
+    except Exception as e:
+        _log(f"delegation/tasks error: {e}")
+        return {"tasks": []}
+
+
+@api_router.post("/delegation/tasks")
+def create_delegation_task(payload: CreateDelegationTaskRequest, auth: dict = Depends(get_current_user)):
+    """Create a delegation task."""
+    try:
+        date.fromisoformat(payload.due_date)
+    except ValueError:
+        raise HTTPException(400, "Invalid due_date. Use YYYY-MM-DD")
+    data = {
+        "title": payload.title,
+        "assignee_id": payload.assignee_id,
+        "due_date": payload.due_date,
+        "created_by": auth["id"],
+    }
+    try:
+        r = supabase.table("delegation_tasks").insert(data).execute()
+        return r.data[0] if r.data else {}
+    except Exception as e:
+        _log(f"delegation create error: {e}")
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            raise HTTPException(503, "Delegation table not set up. Run database/DELEGATION_AND_PENDING_REMINDER.sql in Supabase.")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.put("/delegation/tasks/{task_id}")
+def update_delegation_task(task_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Update delegation task (e.g. status: pending|in_progress|completed|cancelled)."""
+    allowed = {"status", "title", "due_date", "assignee_id"}
+    data = {k: v for k, v in payload.items() if k in allowed and v is not None}
+    if not data:
+        raise HTTPException(400, "No valid fields to update")
+    try:
+        r = supabase.table("delegation_tasks").update(data).eq("id", task_id).execute()
+        return r.data[0] if r.data else {}
+    except Exception as e:
+        raise HTTPException(400, str(e)[:200])
+
+
+async def _send_checklist_reminder_email(to_email: str, task_names: list[str], doer_name: str) -> bool:
+    """Send reminder email via utils/email.py (async SMTP with HTML). Returns True if sent."""
+    to_email = (to_email or "").strip()
+    if not to_email:
+        _log("Checklist reminder: no recipient email, skip send")
+        return False
+
+    from app.utils.email import send_email
+
+    task_items = "".join(f"<li>{n}</li>" for n in task_names)
+    html_content = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+  <h3>You have pending checklist tasks</h3>
+  <p>Hi {doer_name or "User"},</p>
+  <p>You have <strong>{len(task_names)}</strong> task(s) due today:</p>
+  <ul>
+    {task_items}
+  </ul>
+  <p>Please log in to complete them.</p>
+</body>
+</html>
+"""
+    plain_fallback = f"You have {len(task_names)} task(s) due today:\n\n" + "\n".join(f"  - {n}" for n in task_names) + "\n\nPlease log in to complete them."
+
+    ok = await send_email(to_email=to_email, subject="Checklist: Tasks due today", html_content=html_content.strip(), plain_fallback=plain_fallback)
+    if ok:
+        _log(f"Checklist reminder sent to {to_email}")
+    return ok
+
+
+@api_router.api_route("/checklist/send-daily-reminders", methods=["GET", "POST"])
+async def send_checklist_daily_reminders(
+    request: Request,
+    auth: dict | None = Depends(get_current_user_optional),
+):
+    """
+    Send one reminder email per user when assigned date = current date.
+    POST or GET. Auth: X-Cron-Secret header, ?secret= query, or admin login.
+    """
+    cron_secret = (os.getenv("CHECKLIST_CRON_SECRET") or "").strip()
+    x_cron = (
+        request.headers.get("X-Cron-Secret") or
+        request.headers.get("x-cron-secret") or
+        request.query_params.get("secret") or
+        ""
+    ).strip()
+    if cron_secret and x_cron and x_cron == cron_secret:
+        pass
+    elif auth:
+        role = _get_role_from_profile(auth["id"])
+        if role not in ("admin", "master_admin"):
+            raise HTTPException(403, "Admin only")
+    else:
+        raise HTTPException(401, "Set CHECKLIST_CRON_SECRET header or ?secret= for cron, or log in as admin")
+    from app.checklist_utils import get_occurrence_dates
+    today = date.today()
+    q = supabase.table("checklist_tasks").select("*")
+    r = q.execute()
+    tasks = r.data or []
+    doer_ids = list({str(t.get("doer_id", "")) for t in tasks if t.get("doer_id")})
+    user_map = {}
+    if doer_ids:
+        try:
+            profiles_r = supabase.table("user_profiles").select("id, email, full_name").in_("id", doer_ids).execute()
+            for p in (profiles_r.data or []):
+                uid = str(p.get("id", ""))
+                email_val = (p.get("email") or "").strip()
+                user_map[uid] = {"email": email_val, "name": p.get("full_name") or "User"}
+        except Exception as e:
+            _log(f"checklist reminder: user_profiles failed: {e}")
+    try:
+        sent_r = supabase.table("checklist_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
+        already_sent = {str(row["user_id"]) for row in (sent_r.data or [])}
+    except Exception:
+        already_sent = set()
+    comp = {}
+    try:
+        cr = supabase.table("checklist_completions").select("task_id, occurrence_date").execute()
+        for row in cr.data or []:
+            od = row.get("occurrence_date")
+            if isinstance(od, str) and "T" in od:
+                od = od[:10]
+            comp[(str(row["task_id"]), od or "")] = True
+    except Exception:
+        pass
+    by_user: dict[str, list[str]] = {}
+    for task in tasks:
+        t_id = task["id"]
+        start = task.get("start_date")
+        if isinstance(start, str):
+            start = date.fromisoformat(start)
+        doer_id = str(task.get("doer_id", ""))
+        if not doer_id or doer_id in already_sent:
+            continue
+        freq = task.get("frequency", "D")
+        holidays = _get_holidays_for_year(today.year)
+        is_holiday = lambda d, h=holidays: d in h
+        dates = get_occurrence_dates(start, freq, today.year, is_holiday)
+        for d in dates:
+            if d == today:
+                key = (str(t_id), d.isoformat())
+                if not comp.get(key):
+                    by_user.setdefault(doer_id, []).append(task.get("task_name", ""))
+                break
+    sent_count = 0
+    for uid, names in by_user.items():
+        if not names or uid in already_sent:
+            continue
+        u = user_map.get(uid, {})
+        email = (u.get("email") or "").strip()
+        name = u.get("name", "") or "User"
+        if email and await _send_checklist_reminder_email(email, names, name):
+            try:
+                supabase.table("checklist_reminder_sent").insert({
+                    "user_id": uid,
+                    "reminder_date": today.isoformat(),
+                }).execute()
+                sent_count += 1
+            except Exception:
+                pass
+    msg = f"Sent {sent_count} reminder(s) for {today.isoformat()}"
+    debug = request.query_params.get("debug")
+    if debug and sent_count == 0:
+        no_email = [uid for uid in by_user if not (user_map.get(uid) or {}).get("email")]
+        msg += f" | tasks={len(tasks)} by_user={len(by_user)} already_sent={len(already_sent)}"
+        if no_email:
+            msg += f" no_email={len(no_email)}"
+    return {"sent": sent_count, "message": msg}
+
+
+# ---------------------------------------------------------------------------
+# Pending Reminder Digest (Checklist & Delegation + Support Chores&Bug & Feature by stage)
+# Sent to Level 1 & 2 only (admin, master_admin, approver)
+# ---------------------------------------------------------------------------
+
+def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) -> bool:
+    """Send pending digest email. Uses SMTP or Resend. Returns True if sent."""
+    subject = "Pending Task Reminder – Checklist, Delegation & Support"
+    to_email = (to_email or "").strip()
+    if not to_email:
+        _log("Pending digest: no recipient email, skip send")
+        return False
+
+    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
+    smtp_user = (os.getenv("SMTP_USER") or "").strip()
+    smtp_pass = (os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_PASS") or "").strip()
+    smtp_from = (os.getenv("SMTP_FROM_EMAIL") or os.getenv("RESEND_FROM_EMAIL") or "").strip()
+    smtp_port = int(os.getenv("SMTP_PORT") or "587")
+
+    if smtp_host and smtp_user and smtp_pass and smtp_from:
+        try:
+            import smtplib
+            from email.mime.text import MIMEText
+            from email.mime.multipart import MIMEMultipart
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = smtp_from
+            msg["To"] = to_email
+            smtp_stream = (os.getenv("SMTP_POSTMARK_STREAM") or "").strip()
+            if smtp_stream:
+                msg["X-PM-Message-Stream"] = smtp_stream
+            msg.attach(MIMEText(body, "plain"))
+            if smtp_port == 465:
+                with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
+                    server.login(smtp_user, smtp_pass)
+                    server.sendmail(smtp_from, to_email, msg.as_string())
+            else:
+                with smtplib.SMTP(smtp_host, smtp_port) as server:
+                    server.starttls()
+                    server.login(smtp_user, smtp_pass)
+                    server.sendmail(smtp_from, to_email, msg.as_string())
+            _log(f"Pending digest sent to {to_email} (SMTP)")
+            return True
+        except Exception as e:
+            _log(f"Pending digest SMTP error: {e}")
+            return False
+
+    api_key = (os.getenv("RESEND_API_KEY") or "").strip()
+    from_email = (os.getenv("RESEND_FROM_EMAIL") or "noreply@resend.dev").strip()
+    if not api_key:
+        _log("Pending digest: no SMTP or RESEND_API_KEY configured, skip send")
+        return False
+    try:
+        resp = httpx.post(
+            "https://api.resend.com/emails",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"from": from_email, "to": [to_email], "subject": subject, "text": body},
+            timeout=15.0,
+        )
+        if resp.status_code in (200, 201):
+            _log(f"Pending digest sent to {to_email} (Resend)")
+            return True
+        _log(f"Resend API error: {resp.status_code} {resp.text[:200]}")
+        return False
+    except Exception as e:
+        _log(f"Pending digest Resend error: {e}")
+        return False
+
+
+def _get_level1_level2_user_ids() -> list[str]:
+    """Return user IDs with role admin, master_admin, or approver (Level 1 & 2)."""
+    try:
+        admin_roles = supabase.table("roles").select("id").in_("name", ["admin", "master_admin", "approver"]).execute()
+        role_ids = [r["id"] for r in (admin_roles.data or [])]
+        if not role_ids:
+            return []
+        profiles = supabase.table("user_profiles").select("id").in_("role_id", role_ids).eq("is_active", True).execute()
+        return [str(p["id"]) for p in (profiles.data or [])]
+    except Exception as e:
+        _log(f"Pending digest: get Level 1&2 users error: {e}")
+        return []
+
+
+@api_router.api_route("/reminders/send-pending-digest", methods=["GET", "POST"])
+async def send_pending_digest(
+    request: Request,
+    auth: dict | None = Depends(get_current_user_optional),
+):
+    """
+    Send pending reminder digest to Level 1 & 2 (admin, master_admin, approver).
+    Content: Checklist & Delegation pending + Support Chores&Bug & Feature by stage (assignee per ticket).
+    Auth: X-Cron-Secret header, ?secret= query, or admin login.
+    """
+    cron_secret = (os.getenv("CHECKLIST_CRON_SECRET") or os.getenv("PENDING_REMINDER_CRON_SECRET") or "").strip()
+    x_cron = (
+        request.headers.get("X-Cron-Secret") or
+        request.headers.get("x-cron-secret") or
+        request.query_params.get("secret") or
+        ""
+    ).strip()
+    if cron_secret and x_cron and x_cron == cron_secret:
+        pass
+    elif auth:
+        role = _get_role_from_profile(auth["id"])
+        if role not in ("admin", "master_admin"):
+            raise HTTPException(403, "Admin only (or use cron secret)")
+    else:
+        raise HTTPException(401, "Set PENDING_REMINDER_CRON_SECRET or CHECKLIST_CRON_SECRET header/?secret=, or log in as admin")
+
+    from app.checklist_utils import get_occurrence_dates
+    from app.reminder_utils import get_chores_bugs_stage, get_staging_feature_stage, is_chores_bug_pending, is_feature_pending
+
+    today = date.today()
+    level12_ids = _get_level1_level2_user_ids()
+    if not level12_ids:
+        return {"sent": 0, "message": "No Level 1 & 2 users found"}
+
+    try:
+        already_sent_r = supabase.table("pending_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
+        already_sent = {str(r["user_id"]) for r in (already_sent_r.data or [])}
+    except Exception:
+        already_sent = set()
+
+    try:
+        users_r = supabase.table("users_view").select("id, email, full_name").execute()
+        user_map = {str(u["id"]): {"email": (u.get("email") or "").strip(), "name": u.get("full_name") or "User"} for u in (users_r.data or [])}
+    except Exception:
+        user_map = {}
+
+    def assignee_name(aid) -> str:
+        if not aid:
+            return "-"
+        return user_map.get(str(aid), {}).get("name", str(aid)[:8])
+
+    # --- 1. Checklist pending ---
+    holidays = _get_holidays_for_year(today.year)
+    is_holiday = lambda d, h=holidays: d in h
+    checklist_lines = []
+    try:
+        tasks_r = supabase.table("checklist_tasks").select("*").execute()
+        comp_r = supabase.table("checklist_completions").select("task_id, occurrence_date").execute()
+        comp = {}
+        for row in comp_r.data or []:
+            od = row.get("occurrence_date")
+            if isinstance(od, str) and "T" in od:
+                od = od[:10]
+            comp[(str(row["task_id"]), od or "")] = True
+        for task in tasks_r.data or []:
+            start = task.get("start_date")
+            if isinstance(start, str):
+                start = date.fromisoformat(start)
+            freq = task.get("frequency", "D")
+            dates = get_occurrence_dates(start, freq, today.year, is_holiday)
+            for d in dates:
+                if d == today:
+                    key = (str(task["id"]), d.isoformat())
+                    if not comp.get(key):
+                        doer = assignee_name(task.get("doer_id"))
+                        checklist_lines.append(f"  - {task.get('task_name')} (Doer: {doer})")
+                    break
+    except Exception as e:
+        _log(f"Pending digest checklist: {e}")
+        checklist_lines = ["  (Error loading)"]
+    checklist_section = "\n".join(checklist_lines) if checklist_lines else "  (None)"
+
+    # --- 2. Delegation pending ---
+    delegation_lines = []
+    try:
+        del_r = supabase.table("delegation_tasks").select("id, title, assignee_id, due_date").in_("status", ["pending", "in_progress"]).lte("due_date", today.isoformat()).execute()
+        for t in del_r.data or []:
+            assignee = assignee_name(t.get("assignee_id"))
+            delegation_lines.append(f"  - {t.get('title')} (Assignee: {assignee}, Due: {t.get('due_date')})")
+    except Exception:
+        delegation_lines = ["  (Table not created or error)"]
+    delegation_section = "\n".join(delegation_lines) if delegation_lines else "  (None)"
+
+    # --- 3. Support Chores & Bug by stage ---
+    chores_bug_lines = []
+    try:
+        cb_r = supabase.table("tickets").select("*").in_("type", ["chore", "bug"]).is_("quality_solution", "null").execute()
+        tickets_cb = cb_r.data or []
+        staged: dict[str, list] = {}
+        for t in tickets_cb:
+            if not is_chores_bug_pending(t):
+                continue
+            s = get_chores_bugs_stage(t)
+            label = s["stage_label"]
+            staged.setdefault(label, []).append(t)
+        for label in sorted(staged.keys(), key=lambda x: (int(x.split()[1]) if x.split()[1].isdigit() else 0, x)):
+            for t in staged[label]:
+                ref = t.get("reference_no") or t.get("id", "")[:8]
+                title = (t.get("title") or "")[:50]
+                assignee = assignee_name(t.get("assignee_id"))
+                chores_bug_lines.append(f"  [{label}] {ref} {title} (Assignee: {assignee})")
+    except Exception as e:
+        _log(f"Pending digest chores&bug: {e}")
+        chores_bug_lines = ["  (Error loading)"]
+    chores_bug_section = "\n".join(chores_bug_lines) if chores_bug_lines else "  (None)"
+
+    # --- 4. Support Feature by stage ---
+    feature_lines = []
+    try:
+        feat_r = supabase.table("tickets").select("*").eq("type", "feature").execute()
+        tickets_feat = feat_r.data or []
+        staged_f: dict[str, list] = {}
+        for t in tickets_feat:
+            if not is_feature_pending(t):
+                continue
+            s = get_staging_feature_stage(t)
+            label = s["stage_label"]
+            staged_f.setdefault(label, []).append(t)
+        for label in sorted(staged_f.keys(), key=lambda x: ("0" if "Approval" in x else "1" + x)):
+            for t in staged_f[label]:
+                ref = t.get("reference_no") or t.get("id", "")[:8]
+                title = (t.get("title") or "")[:50]
+                assignee = assignee_name(t.get("assignee_id"))
+                feature_lines.append(f"  [{label}] {ref} {title} (Assignee: {assignee})")
+    except Exception as e:
+        _log(f"Pending digest feature: {e}")
+        feature_lines = ["  (Error loading)"]
+    feature_section = "\n".join(feature_lines) if feature_lines else "  (None)"
+
+    body = f"""Pending Task Reminder – {today.isoformat()}
+
+This digest is sent to Level 1 & 2 (Admin, Approver) only.
+
+---
+1. CHECKLIST & DELEGATION – Pending Tasks
+---
+Checklist (due today, not completed):
+{checklist_section}
+
+Delegation (pending, due today or overdue):
+{delegation_section}
+
+---
+2. SUPPORT – Chores & Bug (by Stage, Assignee)
+---
+{chores_bug_section}
+
+---
+3. SUPPORT – Feature (by Stage, Assignee)
+---
+{feature_section}
+
+---
+Please log in to review and take action.
+"""
+
+    sent_count = 0
+    for uid in level12_ids:
+        if uid in already_sent:
+            continue
+        u = user_map.get(uid, {})
+        email = u.get("email", "").strip()
+        name = u.get("name", "User")
+        if email and _send_pending_digest_email(email, body, name):
+            try:
+                supabase.table("pending_reminder_sent").insert({
+                    "user_id": uid,
+                    "reminder_date": today.isoformat(),
+                }).execute()
+                sent_count += 1
+            except Exception:
+                pass
+
+    return {"sent": sent_count, "message": f"Sent pending digest to {sent_count} Level 1 & 2 user(s) for {today.isoformat()}"}
+
 
 # ---------------------------------------------------------------------------
 # Attachment upload (ticket attachments in Supabase Storage)

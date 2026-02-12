@@ -14,6 +14,8 @@ export const Register = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(false)
+  const [registeredEmail, setRegisteredEmail] = useState("")
+  const [resendLoading, setResendLoading] = useState(false)
   const navigate = useNavigate()
 
   // Redirect after success
@@ -59,6 +61,7 @@ export const Register = () => {
       // Check if we have data
       if (response?.data) {
         console.log("✅ Registration successful:", response.data)
+        setRegisteredEmail(response.data.email || values.email)
         message.success(
           response.data.message || "Registration successful! Please check your email."
         )
@@ -90,12 +93,35 @@ export const Register = () => {
       <div style={pageStyle}>
         <Card style={{ width: 420, textAlign: "center" }}>
           <Title level={3}>Registration Successful 🎉</Title>
-          <Text type="success">
-            Confirmation email sent. Please check your inbox.
+          <Text type="success" style={{ display: "block" }}>
+            Check your email for a confirmation link.
+          </Text>
+          <Text type="secondary" style={{ display: "block", marginTop: 8 }}>
+            Click the link to activate your account, then log in.
           </Text>
           <Text type="secondary" style={{ display: "block", marginTop: 16 }}>
             Redirecting to login in 5 seconds…
           </Text>
+          {registeredEmail && (
+            <Button
+              type="link"
+              loading={resendLoading}
+              style={{ marginTop: 16 }}
+              onClick={async () => {
+                setResendLoading(true)
+                try {
+                  const res = await authApi.resendConfirmation(registeredEmail)
+                  message.success(res?.message || "Email resent. Check inbox and spam.")
+                } catch (e: any) {
+                  message.error(e.response?.data?.detail || "Failed to resend.")
+                } finally {
+                  setResendLoading(false)
+                }
+              }}
+            >
+              Didn't receive the email? Resend
+            </Button>
+          )}
         </Card>
       </div>
     )

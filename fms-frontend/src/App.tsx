@@ -16,6 +16,8 @@ import { TicketList } from "./pages/Tickets/TicketList"
 import { TicketDetail } from "./pages/Tickets/TicketDetail"
 import { SolutionList } from "./pages/Solutions/SolutionList"
 import { StagingList } from "./pages/Staging/StagingList"
+import { ChecklistPage } from "./pages/Task/ChecklistPage"
+import { DelegationPage } from "./pages/Task/DelegationPage"
 import { UserList } from "./pages/Users/UserList"
 import { SettingsPage } from "./pages/Settings/SettingsPage"
 import { ApprovalConfirmPage } from "./pages/Approval/ApprovalConfirmPage"
@@ -31,6 +33,8 @@ function AppTitle() {
       [ROUTES.DASHBOARD]: "Dashboard",
       [ROUTES.TICKETS]: "Tickets",
       [ROUTES.STAGING]: "Staging",
+      [ROUTES.CHECKLIST]: "Checklist",
+      [ROUTES.DELEGATION]: "Delegation",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
     }
@@ -131,6 +135,28 @@ function App() {
                 <ProtectedRoute>
                   <AppLayout>
                     <StagingList />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path={ROUTES.CHECKLIST}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ChecklistPage />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path={ROUTES.DELEGATION}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <DelegationPage />
                   </AppLayout>
                 </ProtectedRoute>
               }
