@@ -1,6 +1,6 @@
 # Step-by-step: Push changes to GitHub and go live
 
-Use this when you have local fixes (e.g. Master Admin user list fix) and want to push and deploy.
+Use this when you have local fixes and want to push and deploy.
 
 ---
 

@@ -23,3 +23,18 @@ async def get_current_user(
         return {"id": str(user.user.id), "email": user.user.email or ""}
     except Exception:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+
+async def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> dict | None:
+    """Return current user if token present, else None."""
+    if not credentials:
+        return None
+    try:
+        user = supabase.auth.get_user(credentials.credentials)
+        if not user or not user.user:
+            return None
+        return {"id": str(user.user.id), "email": user.user.email or ""}
+    except Exception:
+        return None
