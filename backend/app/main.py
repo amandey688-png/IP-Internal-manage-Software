@@ -2002,6 +2002,20 @@ async def send_checklist_daily_reminders(
                 user_map[uid] = {"email": email_val, "name": p.get("full_name") or "User"}
         except Exception as e:
             _log(f"checklist reminder: user_profiles failed: {e}")
+        need_auth = any(uid not in user_map or not (user_map.get(uid) or {}).get("email") for uid in doer_ids)
+        if need_auth:
+            try:
+                auth_r = supabase.auth.admin.list_users(per_page=1000)
+                auth_users = getattr(auth_r, "users", []) or []
+                prof_r = supabase.table("user_profiles").select("id, full_name").in_("id", doer_ids).execute()
+                profs = {str(x["id"]): x.get("full_name") or "User" for x in (prof_r.data or [])}
+                for u in auth_users:
+                    uid = str(getattr(u, "id", "") or (u.get("id") if isinstance(u, dict) else ""))
+                    em = (getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else None) or "").strip()
+                    if uid in doer_ids and (uid not in user_map or not (user_map.get(uid) or {}).get("email")):
+                        user_map[uid] = {"email": em, "name": profs.get(uid, "User")}
+            except Exception as e2:
+                _log(f"checklist reminder: auth fallback failed: {e2}")
     try:
         sent_r = supabase.table("checklist_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
         already_sent = {str(row["user_id"]) for row in (sent_r.data or [])}
@@ -2037,13 +2051,16 @@ async def send_checklist_daily_reminders(
                     by_user.setdefault(doer_id, []).append(task.get("task_name", ""))
                 break
     sent_count = 0
+    send_failed = 0
     for uid, names in by_user.items():
         if not names or uid in already_sent:
             continue
         u = user_map.get(uid, {})
         email = (u.get("email") or "").strip()
         name = u.get("name", "") or "User"
-        if email and await _send_checklist_reminder_email(email, names, name):
+        if not email:
+            continue
+        if await _send_checklist_reminder_email(email, names, name):
             try:
                 supabase.table("checklist_reminder_sent").insert({
                     "user_id": uid,
@@ -2052,6 +2069,8 @@ async def send_checklist_daily_reminders(
                 sent_count += 1
             except Exception:
                 pass
+        else:
+            send_failed += 1
     msg = f"Sent {sent_count} reminder(s) for {today.isoformat()}"
     debug = request.query_params.get("debug")
     if debug and sent_count == 0:
@@ -2059,6 +2078,8 @@ async def send_checklist_daily_reminders(
         msg += f" | tasks={len(tasks)} by_user={len(by_user)} already_sent={len(already_sent)}"
         if no_email:
             msg += f" no_email={len(no_email)}"
+        if send_failed:
+            msg += f" send_failed={send_failed}"
     return {"sent": sent_count, "message": msg}
 
 
