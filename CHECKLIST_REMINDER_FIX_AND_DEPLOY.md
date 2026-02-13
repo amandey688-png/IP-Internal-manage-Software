@@ -50,6 +50,10 @@ SELECT id, full_name, email FROM public.user_profiles LIMIT 10;
 cd "c:\Support FMS to APPLICATION"
 git add .
 git commit -m "fix: use Postmark API for emails on Render (SMTP blocked)"
+
+# If push fails with "rejected (fetch first)", run:
+git pull origin main
+
 git push origin main
 ```
 

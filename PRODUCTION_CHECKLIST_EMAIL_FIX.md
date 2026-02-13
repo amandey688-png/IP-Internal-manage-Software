@@ -53,6 +53,17 @@ Headers: X-Postmark-Server-Token, Content-Type, Accept
 cd "c:\Support FMS to APPLICATION"
 git add .
 git commit -m "fix: use Postmark HTTP API in production (SMTP blocked on Render)"
+
+# Pull first if remote has new commits (fixes "rejected" push error)
+git pull origin main
+
+git push origin main
+```
+
+If `git pull` shows conflicts, fix the files Git lists, then:
+```powershell
+git add .
+git commit -m "merge remote main"
 git push origin main
 ```
 
