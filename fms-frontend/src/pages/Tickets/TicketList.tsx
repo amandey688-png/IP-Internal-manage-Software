@@ -72,6 +72,7 @@ export const TicketList = () => {
   const [searchInput, setSearchInput] = useState('')
   const [companies, setCompanies] = useState<Company[]>([])
   const [drawerTicketId, setDrawerTicketId] = useState<string | null>(null)
+  const [drawerTicketType, setDrawerTicketType] = useState<string | null>(null)
   const [filters, setFilters] = useState({
     search: '',
     status: '',
@@ -258,6 +259,7 @@ export const TicketList = () => {
   }
 
   const isChoresBugs = sectionFromUrl === 'chores-bugs' || sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'solutions'
+  const showChoresBugsDrawer = isChoresBugs || drawerTicketType === 'chore' || drawerTicketType === 'bug'
   const isSolutionsSection = sectionFromUrl === 'solutions'
 
   /** When stage filter is set (Chores & Bugs only), filter tickets for table, Export and Print */
@@ -821,18 +823,24 @@ export const TicketList = () => {
             }
           }}
           onRow={(record) => ({
-            onClick: () => setDrawerTicketId(record.id),
+            onClick: () => {
+              setDrawerTicketId(record.id)
+              setDrawerTicketType((record as { type?: string }).type ?? null)
+            },
             style: { cursor: 'pointer' },
           })}
           size="small"
         />
       </Card>
 
-      {isChoresBugs ? (
+      {showChoresBugsDrawer ? (
         <ChoresBugsDetailDrawer
           ticketId={drawerTicketId}
           open={!!drawerTicketId}
-          onClose={() => setDrawerTicketId(null)}
+          onClose={() => {
+            setDrawerTicketId(null)
+            setDrawerTicketType(null)
+          }}
           onUpdate={fetchTickets}
           readOnly={sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'solutions'}
         />
@@ -840,7 +848,10 @@ export const TicketList = () => {
         <TicketDetailDrawer
           ticketId={drawerTicketId}
           open={!!drawerTicketId}
-          onClose={() => setDrawerTicketId(null)}
+          onClose={() => {
+            setDrawerTicketId(null)
+            setDrawerTicketType(null)
+          }}
           onUpdate={fetchTickets}
           readOnly={sectionFromUrl === 'completed-feature'}
           approvalMode={viewFromUrl}
