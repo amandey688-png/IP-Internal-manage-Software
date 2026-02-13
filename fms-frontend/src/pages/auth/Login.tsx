@@ -60,7 +60,7 @@ export const Login = () => {
         background: '#f0f2f5',
       }}
     >
-      <Card style={{ width: 400 }}>
+      <Card className="auth-card" style={{ width: 400, maxWidth: 'calc(100% - 32px)' }}>
         <Title level={2} style={{ textAlign: 'center', marginBottom: 32 }}>
           Login
         </Title>

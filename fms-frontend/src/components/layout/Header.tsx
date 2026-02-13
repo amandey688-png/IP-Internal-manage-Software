@@ -1,5 +1,5 @@
 import { Layout, Dropdown, Avatar, Space, Typography, Button } from 'antd'
-import { UserOutlined, LogoutOutlined, PlusOutlined } from '@ant-design/icons'
+import { UserOutlined, LogoutOutlined, PlusOutlined, MenuOutlined } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
@@ -11,9 +11,11 @@ const { Text } = Typography
 
 interface HeaderProps {
   onAddNew?: () => void
+  onMenuClick?: () => void
+  showMenuButton?: boolean
 }
 
-export const Header = ({ onAddNew }: HeaderProps) => {
+export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuth()
@@ -60,7 +62,7 @@ export const Header = ({ onAddNew }: HeaderProps) => {
 
   return (
     <AntHeader
-      className="no-print"
+      className="no-print app-header"
       style={{
         background: '#fff',
         padding: '0 24px',
@@ -68,16 +70,28 @@ export const Header = ({ onAddNew }: HeaderProps) => {
         justifyContent: 'space-between',
         alignItems: 'center',
         boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-        position: 'sticky',
+        position: 'fixed',
         top: 0,
         right: 0,
         left: 220,
         zIndex: 1000,
+        height: 64,
       }}
     >
-      <Space>
-        <Text strong style={{ fontSize: 16 }}>{APP_NAME}</Text>
-        <Text type="secondary" style={{ marginLeft: 16 }}>{breadcrumb}</Text>
+      <Space size="middle">
+        {showMenuButton && (
+          <Button
+            type="text"
+            icon={<MenuOutlined />}
+            onClick={onMenuClick}
+            style={{ fontSize: 18 }}
+            aria-label="Open menu"
+          />
+        )}
+        <Space>
+          <Text strong style={{ fontSize: 16 }}>{APP_NAME}</Text>
+          <Text type="secondary" className="breadcrumb-text" style={{ marginLeft: 16 }}>{breadcrumb}</Text>
+        </Space>
       </Space>
       <Space size="middle">
         {!hideAddNew && onAddNew && (
@@ -86,8 +100,9 @@ export const Header = ({ onAddNew }: HeaderProps) => {
             icon={<PlusOutlined />}
             onClick={onAddNew}
             style={{ fontWeight: 500 }}
+            className="submit-btn"
           >
-            Submit Support Ticket
+            <span className="submit-btn-text">Submit Support Ticket</span>
           </Button>
         )}
         <Space>

@@ -1,4 +1,4 @@
-import { Layout, Menu, Space } from 'antd'
+import { Layout, Menu, Space, Drawer, Grid } from 'antd'
 import {
   DashboardOutlined,
   FileTextOutlined,
@@ -18,6 +18,7 @@ import { ROUTES, APP_NAME } from '../../utils/constants'
 import { useState, useEffect } from 'react'
 
 const { Sider } = Layout
+const { useBreakpoint } = Grid
 
 const isSupportPage = (pathname: string) =>
   pathname.startsWith(ROUTES.TICKETS) ||
@@ -28,9 +29,13 @@ const isTaskPage = (pathname: string) =>
 
 interface SidebarProps {
   className?: string
+  open?: boolean
+  onClose?: () => void
 }
 
-export const Sidebar = ({ className }: SidebarProps) => {
+export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
+  const screens = useBreakpoint()
+  const isDesktop = screens.lg ?? true
   const navigate = useNavigate()
   const location = useLocation()
   const { canAccessApproval, canAccessSettings, canAccessUsers } = useRole()
@@ -110,6 +115,7 @@ export const Sidebar = ({ className }: SidebarProps) => {
     if (key === 'activity' || key === 'help') return
     const [path, query] = key.includes('?') ? key.split('?') : [key, '']
     navigate(query ? `${path}?${query}` : path)
+    onClose?.()
   }
 
   const selectedKeys = [location.pathname, location.pathname + (location.search || '')]
@@ -123,21 +129,8 @@ export const Sidebar = ({ className }: SidebarProps) => {
     setTaskOpen(keys.includes('task'))
   }
 
-  return (
-    <Sider
-      className={className}
-      width={220}
-      style={{
-        overflow: 'auto',
-        height: '100vh',
-        position: 'fixed',
-        left: 0,
-        top: 0,
-        bottom: 0,
-        background: '#fafafa',
-        borderRight: '1px solid #f0f0f0',
-      }}
-    >
+  const menuContent = (
+    <>
       <div
         style={{
           height: 64,
@@ -165,6 +158,40 @@ export const Sidebar = ({ className }: SidebarProps) => {
           marginTop: 8,
         }}
       />
-    </Sider>
+    </>
+  )
+
+  if (isDesktop) {
+    return (
+      <Sider
+        className={`${className ?? ''} sidebar-desktop`}
+        width={220}
+        style={{
+          overflow: 'auto',
+          height: '100vh',
+          position: 'fixed',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          background: '#fafafa',
+          borderRight: '1px solid #f0f0f0',
+        }}
+      >
+        {menuContent}
+      </Sider>
+    )
+  }
+
+  return (
+    <Drawer
+      title={APP_NAME}
+      placement="left"
+      open={open}
+      onClose={onClose}
+      width={260}
+      styles={{ body: { padding: 0 } }}
+    >
+      {menuContent}
+    </Drawer>
   )
 }

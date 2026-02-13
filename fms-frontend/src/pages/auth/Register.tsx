@@ -91,7 +91,7 @@ export const Register = () => {
   if (success) {
     return (
       <div style={pageStyle}>
-        <Card style={{ width: 420, textAlign: "center" }}>
+        <Card className="auth-card" style={{ width: 420, maxWidth: 'calc(100% - 32px)', textAlign: "center" }}>
           <Title level={3}>Registration Successful 🎉</Title>
           <Text type="success" style={{ display: "block" }}>
             Check your email for a confirmation link.
@@ -130,7 +130,7 @@ export const Register = () => {
   // ✅ REGISTER FORM UI
   return (
     <div style={pageStyle}>
-      <Card style={{ width: 420 }}>
+      <Card className="auth-card" style={{ width: 420, maxWidth: 'calc(100% - 32px)' }}>
         <Title level={2} style={{ textAlign: "center", marginBottom: 32 }}>
           Register
         </Title>
