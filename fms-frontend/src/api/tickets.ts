@@ -136,6 +136,7 @@ export const ticketsApi = {
     type?: string
     types_in?: string
     section?: string
+    approval_filter?: string
     company_id?: string
     priority?: string
     date_from?: string

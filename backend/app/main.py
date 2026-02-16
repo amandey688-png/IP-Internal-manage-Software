@@ -764,6 +764,7 @@ def list_tickets(
     page: int = 1,
     limit: int = 50,
     section: str | None = None,
+    approval_filter: str | None = None,  # For section=approval-status: pending | unapproved | all
     auth: dict = Depends(get_current_user),
 ):
     # Approval Status section: only admin, master_admin and approver
@@ -781,8 +782,9 @@ def list_tickets(
     elif section == "solutions":
         q = q.not_.is_("quality_solution", "null")
     elif section == "completed-feature":
+        # Only Feature type; only when last stage completed (live_review_status = completed)
         q = q.eq("type", "feature")
-        q = q.or_("status.eq.resolved,live_review_status.eq.completed")
+        q = q.eq("live_review_status", "completed")
     elif section == "staging":
         # Tickets in Staging: (new workflow: staging_planned set OR old: status_2 = staging) AND not completed Stage 3
         q = q.or_("staging_planned.not.is.null,status_2.eq.staging")
@@ -795,9 +797,16 @@ def list_tickets(
         q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
         q = q.or_("status_2.is.null,status_2.neq.staging")
     elif section == "approval-status":
-        # Feature requests: pending, approved, and rejected (all for approval records)
+        # Feature requests: only Pending and Unapproved (exclude Approved)
         q = q.eq("type", "feature")
         q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
+        if approval_filter == "pending":
+            q = q.is_("approval_status", "null")
+        elif approval_filter == "unapproved":
+            q = q.eq("approval_status", "unapproved")
+        else:
+            # all (default): show both pending and unapproved
+            q = q.or_("approval_status.is.null,approval_status.eq.unapproved")
     elif types_in:
         types_list = [t.strip() for t in types_in.split(",") if t.strip()]
         if types_list:
@@ -1674,6 +1683,26 @@ def create_checklist_task(payload: CreateChecklistTaskRequest, auth: dict = Depe
         "created_by": auth["id"],
     }
     try:
+        pr = supabase.table("user_profiles").select("full_name").eq("id", auth["id"]).limit(1).execute()
+        name = (pr.data or [{}])[0].get("full_name") or "USER"
+        prefix = "".join(c for c in name.upper() if c.isalnum())[:6] or "USER"
+        prefix = prefix[:6]
+        existing = supabase.table("checklist_tasks").select("reference_no").like("reference_no", f"CHK-{prefix}-%").execute()
+        nums = []
+        for row in (existing.data or []):
+            ref = row.get("reference_no") or ""
+            if ref.startswith(f"CHK-{prefix}-"):
+                try:
+                    nums.append(int(ref.split("-")[-1]))
+                except ValueError:
+                    pass
+        next_num = max(nums, default=0) + 1
+        data["reference_no"] = f"CHK-{prefix}-{next_num:03d}"
+    except Exception as e:
+        _log(f"checklist reference_no fallback: {e}")
+        import uuid
+        data["reference_no"] = f"CHK-{str(uuid.uuid4())[:8].upper()}"
+    try:
         r = supabase.table("checklist_tasks").insert(data).execute()
         return r.data[0] if r.data else {}
     except Exception as e:
@@ -1687,10 +1716,11 @@ def create_checklist_task(payload: CreateChecklistTaskRequest, auth: dict = Depe
 @api_router.get("/checklist/tasks")
 def list_checklist_tasks(
     user_id: str | None = Query(None),
+    reference_no: str | None = Query(None),
     auth: dict = Depends(get_current_user),
     current: dict = Depends(get_current_user_with_role),
 ):
-    """List checklist tasks. Regular users see only their own. Admin/Master Admin can filter by user_id or see all."""
+    """List checklist tasks. Regular users see only their own. Admin/Master Admin can filter by user_id or see all. All can filter by reference_no."""
     try:
         role = current.get("role", "user")
         if role not in ("admin", "master_admin"):
@@ -1700,6 +1730,8 @@ def list_checklist_tasks(
             q = q.eq("doer_id", user_id)
         elif role not in ("admin", "master_admin"):
             q = q.eq("doer_id", auth["id"])
+        if reference_no:
+            q = q.eq("reference_no", reference_no)
         r = q.order("created_at", desc=True).execute()
         tasks = r.data or []
         doer_ids = list({t["doer_id"] for t in tasks if t.get("doer_id")})
@@ -1722,13 +1754,13 @@ def list_checklist_tasks(
 def list_checklist_occurrences(
     filter_type: str = Query("today", alias="filter"),
     user_id: str | None = Query(None),
+    reference_no: str | None = Query(None),
     auth: dict = Depends(get_current_user),
     current: dict = Depends(get_current_user_with_role),
 ):
     """
     Get checklist occurrences. filter: today|completed|overdue|upcoming.
-    today = only today's tasks; completed = all completed; overdue = past incomplete; upcoming = future.
-    Regular users see only their tasks. Admin can filter by user_id.
+    Regular users see only their tasks. Admin can filter by user_id. All can filter by reference_no.
     """
     try:
         from app.checklist_utils import get_occurrence_dates
@@ -1740,6 +1772,8 @@ def list_checklist_occurrences(
             q = q.eq("doer_id", user_id)
         elif role not in ("admin", "master_admin"):
             q = q.eq("doer_id", auth["id"])
+        if reference_no:
+            q = q.eq("reference_no", reference_no)
         r = q.execute()
         tasks = r.data or []
         doer_map = {}
@@ -1772,6 +1806,7 @@ def list_checklist_occurrences(
                         occurrences.append({
                             "task_id": t_id,
                             "task_name": task.get("task_name", ""),
+                            "reference_no": task.get("reference_no"),
                             "doer_id": task.get("doer_id"),
                             "doer_name": doer_map.get(task.get("doer_id"), ""),
                             "department": task.get("department", ""),
@@ -1839,9 +1874,14 @@ def list_checklist_users(auth: dict = Depends(get_current_user), current: dict =
 # Delegation Tasks (Task module – separate from Support)
 # ---------------------------------------------------------------------------
 class CreateDelegationTaskRequest(BaseModel):
-    title: str
+    title: str  # Task Name
     assignee_id: str
     due_date: str
+    delegation_on: str | None = None
+    submission_date: str | None = None
+    has_document: str | None = None  # 'yes' | 'no'
+    document_url: str | None = None
+    submitted_by: str | None = None
 
 
 @api_router.get("/delegation/users")
@@ -1860,10 +1900,11 @@ def list_delegation_users(auth: dict = Depends(get_current_user), current: dict 
 def list_delegation_tasks(
     status: str | None = Query(None),
     assignee_id: str | None = Query(None),
+    reference_no: str | None = Query(None),
     auth: dict = Depends(get_current_user),
     current: dict = Depends(get_current_user_with_role),
 ):
-    """List delegation tasks. Admin sees all; user sees own assigned."""
+    """List delegation tasks. Default status=pending. Admin/Master can filter by user. All users can filter by reference_no."""
     try:
         q = supabase.table("delegation_tasks").select("*")
         role = current.get("role", "user")
@@ -1871,20 +1912,28 @@ def list_delegation_tasks(
             q = q.eq("assignee_id", auth["id"])
         elif assignee_id:
             q = q.eq("assignee_id", assignee_id)
-        if status:
-            q = q.eq("status", status)
+        # Default pending; send status='all' to see all tasks
+        if status == "all":
+            pass
+        else:
+            q = q.eq("status", status or "pending")
+        if reference_no:
+            q = q.eq("reference_no", reference_no)
         r = q.order("due_date", desc=False).execute()
         tasks = r.data or []
         assignee_ids = {t["assignee_id"] for t in tasks if t.get("assignee_id")}
-        assignee_map = {}
-        if assignee_ids:
+        submitted_by_ids = {t["submitted_by"] for t in tasks if t.get("submitted_by")}
+        all_user_ids = assignee_ids | submitted_by_ids
+        user_map = {}
+        if all_user_ids:
             try:
-                pr = supabase.table("user_profiles").select("id, full_name").in_("id", list(assignee_ids)).execute()
-                assignee_map = {p["id"]: p.get("full_name", "") for p in (pr.data or [])}
+                pr = supabase.table("user_profiles").select("id, full_name").in_("id", list(all_user_ids)).execute()
+                user_map = {p["id"]: p.get("full_name", "") for p in (pr.data or [])}
             except Exception:
                 pass
         for t in tasks:
-            t["assignee_name"] = assignee_map.get(t.get("assignee_id"), "")
+            t["assignee_name"] = user_map.get(t.get("assignee_id"), "")
+            t["submitted_by_name"] = user_map.get(t.get("submitted_by"), "")
         return {"tasks": tasks}
     except Exception as e:
         _log(f"delegation/tasks error: {e}")
@@ -1898,12 +1947,49 @@ def create_delegation_task(payload: CreateDelegationTaskRequest, auth: dict = De
         date.fromisoformat(payload.due_date)
     except ValueError:
         raise HTTPException(400, "Invalid due_date. Use YYYY-MM-DD")
+    for field_name, val in [("delegation_on", payload.delegation_on), ("submission_date", payload.submission_date)]:
+        if val:
+            try:
+                date.fromisoformat(val)
+            except ValueError:
+                raise HTTPException(400, f"Invalid {field_name}. Use YYYY-MM-DD")
     data = {
         "title": payload.title,
         "assignee_id": payload.assignee_id,
         "due_date": payload.due_date,
         "created_by": auth["id"],
     }
+    if payload.delegation_on:
+        data["delegation_on"] = payload.delegation_on
+    if payload.submission_date:
+        data["submission_date"] = payload.submission_date
+    if payload.has_document:
+        data["has_document"] = payload.has_document
+    if payload.document_url:
+        data["document_url"] = payload.document_url
+    if payload.submitted_by:
+        data["submitted_by"] = payload.submitted_by
+    # Generate unique reference_no based on submitted_by user name (e.g. DEL-AMAN-001)
+    try:
+        pr = supabase.table("user_profiles").select("full_name").eq("id", payload.submitted_by or payload.assignee_id).limit(1).execute()
+        name = (pr.data or [{}])[0].get("full_name") or "USER"
+        prefix = "".join(c for c in name.upper() if c.isalnum())[:6] or "USER"
+        prefix = prefix[:6]
+        existing = supabase.table("delegation_tasks").select("reference_no").like("reference_no", f"DEL-{prefix}-%").execute()
+        nums = []
+        for row in (existing.data or []):
+            ref = row.get("reference_no") or ""
+            if ref.startswith(f"DEL-{prefix}-"):
+                try:
+                    nums.append(int(ref.split("-")[-1]))
+                except ValueError:
+                    pass
+        next_num = max(nums, default=0) + 1
+        data["reference_no"] = f"DEL-{prefix}-{next_num:03d}"
+    except Exception as e:
+        _log(f"delegation reference_no fallback: {e}")
+        import uuid
+        data["reference_no"] = f"DEL-{str(uuid.uuid4())[:8].upper()}"
     try:
         r = supabase.table("delegation_tasks").insert(data).execute()
         return r.data[0] if r.data else {}
@@ -1916,10 +2002,34 @@ def create_delegation_task(payload: CreateDelegationTaskRequest, auth: dict = De
 
 
 @api_router.put("/delegation/tasks/{task_id}")
-def update_delegation_task(task_id: str, payload: dict, auth: dict = Depends(get_current_user)):
-    """Update delegation task (e.g. status: pending|in_progress|completed|cancelled)."""
-    allowed = {"status", "title", "due_date", "assignee_id"}
-    data = {k: v for k, v in payload.items() if k in allowed and v is not None}
+def update_delegation_task(task_id: str, payload: dict, auth: dict = Depends(get_current_user), current: dict = Depends(get_current_user_with_role)):
+    """Update delegation task. Only Master Admin can edit fields other than status. Status complete/cancel allowed for assignee or admin."""
+    from datetime import datetime, timezone
+    role = current.get("role", "user")
+    allowed_all = {"status", "title", "due_date", "assignee_id", "delegation_on", "submission_date", "has_document", "document_url", "submitted_by", "completed_at"}
+    data = {}
+    status_only = set(payload.keys()) <= {"status", "document_url"}
+    if role == "master_admin":
+        data = {k: v for k, v in payload.items() if k in allowed_all and v is not None}
+    else:
+        if not status_only:
+            raise HTTPException(403, "Only Master Admin can edit task fields. You can only Complete or Cancel.")
+        # Assignee or Admin can complete/cancel
+        task_row = supabase.table("delegation_tasks").select("assignee_id, has_document").eq("id", task_id).limit(1).execute()
+        if not task_row.data:
+            raise HTTPException(404, "Task not found")
+        assignee_id = task_row.data[0].get("assignee_id")
+        has_document = task_row.data[0].get("has_document")
+        if payload.get("status") == "completed" and has_document == "yes" and not payload.get("document_url"):
+            raise HTTPException(400, "Document is required. Please upload the document before completing.")
+        if role not in ("admin", "master_admin") and assignee_id != auth["id"]:
+            raise HTTPException(403, "You can only complete or cancel your own assigned tasks.")
+        if "status" in payload and payload["status"] in ("completed", "cancelled"):
+            data["status"] = payload["status"]
+        if "document_url" in payload and payload["document_url"]:
+            data["document_url"] = payload["document_url"]
+    if payload.get("status") == "completed":
+        data["completed_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     if not data:
         raise HTTPException(400, "No valid fields to update")
     try:
@@ -2085,7 +2195,7 @@ async def send_checklist_daily_reminders(
 
 # ---------------------------------------------------------------------------
 # Pending Reminder Digest (Checklist & Delegation + Support Chores&Bug & Feature by stage)
-# Sent to Level 1 & 2 only (admin, master_admin, approver)
+# Sent to admin, master_admin, approver roles only
 # ---------------------------------------------------------------------------
 
 def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) -> bool:
@@ -2188,7 +2298,7 @@ def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) ->
 
 
 def _get_level1_level2_user_ids() -> list[str]:
-    """Return user IDs with role admin, master_admin, or approver (Level 1 & 2)."""
+    """Return user IDs with role admin, master_admin, or approver (digest recipients)."""
     try:
         admin_roles = supabase.table("roles").select("id").in_("name", ["admin", "master_admin", "approver"]).execute()
         role_ids = [r["id"] for r in (admin_roles.data or [])]
@@ -2197,7 +2307,7 @@ def _get_level1_level2_user_ids() -> list[str]:
         profiles = supabase.table("user_profiles").select("id").in_("role_id", role_ids).eq("is_active", True).execute()
         return [str(p["id"]) for p in (profiles.data or [])]
     except Exception as e:
-        _log(f"Pending digest: get Level 1&2 users error: {e}")
+        _log(f"Pending digest: get recipients error: {e}")
         return []
 
 
@@ -2207,7 +2317,7 @@ async def send_pending_digest(
     auth: dict | None = Depends(get_current_user_optional),
 ):
     """
-    Send pending reminder digest to Level 1 & 2 (admin, master_admin, approver).
+    Send pending reminder digest to admin, master_admin, approver roles.
     Content: Checklist & Delegation pending + Support Chores&Bug & Feature by stage (assignee per ticket).
     Auth: X-Cron-Secret header, ?secret= query, or admin login.
     """
@@ -2233,7 +2343,7 @@ async def send_pending_digest(
     today = date.today()
     level12_ids = _get_level1_level2_user_ids()
     if not level12_ids:
-        return {"sent": 0, "message": "No Level 1 & 2 users found"}
+        return {"sent": 0, "message": "No recipients found. Ensure at least one user has role Admin, Master Admin, or Approver and has an email in the system."}
 
     try:
         already_sent_r = supabase.table("pending_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
@@ -2342,7 +2452,7 @@ async def send_pending_digest(
 
     body = f"""Pending Task Reminder – {today.isoformat()}
 
-This digest is sent to Level 1 & 2 (Admin, Approver) only.
+This digest is sent to Admin, Master Admin, and Approver roles.
 
 ---
 1. CHECKLIST & DELEGATION – Pending Tasks
@@ -2384,7 +2494,7 @@ Please log in to review and take action.
             except Exception:
                 pass
 
-    return {"sent": sent_count, "message": f"Sent pending digest to {sent_count} Level 1 & 2 user(s) for {today.isoformat()}"}
+    return {"sent": sent_count, "message": f"Sent pending digest to {sent_count} recipient(s) for {today.isoformat()}"}
 
 
 # ---------------------------------------------------------------------------
