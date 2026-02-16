@@ -1,6 +1,7 @@
 import { useEffect } from "react"
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import { ConfigProvider } from "antd"
+import { SpeedInsights } from "@vercel/speed-insights/react"
 import { AuthProvider } from "./contexts/AuthProvider"
 import { AppLayout } from "./components/layout/AppLayout"
 import { ProtectedRoute } from "./components/layout/ProtectedRoute"
@@ -63,6 +64,7 @@ function App() {
       <AuthProvider>
         <BrowserRouter>
           <AppTitle />
+          <SpeedInsights />
           <Routes>
             {/* ================= PUBLIC ROUTES ================= */}
             <Route path={ROUTES.REGISTER} element={<Register />} />
