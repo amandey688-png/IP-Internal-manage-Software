@@ -1,5 +1,7 @@
 # Pending Task Reminder – Check & Test Steps
 
+**Support task mail (Chores & Bug by stage, 9 AM daily):** For a single guide on setup, local test, push live, and verifying mail, see **`SUPPORT_TASK_MAIL_SETUP_AND_TEST.md`**.
+
 ## Overview
 
 Two reminder systems:

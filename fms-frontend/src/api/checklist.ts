@@ -26,11 +26,13 @@ export interface ChecklistTask {
   start_date: string
   created_by: string
   created_at: string
+  reference_no?: string
 }
 
 export interface ChecklistOccurrence {
   task_id: string
   task_name: string
+  reference_no?: string
   doer_id: string
   doer_name?: string
   department: string
@@ -45,15 +47,19 @@ export const checklistApi = {
   getHolidays: (year: number) =>
     apiClient.get<{ holidays: { holiday_date: string; holiday_name: string }[] }>(`/checklist/holidays?year=${year}`).then((r) => r.data),
 
-  getTasks: (userId?: string) => {
-    const params = userId ? `?user_id=${encodeURIComponent(userId)}` : ''
-    return apiClient.get<{ tasks: ChecklistTask[] }>(`/checklist/tasks${params}`).then((r) => r.data)
+  getTasks: (userId?: string, referenceNo?: string) => {
+    const params = new URLSearchParams()
+    if (userId) params.set('user_id', userId)
+    if (referenceNo) params.set('reference_no', referenceNo)
+    const q = params.toString()
+    return apiClient.get<{ tasks: ChecklistTask[] }>(`/checklist/tasks${q ? `?${q}` : ''}`).then((r) => r.data)
   },
 
-  getOccurrences: (filter: 'today' | 'completed' | 'overdue' | 'upcoming', userId?: string) => {
-    let url = `/checklist/occurrences?filter=${filter}`
-    if (userId) url += `&user_id=${encodeURIComponent(userId)}`
-    return apiClient.get<{ occurrences: ChecklistOccurrence[] }>(url).then((r) => r.data)
+  getOccurrences: (filter: 'today' | 'completed' | 'overdue' | 'upcoming', userId?: string, referenceNo?: string) => {
+    const params = new URLSearchParams({ filter })
+    if (userId) params.set('user_id', userId)
+    if (referenceNo) params.set('reference_no', referenceNo)
+    return apiClient.get<{ occurrences: ChecklistOccurrence[] }>(`/checklist/occurrences?${params}`).then((r) => r.data)
   },
 
   createTask: (data: { task_name: string; department: string; frequency: string; start_date: string }) =>

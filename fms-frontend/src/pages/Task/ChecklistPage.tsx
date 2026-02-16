@@ -43,6 +43,7 @@ export const ChecklistPage = () => {
   const [occurrences, setOccurrences] = useState<ChecklistOccurrence[]>([])
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([])
   const [selectedUserId, setSelectedUserId] = useState<string | undefined>(undefined)
+  const [referenceNoFilter, setReferenceNoFilter] = useState<string>('__all__')
   const [filter, setFilter] = useState<FilterType>('today')
   const [loading, setLoading] = useState(false)
   const [submitLoading, setSubmitLoading] = useState<string | null>(null)
@@ -53,12 +54,16 @@ export const ChecklistPage = () => {
   const canUploadHolidays = today.getMonth() === 11 && today.getDate() >= 15
 
   useEffect(() => {
-    loadTasks()
+    setReferenceNoFilter('__all__')
   }, [selectedUserId])
 
   useEffect(() => {
+    loadTasks()
+  }, [selectedUserId, referenceNoFilter])
+
+  useEffect(() => {
     loadOccurrences()
-  }, [filter, selectedUserId])
+  }, [filter, selectedUserId, referenceNoFilter])
 
   useEffect(() => {
     if (isAdmin) {
@@ -66,10 +71,12 @@ export const ChecklistPage = () => {
     }
   }, [isAdmin])
 
+  const refNoParam = referenceNoFilter && referenceNoFilter !== '__all__' ? referenceNoFilter : undefined
+
   const loadTasks = () => {
     setLoading(true)
     checklistApi
-      .getTasks(selectedUserId)
+      .getTasks(selectedUserId, refNoParam)
       .then((r) => setTasks(r.tasks || []))
       .catch(() => message.error('Failed to load tasks'))
       .finally(() => setLoading(false))
@@ -78,11 +85,18 @@ export const ChecklistPage = () => {
   const loadOccurrences = () => {
     setLoading(true)
     checklistApi
-      .getOccurrences(filter, selectedUserId)
+      .getOccurrences(filter, selectedUserId, refNoParam)
       .then((r) => setOccurrences(r.occurrences || []))
       .catch(() => message.error('Failed to load occurrences'))
       .finally(() => setLoading(false))
   }
+
+  const referenceNoOptions = [
+    { label: 'All', value: '__all__' },
+    ...Array.from(new Set(occurrences.map((o) => o.reference_no).filter(Boolean)))
+      .sort()
+      .map((ref) => ({ label: ref!, value: ref! })),
+  ]
 
   const onFinish = (values: { task_name: string; department: string; frequency: string; start_date: dayjs.Dayjs | null }) => {
     if (!values.start_date) {
@@ -121,6 +135,13 @@ export const ChecklistPage = () => {
   }
 
   const columns = [
+    {
+      title: 'Reference No',
+      dataIndex: 'reference_no',
+      key: 'reference_no',
+      width: 120,
+      render: (v: string) => v || '-',
+    },
     {
       title: 'Date',
       dataIndex: 'occurrence_date',
@@ -240,7 +261,14 @@ export const ChecklistPage = () => {
       <Card
         title="Task List"
         extra={
-          <Space>
+          <Space wrap>
+            <Text type="secondary">Reference No:</Text>
+            <AntSelect
+              value={referenceNoFilter}
+              onChange={setReferenceNoFilter}
+              style={{ width: 140 }}
+              options={referenceNoOptions}
+            />
             <Text type="secondary">Filter:</Text>
             <AntSelect
               value={filter}

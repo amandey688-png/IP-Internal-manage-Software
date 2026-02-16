@@ -62,13 +62,14 @@ export const TicketList = () => {
   const typeFromUrl = searchParams.get('type') || new URLSearchParams(location.search).get('type') || ''
   const sectionFromUrl = searchParams.get('section') || new URLSearchParams(location.search).get('section') || ''
   const viewFromUrl = searchParams.get('view') === 'approval'
+  const isApprovalSection = viewFromUrl || sectionFromUrl === 'approval-status'
   const showStageFilter = sectionFromUrl === 'chores-bugs'
 
   useEffect(() => {
-    if (viewFromUrl && !canAccessApproval) {
+    if (isApprovalSection && !canAccessApproval) {
       navigate(ROUTES.DASHBOARD, { replace: true })
     }
-  }, [viewFromUrl, canAccessApproval, navigate])
+  }, [isApprovalSection, canAccessApproval, navigate])
   const [searchInput, setSearchInput] = useState('')
   const [companies, setCompanies] = useState<Company[]>([])
   const [drawerTicketId, setDrawerTicketId] = useState<string | null>(null)
@@ -87,6 +88,8 @@ export const TicketList = () => {
   })
   /** Stage filter: applies to table, Export and Print (filters current result set) */
   const [stageFilter, setStageFilter] = useState<string>('')
+  /** Approval Status view: pending (default) | unapproved | all */
+  const [approvalFilter, setApprovalFilter] = useState<string>('pending')
 
   useEffect(() => {
     const t = searchParams.get('type') || ''
@@ -94,7 +97,8 @@ export const TicketList = () => {
     const urlStatus = searchParams.get('status') || new URLSearchParams(location.search).get('status') || ''
     const urlDateFrom = searchParams.get('date_from') || new URLSearchParams(location.search).get('date_from') || ''
     const urlDateTo = searchParams.get('date_to') || new URLSearchParams(location.search).get('date_to') || ''
-    const viewApproval = searchParams.get('view') === 'approval'
+    const viewApproval = searchParams.get('view') === 'approval' || s === 'approval-status'
+    if (viewApproval) setApprovalFilter('pending')
     setFilters((f) => {
       const next = { ...f }
       if (viewApproval) {
@@ -152,7 +156,7 @@ export const TicketList = () => {
       }
       fetchTickets()
     }
-  }, [page, pageSize, filters, viewFromUrl, stageFilter, showStageFilter])
+  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, showStageFilter])
 
   const fetchTickets = async () => {
     setLoading(true)
@@ -166,8 +170,9 @@ export const TicketList = () => {
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
         ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
         ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
+        ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
         ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
-        ...(viewFromUrl && { section: 'approval-status' }),
+        ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
         ...(filters.company_id && { company_id: filters.company_id }),
         ...(filters.priority && { priority: filters.priority }),
         ...(filters.date_from && { date_from: filters.date_from }),
@@ -201,8 +206,9 @@ export const TicketList = () => {
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
         ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
         ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
+        ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
         ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
-        ...(viewFromUrl && { section: 'approval-status' }),
+        ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
         ...(filters.company_id && { company_id: filters.company_id }),
         ...(filters.priority && { priority: filters.priority }),
         ...(filters.date_from && { date_from: filters.date_from }),
@@ -665,7 +671,7 @@ export const TicketList = () => {
   ]
 
   const pageTitle =
-    viewFromUrl
+    isApprovalSection
       ? 'Approval Status'
       : sectionFromUrl === 'chores-bugs'
         ? 'Chores & Bugs'
@@ -717,6 +723,22 @@ export const TicketList = () => {
           <Button type="primary" onClick={handleSearch}>
             Search
           </Button>
+          {isApprovalSection && (
+            <Select
+              placeholder="Approval"
+              style={{ width: 140 }}
+              value={approvalFilter}
+              onChange={(v) => {
+                setApprovalFilter(v ?? 'pending')
+                setPage(1)
+              }}
+              options={[
+                { value: 'pending', label: 'Pending' },
+                { value: 'unapproved', label: 'Unapproved' },
+                { value: 'all', label: 'All' },
+              ]}
+            />
+          )}
           <Select
             placeholder="Company"
             style={{ width: 150 }}
@@ -743,17 +765,6 @@ export const TicketList = () => {
             <Option value="closed">Closed</Option>
             <Option value="cancelled">Cancelled</Option>
             <Option value="on_hold">On Hold</Option>
-          </Select>
-          <Select
-            placeholder="Type"
-            style={{ width: 120 }}
-            value={filters.type || undefined}
-            onChange={(v) => setFilters((f) => ({ ...f, type: v || '' }))}
-            allowClear
-          >
-            <Option value="chore">Chores</Option>
-            <Option value="bug">Bug</Option>
-            <Option value="feature">Feature</Option>
           </Select>
           <Select
             placeholder="Priority"
@@ -854,7 +865,7 @@ export const TicketList = () => {
           }}
           onUpdate={fetchTickets}
           readOnly={sectionFromUrl === 'completed-feature'}
-          approvalMode={viewFromUrl}
+          approvalMode={isApprovalSection}
         />
       )}
     </div>

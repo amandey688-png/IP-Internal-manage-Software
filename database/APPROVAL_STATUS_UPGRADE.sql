@@ -11,3 +11,6 @@ ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS unapproval_actual_at TIMESTA
 
 COMMENT ON COLUMN public.tickets.approval_actual_at IS 'When the ticket was approved (Feature)';
 COMMENT ON COLUMN public.tickets.unapproval_actual_at IS 'When the ticket was unapproved (Feature), with remarks';
+
+-- Reload PostgREST schema cache (Supabase)
+NOTIFY pgrst, 'reload schema';
