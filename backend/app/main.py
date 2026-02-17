@@ -707,10 +707,50 @@ def create_ticket(payload: CreateTicketRequest, auth: dict = Depends(get_current
         )
 
 
+# Fallback: reference_no -> company_name when tickets.company_name is null (e.g. production DB not updated).
+# Matches database/TICKETS_UPDATE_COMPANY_NAMES.sql so live shows correct names without running that SQL.
+_REF_NO_TO_COMPANY: dict[str, str] = {}
+def _build_ref_no_to_company() -> dict[str, str]:
+    if _REF_NO_TO_COMPANY:
+        return _REF_NO_TO_COMPANY
+    # Apply same updates as TICKETS_UPDATE_COMPANY_NAMES.sql in order (later overwrites).
+    refs_demo = [
+        "BU-001", "BU-002", "CH-001", "CH-002", "CH-003", "CH-004", "CH-005", "CH-006", "CH-007", "CH-008",
+        "CH-009", "CH-010", "CH-011", "CH-012", "CH-013", "CH-014", "CH-015", "CH-016", "CH-017", "CH-018",
+        "CH-019", "CH-020", "CH-021", "CH-022", "CH-023", "CH-024", "CH-025", "CH-026", "CH-027", "CH-039",
+        "CH-040", "CH-044", "CH-045", "CH-046", "CH-047", "CH-048", "CH-049", "CH-050", "CH-051", "CH-052",
+        "CH-053", "CH-054", "CH-055", "CH-056", "CH-057", "CH-058", "CH-059", "CH-060", "CH-061", "CH-062",
+        "CH-063", "CH-081", "CH-085",
+    ]
+    for ref in refs_demo:
+        _REF_NO_TO_COMPANY[ref] = "Demo_c"
+    _REF_NO_TO_COMPANY["CH-028"] = "Ghankun Steel Pvt Ltd (SMS Division)"
+    _REF_NO_TO_COMPANY["CH-029"] = "Crescent Foundry"
+    _REF_NO_TO_COMPANY["CH-031"] = "Kodarma Chemical Pvt. Ltd."
+    _REF_NO_TO_COMPANY["CH-035"] = "Nirmaan TMT"
+    _REF_NO_TO_COMPANY["CH-036"] = "Spintech Tubes Pvt Ltd"
+    _REF_NO_TO_COMPANY["CH-037"] = "Indo East Corporation Private Limited"
+    for ref in ("CH-038", "BU-008"):
+        _REF_NO_TO_COMPANY[ref] = "Karnikripa Power Pvt Ltd"
+    for ref in (
+        "CH-041", "CH-049", "CH-050", "CH-051", "CH-054", "CH-058", "CH-062", "BU-006",
+        "CH-064", "CH-065", "CH-066", "CH-067", "CH-068", "CH-069", "CH-070", "CH-071", "CH-072", "CH-073",
+    ):
+        _REF_NO_TO_COMPANY[ref] = "BIHAR FOUNDRY"
+    _REF_NO_TO_COMPANY["BU-004"] = "Flexicom Industries Pvt. Ltd."
+    for ref in (
+        "CH-063", "CH-064", "CH-065", "CH-066", "CH-067", "CH-068", "CH-069", "CH-070",
+        "CH-072", "CH-073", "CH-074", "CH-075", "CH-076", "CH-077", "CH-078", "BU-007", "CH-079",
+    ):
+        _REF_NO_TO_COMPANY[ref] = "Bhagwati Power Pvt. Ltd."
+    return _REF_NO_TO_COMPANY
+
+
 def _enrich_tickets_with_lookups(rows: list) -> list:
     """Add company_name, page_name, division_name from lookup tables."""
     if not rows:
         return rows
+    ref_to_company = _build_ref_no_to_company()
     company_ids = {r.get("company_id") for r in rows if r.get("company_id")}
     page_ids = {r.get("page_id") for r in rows if r.get("page_id")}
     division_ids = {r.get("division_id") for r in rows if r.get("division_id")}
@@ -742,7 +782,12 @@ def _enrich_tickets_with_lookups(rows: list) -> list:
     except Exception:
         pass
     for row in rows:
-        row["company_name"] = companies_map.get(row.get("company_id")) if row.get("company_id") else None
+        # Prefer ticket's own company_name; then companies lookup; then reference_no fallback (for production when DB not updated)
+        row["company_name"] = (
+            (row.get("company_name") and str(row.get("company_name")).strip())
+            or (companies_map.get(row.get("company_id")) if row.get("company_id") else None)
+            or ref_to_company.get(row.get("reference_no") or "")
+        )
         row["page_name"] = pages_map.get(row.get("page_id")) if row.get("page_id") else None
         row["division_name"] = divisions_map.get(row.get("division_id")) if row.get("division_id") else None
         row["approved_by_name"] = approvers_map.get(row.get("approved_by")) if row.get("approved_by") else None
