@@ -16,7 +16,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
         pass
 
 from datetime import datetime, date, timedelta
-from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request, UploadFile, File, Query
+from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request, UploadFile, File, Query, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
@@ -176,7 +176,7 @@ class LoginResponse(BaseModel):
 # ---------- Routes ----------
 @app.get("/health")
 def health():
-    """Health check endpoint to verify backend is running"""
+    """Lightweight health check (no DB). Use for keep-alive pings (e.g. UptimeRobot every 5 min) to prevent Render cold start."""
     return {"status": "ok", "message": "Backend is running"}
 
 
@@ -707,10 +707,50 @@ def create_ticket(payload: CreateTicketRequest, auth: dict = Depends(get_current
         )
 
 
+# Fallback: reference_no -> company_name when tickets.company_name is null (e.g. production DB not updated).
+# Matches database/TICKETS_UPDATE_COMPANY_NAMES.sql so live shows correct names without running that SQL.
+_REF_NO_TO_COMPANY: dict[str, str] = {}
+def _build_ref_no_to_company() -> dict[str, str]:
+    if _REF_NO_TO_COMPANY:
+        return _REF_NO_TO_COMPANY
+    # Apply same updates as TICKETS_UPDATE_COMPANY_NAMES.sql in order (later overwrites).
+    refs_demo = [
+        "BU-001", "BU-002", "CH-001", "CH-002", "CH-003", "CH-004", "CH-005", "CH-006", "CH-007", "CH-008",
+        "CH-009", "CH-010", "CH-011", "CH-012", "CH-013", "CH-014", "CH-015", "CH-016", "CH-017", "CH-018",
+        "CH-019", "CH-020", "CH-021", "CH-022", "CH-023", "CH-024", "CH-025", "CH-026", "CH-027", "CH-039",
+        "CH-040", "CH-044", "CH-045", "CH-046", "CH-047", "CH-048", "CH-049", "CH-050", "CH-051", "CH-052",
+        "CH-053", "CH-054", "CH-055", "CH-056", "CH-057", "CH-058", "CH-059", "CH-060", "CH-061", "CH-062",
+        "CH-063", "CH-081", "CH-085",
+    ]
+    for ref in refs_demo:
+        _REF_NO_TO_COMPANY[ref] = "Demo_c"
+    _REF_NO_TO_COMPANY["CH-028"] = "Ghankun Steel Pvt Ltd (SMS Division)"
+    _REF_NO_TO_COMPANY["CH-029"] = "Crescent Foundry"
+    _REF_NO_TO_COMPANY["CH-031"] = "Kodarma Chemical Pvt. Ltd."
+    _REF_NO_TO_COMPANY["CH-035"] = "Nirmaan TMT"
+    _REF_NO_TO_COMPANY["CH-036"] = "Spintech Tubes Pvt Ltd"
+    _REF_NO_TO_COMPANY["CH-037"] = "Indo East Corporation Private Limited"
+    for ref in ("CH-038", "BU-008"):
+        _REF_NO_TO_COMPANY[ref] = "Karnikripa Power Pvt Ltd"
+    for ref in (
+        "CH-041", "CH-049", "CH-050", "CH-051", "CH-054", "CH-058", "CH-062", "BU-006",
+        "CH-064", "CH-065", "CH-066", "CH-067", "CH-068", "CH-069", "CH-070", "CH-071", "CH-072", "CH-073",
+    ):
+        _REF_NO_TO_COMPANY[ref] = "BIHAR FOUNDRY"
+    _REF_NO_TO_COMPANY["BU-004"] = "Flexicom Industries Pvt. Ltd."
+    for ref in (
+        "CH-063", "CH-064", "CH-065", "CH-066", "CH-067", "CH-068", "CH-069", "CH-070",
+        "CH-072", "CH-073", "CH-074", "CH-075", "CH-076", "CH-077", "CH-078", "BU-007", "CH-079",
+    ):
+        _REF_NO_TO_COMPANY[ref] = "Bhagwati Power Pvt. Ltd."
+    return _REF_NO_TO_COMPANY
+
+
 def _enrich_tickets_with_lookups(rows: list) -> list:
     """Add company_name, page_name, division_name from lookup tables."""
     if not rows:
         return rows
+    ref_to_company = _build_ref_no_to_company()
     company_ids = {r.get("company_id") for r in rows if r.get("company_id")}
     page_ids = {r.get("page_id") for r in rows if r.get("page_id")}
     division_ids = {r.get("division_id") for r in rows if r.get("division_id")}
@@ -742,7 +782,12 @@ def _enrich_tickets_with_lookups(rows: list) -> list:
     except Exception:
         pass
     for row in rows:
-        row["company_name"] = companies_map.get(row.get("company_id")) if row.get("company_id") else None
+        # Prefer ticket's own company_name; then companies lookup; then reference_no fallback (for production when DB not updated)
+        row["company_name"] = (
+            (row.get("company_name") and str(row.get("company_name")).strip())
+            or (companies_map.get(row.get("company_id")) if row.get("company_id") else None)
+            or ref_to_company.get(row.get("reference_no") or "")
+        )
         row["page_name"] = pages_map.get(row.get("page_id")) if row.get("page_id") else None
         row["division_name"] = divisions_map.get(row.get("division_id")) if row.get("division_id") else None
         row["approved_by_name"] = approvers_map.get(row.get("approved_by")) if row.get("approved_by") else None
@@ -2072,14 +2117,106 @@ async def _send_checklist_reminder_email(to_email: str, task_names: list[str], d
     return ok
 
 
+async def _run_checklist_reminders_background():
+    """Run checklist daily reminders. Used by cron; logs result. Avoids request timeout."""
+    try:
+        from app.checklist_utils import get_occurrence_dates
+        today = date.today()
+        q = supabase.table("checklist_tasks").select("*")
+        r = q.execute()
+        tasks = r.data or []
+        doer_ids = list({str(t.get("doer_id", "")) for t in tasks if t.get("doer_id")})
+        user_map = {}
+        if doer_ids:
+            try:
+                profiles_r = supabase.table("user_profiles").select("id, email, full_name").in_("id", doer_ids).execute()
+                for p in (profiles_r.data or []):
+                    uid = str(p.get("id", ""))
+                    email_val = (p.get("email") or "").strip()
+                    user_map[uid] = {"email": email_val, "name": p.get("full_name") or "User"}
+            except Exception as e:
+                _log(f"checklist reminder: user_profiles failed: {e}")
+            need_auth = any(uid not in user_map or not (user_map.get(uid) or {}).get("email") for uid in doer_ids)
+            if need_auth:
+                try:
+                    auth_r = supabase.auth.admin.list_users(per_page=1000)
+                    auth_users = getattr(auth_r, "users", []) or []
+                    prof_r = supabase.table("user_profiles").select("id, full_name").in_("id", doer_ids).execute()
+                    profs = {str(x["id"]): x.get("full_name") or "User" for x in (prof_r.data or [])}
+                    for u in auth_users:
+                        uid = str(getattr(u, "id", "") or (u.get("id") if isinstance(u, dict) else ""))
+                        em = (getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else None) or "").strip()
+                        if uid in doer_ids and (uid not in user_map or not (user_map.get(uid) or {}).get("email")):
+                            user_map[uid] = {"email": em, "name": profs.get(uid, "User")}
+                except Exception as e2:
+                    _log(f"checklist reminder: auth fallback failed: {e2}")
+        try:
+            sent_r = supabase.table("checklist_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
+            already_sent = {str(row["user_id"]) for row in (sent_r.data or [])}
+        except Exception:
+            already_sent = set()
+        comp = {}
+        try:
+            cr = supabase.table("checklist_completions").select("task_id, occurrence_date").execute()
+            for row in cr.data or []:
+                od = row.get("occurrence_date")
+                if isinstance(od, str) and "T" in od:
+                    od = od[:10]
+                comp[(str(row["task_id"]), od or "")] = True
+        except Exception:
+            pass
+        by_user: dict[str, list[str]] = {}
+        for task in tasks:
+            t_id = task["id"]
+            start = task.get("start_date")
+            if isinstance(start, str):
+                start = date.fromisoformat(start)
+            doer_id = str(task.get("doer_id", ""))
+            if not doer_id or doer_id in already_sent:
+                continue
+            freq = task.get("frequency", "D")
+            holidays = _get_holidays_for_year(today.year)
+            is_holiday = lambda d, h=holidays: d in h
+            dates = get_occurrence_dates(start, freq, today.year, is_holiday)
+            for d in dates:
+                if d == today:
+                    key = (str(t_id), d.isoformat())
+                    if not comp.get(key):
+                        by_user.setdefault(doer_id, []).append(task.get("task_name", ""))
+                    break
+        sent_count = 0
+        for uid, names in by_user.items():
+            if not names or uid in already_sent:
+                continue
+            u = user_map.get(uid, {})
+            email = (u.get("email") or "").strip()
+            name = u.get("name", "") or "User"
+            if not email:
+                continue
+            if await _send_checklist_reminder_email(email, names, name):
+                try:
+                    supabase.table("checklist_reminder_sent").insert({
+                        "user_id": uid,
+                        "reminder_date": today.isoformat(),
+                    }).execute()
+                    sent_count += 1
+                except Exception:
+                    pass
+        _log(f"Checklist reminder background: sent {sent_count} for {today.isoformat()}")
+    except Exception as e:
+        _log(f"Checklist reminder background error: {e}")
+
+
 @api_router.api_route("/checklist/send-daily-reminders", methods=["GET", "POST"])
 async def send_checklist_daily_reminders(
     request: Request,
+    background_tasks: BackgroundTasks,
     auth: dict | None = Depends(get_current_user_optional),
 ):
     """
-    Send one reminder email per user when assigned date = current date.
+    Start checklist daily reminders in background. Returns immediately to avoid Render timeout.
     POST or GET. Auth: X-Cron-Secret header, ?secret= query, or admin login.
+    Result is logged; check server logs for sent count.
     """
     cron_secret = (os.getenv("CHECKLIST_CRON_SECRET") or "").strip()
     x_cron = (
@@ -2096,101 +2233,8 @@ async def send_checklist_daily_reminders(
             raise HTTPException(403, "Admin only")
     else:
         raise HTTPException(401, "Set CHECKLIST_CRON_SECRET header or ?secret= for cron, or log in as admin")
-    from app.checklist_utils import get_occurrence_dates
-    today = date.today()
-    q = supabase.table("checklist_tasks").select("*")
-    r = q.execute()
-    tasks = r.data or []
-    doer_ids = list({str(t.get("doer_id", "")) for t in tasks if t.get("doer_id")})
-    user_map = {}
-    if doer_ids:
-        try:
-            profiles_r = supabase.table("user_profiles").select("id, email, full_name").in_("id", doer_ids).execute()
-            for p in (profiles_r.data or []):
-                uid = str(p.get("id", ""))
-                email_val = (p.get("email") or "").strip()
-                user_map[uid] = {"email": email_val, "name": p.get("full_name") or "User"}
-        except Exception as e:
-            _log(f"checklist reminder: user_profiles failed: {e}")
-        need_auth = any(uid not in user_map or not (user_map.get(uid) or {}).get("email") for uid in doer_ids)
-        if need_auth:
-            try:
-                auth_r = supabase.auth.admin.list_users(per_page=1000)
-                auth_users = getattr(auth_r, "users", []) or []
-                prof_r = supabase.table("user_profiles").select("id, full_name").in_("id", doer_ids).execute()
-                profs = {str(x["id"]): x.get("full_name") or "User" for x in (prof_r.data or [])}
-                for u in auth_users:
-                    uid = str(getattr(u, "id", "") or (u.get("id") if isinstance(u, dict) else ""))
-                    em = (getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else None) or "").strip()
-                    if uid in doer_ids and (uid not in user_map or not (user_map.get(uid) or {}).get("email")):
-                        user_map[uid] = {"email": em, "name": profs.get(uid, "User")}
-            except Exception as e2:
-                _log(f"checklist reminder: auth fallback failed: {e2}")
-    try:
-        sent_r = supabase.table("checklist_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
-        already_sent = {str(row["user_id"]) for row in (sent_r.data or [])}
-    except Exception:
-        already_sent = set()
-    comp = {}
-    try:
-        cr = supabase.table("checklist_completions").select("task_id, occurrence_date").execute()
-        for row in cr.data or []:
-            od = row.get("occurrence_date")
-            if isinstance(od, str) and "T" in od:
-                od = od[:10]
-            comp[(str(row["task_id"]), od or "")] = True
-    except Exception:
-        pass
-    by_user: dict[str, list[str]] = {}
-    for task in tasks:
-        t_id = task["id"]
-        start = task.get("start_date")
-        if isinstance(start, str):
-            start = date.fromisoformat(start)
-        doer_id = str(task.get("doer_id", ""))
-        if not doer_id or doer_id in already_sent:
-            continue
-        freq = task.get("frequency", "D")
-        holidays = _get_holidays_for_year(today.year)
-        is_holiday = lambda d, h=holidays: d in h
-        dates = get_occurrence_dates(start, freq, today.year, is_holiday)
-        for d in dates:
-            if d == today:
-                key = (str(t_id), d.isoformat())
-                if not comp.get(key):
-                    by_user.setdefault(doer_id, []).append(task.get("task_name", ""))
-                break
-    sent_count = 0
-    send_failed = 0
-    for uid, names in by_user.items():
-        if not names or uid in already_sent:
-            continue
-        u = user_map.get(uid, {})
-        email = (u.get("email") or "").strip()
-        name = u.get("name", "") or "User"
-        if not email:
-            continue
-        if await _send_checklist_reminder_email(email, names, name):
-            try:
-                supabase.table("checklist_reminder_sent").insert({
-                    "user_id": uid,
-                    "reminder_date": today.isoformat(),
-                }).execute()
-                sent_count += 1
-            except Exception:
-                pass
-        else:
-            send_failed += 1
-    msg = f"Sent {sent_count} reminder(s) for {today.isoformat()}"
-    debug = request.query_params.get("debug")
-    if debug and sent_count == 0:
-        no_email = [uid for uid in by_user if not (user_map.get(uid) or {}).get("email")]
-        msg += f" | tasks={len(tasks)} by_user={len(by_user)} already_sent={len(already_sent)}"
-        if no_email:
-            msg += f" no_email={len(no_email)}"
-        if send_failed:
-            msg += f" send_failed={send_failed}"
-    return {"sent": sent_count, "message": msg}
+    background_tasks.add_task(_run_checklist_reminders_background)
+    return {"status": "started", "message": "Checklist reminder job started. Check server logs for result."}
 
 
 # ---------------------------------------------------------------------------
@@ -2311,146 +2355,117 @@ def _get_level1_level2_user_ids() -> list[str]:
         return []
 
 
-@api_router.api_route("/reminders/send-pending-digest", methods=["GET", "POST"])
-async def send_pending_digest(
-    request: Request,
-    auth: dict | None = Depends(get_current_user_optional),
-):
-    """
-    Send pending reminder digest to admin, master_admin, approver roles.
-    Content: Checklist & Delegation pending + Support Chores&Bug & Feature by stage (assignee per ticket).
-    Auth: X-Cron-Secret header, ?secret= query, or admin login.
-    """
-    cron_secret = (os.getenv("CHECKLIST_CRON_SECRET") or os.getenv("PENDING_REMINDER_CRON_SECRET") or "").strip()
-    x_cron = (
-        request.headers.get("X-Cron-Secret") or
-        request.headers.get("x-cron-secret") or
-        request.query_params.get("secret") or
-        ""
-    ).strip()
-    if cron_secret and x_cron and x_cron == cron_secret:
-        pass
-    elif auth:
-        role = _get_role_from_profile(auth["id"])
-        if role not in ("admin", "master_admin"):
-            raise HTTPException(403, "Admin only (or use cron secret)")
-    else:
-        raise HTTPException(401, "Set PENDING_REMINDER_CRON_SECRET or CHECKLIST_CRON_SECRET header/?secret=, or log in as admin")
-
-    from app.checklist_utils import get_occurrence_dates
-    from app.reminder_utils import get_chores_bugs_stage, get_staging_feature_stage, is_chores_bug_pending, is_feature_pending
-
-    today = date.today()
-    level12_ids = _get_level1_level2_user_ids()
-    if not level12_ids:
-        return {"sent": 0, "message": "No recipients found. Ensure at least one user has role Admin, Master Admin, or Approver and has an email in the system."}
-
+async def _run_pending_digest_background():
+    """Run pending digest (checklist, delegation, chores/bug, feature). Used by cron; logs result. Avoids request timeout."""
     try:
-        already_sent_r = supabase.table("pending_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
-        already_sent = {str(r["user_id"]) for r in (already_sent_r.data or [])}
-    except Exception:
-        already_sent = set()
+        from app.checklist_utils import get_occurrence_dates
+        from app.reminder_utils import get_chores_bugs_stage, get_staging_feature_stage, is_chores_bug_pending, is_feature_pending
+        today = date.today()
+        level12_ids = _get_level1_level2_user_ids()
+        if not level12_ids:
+            _log("Pending digest background: no recipients")
+            return
+        try:
+            already_sent_r = supabase.table("pending_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
+            already_sent = {str(r["user_id"]) for r in (already_sent_r.data or [])}
+        except Exception:
+            already_sent = set()
+        try:
+            users_r = supabase.table("users_view").select("id, email, full_name").execute()
+            user_map = {str(u["id"]): {"email": (u.get("email") or "").strip(), "name": u.get("full_name") or "User"} for u in (users_r.data or [])}
+        except Exception:
+            user_map = {}
 
-    try:
-        users_r = supabase.table("users_view").select("id, email, full_name").execute()
-        user_map = {str(u["id"]): {"email": (u.get("email") or "").strip(), "name": u.get("full_name") or "User"} for u in (users_r.data or [])}
-    except Exception:
-        user_map = {}
+        def assignee_name(aid) -> str:
+            if not aid:
+                return "-"
+            return user_map.get(str(aid), {}).get("name", str(aid)[:8])
 
-    def assignee_name(aid) -> str:
-        if not aid:
-            return "-"
-        return user_map.get(str(aid), {}).get("name", str(aid)[:8])
+        holidays = _get_holidays_for_year(today.year)
+        is_holiday = lambda d, h=holidays: d in h
+        checklist_lines = []
+        try:
+            tasks_r = supabase.table("checklist_tasks").select("*").execute()
+            comp_r = supabase.table("checklist_completions").select("task_id, occurrence_date").execute()
+            comp = {}
+            for row in comp_r.data or []:
+                od = row.get("occurrence_date")
+                if isinstance(od, str) and "T" in od:
+                    od = od[:10]
+                comp[(str(row["task_id"]), od or "")] = True
+            for task in tasks_r.data or []:
+                start = task.get("start_date")
+                if isinstance(start, str):
+                    start = date.fromisoformat(start)
+                freq = task.get("frequency", "D")
+                dates = get_occurrence_dates(start, freq, today.year, is_holiday)
+                for d in dates:
+                    if d == today:
+                        key = (str(task["id"]), d.isoformat())
+                        if not comp.get(key):
+                            doer = assignee_name(task.get("doer_id"))
+                            checklist_lines.append(f"  - {task.get('task_name')} (Doer: {doer})")
+                        break
+        except Exception as e:
+            _log(f"Pending digest checklist: {e}")
+            checklist_lines = ["  (Error loading)"]
+        checklist_section = "\n".join(checklist_lines) if checklist_lines else "  (None)"
 
-    # --- 1. Checklist pending ---
-    holidays = _get_holidays_for_year(today.year)
-    is_holiday = lambda d, h=holidays: d in h
-    checklist_lines = []
-    try:
-        tasks_r = supabase.table("checklist_tasks").select("*").execute()
-        comp_r = supabase.table("checklist_completions").select("task_id, occurrence_date").execute()
-        comp = {}
-        for row in comp_r.data or []:
-            od = row.get("occurrence_date")
-            if isinstance(od, str) and "T" in od:
-                od = od[:10]
-            comp[(str(row["task_id"]), od or "")] = True
-        for task in tasks_r.data or []:
-            start = task.get("start_date")
-            if isinstance(start, str):
-                start = date.fromisoformat(start)
-            freq = task.get("frequency", "D")
-            dates = get_occurrence_dates(start, freq, today.year, is_holiday)
-            for d in dates:
-                if d == today:
-                    key = (str(task["id"]), d.isoformat())
-                    if not comp.get(key):
-                        doer = assignee_name(task.get("doer_id"))
-                        checklist_lines.append(f"  - {task.get('task_name')} (Doer: {doer})")
-                    break
-    except Exception as e:
-        _log(f"Pending digest checklist: {e}")
-        checklist_lines = ["  (Error loading)"]
-    checklist_section = "\n".join(checklist_lines) if checklist_lines else "  (None)"
-
-    # --- 2. Delegation pending ---
-    delegation_lines = []
-    try:
-        del_r = supabase.table("delegation_tasks").select("id, title, assignee_id, due_date").in_("status", ["pending", "in_progress"]).lte("due_date", today.isoformat()).execute()
-        for t in del_r.data or []:
-            assignee = assignee_name(t.get("assignee_id"))
-            delegation_lines.append(f"  - {t.get('title')} (Assignee: {assignee}, Due: {t.get('due_date')})")
-    except Exception:
-        delegation_lines = ["  (Table not created or error)"]
-    delegation_section = "\n".join(delegation_lines) if delegation_lines else "  (None)"
-
-    # --- 3. Support Chores & Bug by stage ---
-    chores_bug_lines = []
-    try:
-        cb_r = supabase.table("tickets").select("*").in_("type", ["chore", "bug"]).is_("quality_solution", "null").execute()
-        tickets_cb = cb_r.data or []
-        staged: dict[str, list] = {}
-        for t in tickets_cb:
-            if not is_chores_bug_pending(t):
-                continue
-            s = get_chores_bugs_stage(t)
-            label = s["stage_label"]
-            staged.setdefault(label, []).append(t)
-        for label in sorted(staged.keys(), key=lambda x: (int(x.split()[1]) if x.split()[1].isdigit() else 0, x)):
-            for t in staged[label]:
-                ref = t.get("reference_no") or t.get("id", "")[:8]
-                title = (t.get("title") or "")[:50]
+        delegation_lines = []
+        try:
+            del_r = supabase.table("delegation_tasks").select("id, title, assignee_id, due_date").in_("status", ["pending", "in_progress"]).lte("due_date", today.isoformat()).execute()
+            for t in del_r.data or []:
                 assignee = assignee_name(t.get("assignee_id"))
-                chores_bug_lines.append(f"  [{label}] {ref} {title} (Assignee: {assignee})")
-    except Exception as e:
-        _log(f"Pending digest chores&bug: {e}")
-        chores_bug_lines = ["  (Error loading)"]
-    chores_bug_section = "\n".join(chores_bug_lines) if chores_bug_lines else "  (None)"
+                delegation_lines.append(f"  - {t.get('title')} (Assignee: {assignee}, Due: {t.get('due_date')})")
+        except Exception:
+            delegation_lines = ["  (Table not created or error)"]
+        delegation_section = "\n".join(delegation_lines) if delegation_lines else "  (None)"
 
-    # --- 4. Support Feature by stage ---
-    feature_lines = []
-    try:
-        feat_r = supabase.table("tickets").select("*").eq("type", "feature").execute()
-        tickets_feat = feat_r.data or []
-        staged_f: dict[str, list] = {}
-        for t in tickets_feat:
-            if not is_feature_pending(t):
-                continue
-            s = get_staging_feature_stage(t)
-            label = s["stage_label"]
-            staged_f.setdefault(label, []).append(t)
-        for label in sorted(staged_f.keys(), key=lambda x: ("0" if "Approval" in x else "1" + x)):
-            for t in staged_f[label]:
-                ref = t.get("reference_no") or t.get("id", "")[:8]
-                title = (t.get("title") or "")[:50]
-                assignee = assignee_name(t.get("assignee_id"))
-                feature_lines.append(f"  [{label}] {ref} {title} (Assignee: {assignee})")
-    except Exception as e:
-        _log(f"Pending digest feature: {e}")
-        feature_lines = ["  (Error loading)"]
-    feature_section = "\n".join(feature_lines) if feature_lines else "  (None)"
+        chores_bug_lines = []
+        try:
+            cb_r = supabase.table("tickets").select("*").in_("type", ["chore", "bug"]).is_("quality_solution", "null").execute()
+            tickets_cb = cb_r.data or []
+            staged: dict[str, list] = {}
+            for t in tickets_cb:
+                if not is_chores_bug_pending(t):
+                    continue
+                s = get_chores_bugs_stage(t)
+                label = s["stage_label"]
+                staged.setdefault(label, []).append(t)
+            for label in sorted(staged.keys(), key=lambda x: (int(x.split()[1]) if x.split()[1].isdigit() else 0, x)):
+                for t in staged[label]:
+                    ref = t.get("reference_no") or t.get("id", "")[:8]
+                    title = (t.get("title") or "")[:50]
+                    assignee = assignee_name(t.get("assignee_id"))
+                    chores_bug_lines.append(f"  [{label}] {ref} {title} (Assignee: {assignee})")
+        except Exception as e:
+            _log(f"Pending digest chores&bug: {e}")
+            chores_bug_lines = ["  (Error loading)"]
+        chores_bug_section = "\n".join(chores_bug_lines) if chores_bug_lines else "  (None)"
 
-    body = f"""Pending Task Reminder – {today.isoformat()}
+        feature_lines = []
+        try:
+            feat_r = supabase.table("tickets").select("*").eq("type", "feature").execute()
+            tickets_feat = feat_r.data or []
+            staged_f: dict[str, list] = {}
+            for t in tickets_feat:
+                if not is_feature_pending(t):
+                    continue
+                s = get_staging_feature_stage(t)
+                label = s["stage_label"]
+                staged_f.setdefault(label, []).append(t)
+            for label in sorted(staged_f.keys(), key=lambda x: ("0" if "Approval" in x else "1" + x)):
+                for t in staged_f[label]:
+                    ref = t.get("reference_no") or t.get("id", "")[:8]
+                    title = (t.get("title") or "")[:50]
+                    assignee = assignee_name(t.get("assignee_id"))
+                    feature_lines.append(f"  [{label}] {ref} {title} (Assignee: {assignee})")
+        except Exception as e:
+            _log(f"Pending digest feature: {e}")
+            feature_lines = ["  (Error loading)"]
+        feature_section = "\n".join(feature_lines) if feature_lines else "  (None)"
+
+        body = f"""Pending Task Reminder – {today.isoformat()}
 
 This digest is sent to Admin, Master Admin, and Approver roles.
 
@@ -2477,24 +2492,60 @@ Delegation (pending, due today or overdue):
 Please log in to review and take action.
 """
 
-    sent_count = 0
-    for uid in level12_ids:
-        if uid in already_sent:
-            continue
-        u = user_map.get(uid, {})
-        email = u.get("email", "").strip()
-        name = u.get("name", "User")
-        if email and _send_pending_digest_email(email, body, name):
-            try:
-                supabase.table("pending_reminder_sent").insert({
-                    "user_id": uid,
-                    "reminder_date": today.isoformat(),
-                }).execute()
-                sent_count += 1
-            except Exception:
-                pass
+        sent_count = 0
+        for uid in level12_ids:
+            if uid in already_sent:
+                continue
+            u = user_map.get(uid, {})
+            email = u.get("email", "").strip()
+            name = u.get("name", "User")
+            if email and _send_pending_digest_email(email, body, name):
+                try:
+                    supabase.table("pending_reminder_sent").insert({
+                        "user_id": uid,
+                        "reminder_date": today.isoformat(),
+                    }).execute()
+                    sent_count += 1
+                except Exception:
+                    pass
+        _log(f"Pending digest background: sent {sent_count} for {today.isoformat()}")
+    except Exception as e:
+        _log(f"Pending digest background error: {e}")
 
-    return {"sent": sent_count, "message": f"Sent pending digest to {sent_count} recipient(s) for {today.isoformat()}"}
+
+@api_router.api_route("/reminders/send-pending-digest", methods=["GET", "POST"])
+async def send_pending_digest(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    auth: dict | None = Depends(get_current_user_optional),
+):
+    """
+    Start pending reminder digest in background. Returns immediately to avoid Render timeout.
+    Content: Checklist & Delegation + Support Chores&Bug & Feature by stage. Sent to admin, master_admin, approver.
+    Auth: X-Cron-Secret header, ?secret= query, or admin login. Result is logged; check server logs for sent count.
+    """
+    cron_secret = (os.getenv("CHECKLIST_CRON_SECRET") or os.getenv("PENDING_REMINDER_CRON_SECRET") or "").strip()
+    x_cron = (
+        request.headers.get("X-Cron-Secret") or
+        request.headers.get("x-cron-secret") or
+        request.query_params.get("secret") or
+        ""
+    ).strip()
+    if cron_secret and x_cron and x_cron == cron_secret:
+        pass
+    elif auth:
+        role = _get_role_from_profile(auth["id"])
+        if role not in ("admin", "master_admin"):
+            raise HTTPException(403, "Admin only (or use cron secret)")
+    else:
+        raise HTTPException(401, "Set PENDING_REMINDER_CRON_SECRET or CHECKLIST_CRON_SECRET header/?secret=, or log in as admin")
+
+    level12_ids = _get_level1_level2_user_ids()
+    if not level12_ids:
+        return {"status": "skipped", "message": "No recipients found. Ensure at least one user has role Admin, Master Admin, or Approver and has an email in the system."}
+
+    background_tasks.add_task(_run_pending_digest_background)
+    return {"status": "started", "message": "Pending digest job started. Check server logs for result."}
 
 
 # ---------------------------------------------------------------------------
