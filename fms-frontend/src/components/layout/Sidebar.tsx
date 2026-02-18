@@ -5,7 +5,6 @@ import {
   RocketOutlined,
   UserOutlined,
   SettingOutlined,
-  BellOutlined,
   QuestionCircleOutlined,
   CheckSquareOutlined,
   SendOutlined,
@@ -38,7 +37,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const isDesktop = screens.lg ?? true
   const navigate = useNavigate()
   const location = useLocation()
-  const { canAccessApproval, canAccessSettings, canAccessUsers } = useRole()
+  const { canAccessApproval, canAccessSettings, canAccessUsers, canViewSectionByKey } = useRole()
   const [supportOpen, setSupportOpen] = useState(isSupportPage(location.pathname))
   const [taskOpen, setTaskOpen] = useState(isTaskPage(location.pathname))
 
@@ -51,16 +50,19 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const linkStyle = { color: 'inherit', display: 'block' }
   const allSupportItems: MenuProps['items'] = [
-    { key: ROUTES.TICKETS, icon: <FileTextOutlined />, label: <Link to={ROUTES.TICKETS} style={linkStyle}>All Tickets</Link> },
-    { key: `${ROUTES.TICKETS}?section=chores-bugs`, icon: <FileTextOutlined />, label: <Link to={{ pathname: ROUTES.TICKETS, search: 'section=chores-bugs' }} style={linkStyle}>Chores & Bugs</Link> },
-    { key: ROUTES.STAGING, icon: <RocketOutlined />, label: <Link to={ROUTES.STAGING} style={linkStyle}>Staging</Link> },
-    { key: `${ROUTES.TICKETS}?type=feature`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?type=feature`} style={linkStyle}>Feature</Link> },
-    { key: `${ROUTES.TICKETS}?type=feature&view=approval`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?type=feature&view=approval`} style={linkStyle}>Approval Status</Link> },
-    { key: `${ROUTES.TICKETS}?section=completed-chores-bugs`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=completed-chores-bugs`} style={linkStyle}>Completed Chores & Bugs</Link> },
-    { key: `${ROUTES.TICKETS}?section=completed-feature`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=completed-feature`} style={linkStyle}>Completed Feature</Link> },
+    { key: ROUTES.TICKETS, icon: <FileTextOutlined />, label: <Link to={ROUTES.TICKETS} style={linkStyle}>All Tickets</Link>, sectionKey: 'all_tickets' },
+    { key: `${ROUTES.TICKETS}?section=chores-bugs`, icon: <FileTextOutlined />, label: <Link to={{ pathname: ROUTES.TICKETS, search: 'section=chores-bugs' }} style={linkStyle}>Chores & Bugs</Link>, sectionKey: 'chores_bugs' },
+    { key: ROUTES.STAGING, icon: <RocketOutlined />, label: <Link to={ROUTES.STAGING} style={linkStyle}>Staging</Link>, sectionKey: 'staging' },
+    { key: `${ROUTES.TICKETS}?type=feature`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?type=feature`} style={linkStyle}>Feature</Link>, sectionKey: 'feature' },
+    { key: `${ROUTES.TICKETS}?type=feature&view=approval`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?type=feature&view=approval`} style={linkStyle}>Approval Status</Link>, sectionKey: 'approval_status' },
+    { key: `${ROUTES.TICKETS}?section=completed-chores-bugs`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=completed-chores-bugs`} style={linkStyle}>Completed Chores & Bugs</Link>, sectionKey: 'completed_chores_bugs' },
+    { key: `${ROUTES.TICKETS}?section=completed-feature`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=completed-feature`} style={linkStyle}>Completed Feature</Link>, sectionKey: 'completed_feature' },
+    { key: `${ROUTES.TICKETS}?section=solutions`, icon: <FileTextOutlined />, label: <Link to={{ pathname: ROUTES.TICKETS, search: 'section=solutions' }} style={linkStyle}>Solution</Link>, sectionKey: 'solution' },
   ]
   const supportItems: MenuProps['items'] = allSupportItems?.filter((item) => {
     const key = item?.key as string
+    const sectionKey = (item as { sectionKey?: string })?.sectionKey
+    if (sectionKey && !canViewSectionByKey(sectionKey)) return false
     if (key?.includes('view=approval')) return canAccessApproval
     return true
   }) ?? []
@@ -70,40 +72,27 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     { key: ROUTES.DELEGATION, icon: <SendOutlined />, label: <Link to={ROUTES.DELEGATION} style={linkStyle}>Delegation</Link> },
   ]
 
+  const showDashboard = canViewSectionByKey('dashboard')
+  const hasAnySupportSection = (supportItems?.length ?? 0) > 0
+
   const menuItems: MenuProps['items'] = [
-    {
-      key: 'activity',
-      icon: <BellOutlined />,
-      label: (
-        <Space>
-          Activity
-          <span style={{
-            background: '#ff4d4f',
-            color: '#fff',
-            borderRadius: 10,
-            padding: '0 6px',
-            fontSize: 11,
-          }}>12</span>
-        </Space>
-      ),
-    },
-    { key: ROUTES.DASHBOARD, icon: <DashboardOutlined />, label: 'Dashboard' },
-    {
+    ...(showDashboard ? [{ key: ROUTES.DASHBOARD, icon: <DashboardOutlined />, label: <Link to={ROUTES.DASHBOARD} style={linkStyle}>Dashboard</Link> }] : []),
+    ...(hasAnySupportSection ? [{
       key: 'support',
       icon: <FileTextOutlined />,
       label: 'Support',
       children: supportItems,
       onTitleClick: () => setSupportOpen(!supportOpen),
-    },
-    {
+    }] : []),
+    ...(canViewSectionByKey('task') ? [{
       key: 'task',
       icon: <UnorderedListOutlined />,
       label: 'Task',
       children: taskItems,
       onTitleClick: () => setTaskOpen(!taskOpen),
-    },
-    ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: 'Users' }] : []),
-    ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: 'Settings' }] : []),
+    }] : []),
+    ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: <Link to={ROUTES.USERS} style={linkStyle}>Users</Link> }] : []),
+    ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: <Link to={ROUTES.SETTINGS} style={linkStyle}>Settings</Link> }] : []),
     {
       key: 'help',
       icon: <QuestionCircleOutlined />,
@@ -112,7 +101,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   ]
 
   const handleMenuClick = ({ key }: { key: string }) => {
-    if (key === 'activity' || key === 'help') return
+    if (key === 'help') return
     const [path, query] = key.includes('?') ? key.split('?') : [key, '']
     navigate(query ? `${path}?${query}` : path)
     onClose?.()

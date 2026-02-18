@@ -20,11 +20,13 @@ Click this link to create the PR:
 2. **Compare branch:** `fix/postmark-api-production`
 3. **Title:** `fix: use Postmark HTTP API in production (SMTP blocked on Render)`
 4. **Description** (optional):
-   ```
+
+   ```text
    - Use Postmark HTTP API instead of SMTP on Render (SMTP ports blocked)
    - Add Accept header for Postmark API
    - Update deployment docs
    ```
+
 5. Click **Create pull request**
 
 ---

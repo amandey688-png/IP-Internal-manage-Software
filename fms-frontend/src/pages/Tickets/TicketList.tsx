@@ -17,7 +17,7 @@ import { supportApi } from '../../api/support'
 import { TicketDetailDrawer } from '../../components/tickets/TicketDetailDrawer'
 import { ChoresBugsDetailDrawer } from '../../components/tickets/ChoresBugsDetailDrawer'
 import { PrintExport } from '../../components/common/PrintExport'
-import { formatDateTable, formatDuration, formatReplySla, getChoresBugsCurrentStage, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
+import { formatDateTable, formatDuration, formatReplySla, getChoresBugsCurrentStage, getFeatureCurrentStage, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
 import { useRole } from '../../hooks/useRole'
 import type { Ticket } from '../../api/tickets'
 import type { Company } from '../../api/support'
@@ -64,6 +64,7 @@ export const TicketList = () => {
   const viewFromUrl = searchParams.get('view') === 'approval'
   const isApprovalSection = viewFromUrl || sectionFromUrl === 'approval-status'
   const showStageFilter = sectionFromUrl === 'chores-bugs'
+  const showStageFilterForFeature = typeFromUrl === 'feature' && !isApprovalSection
 
   useEffect(() => {
     if (isApprovalSection && !canAccessApproval) {
@@ -146,8 +147,8 @@ export const TicketList = () => {
   }, [])
 
   useEffect(() => {
-    if (showStageFilter && stageFilter) {
-      // When stage filter is active, fetch all pages then filter client-side
+    if ((showStageFilter && stageFilter) || (showStageFilterForFeature && stageFilter)) {
+      // When stage filter is active (Chores & Bug or Feature), fetch all pages then filter client-side
       fetchAllTicketsForStageFilter()
     } else {
       // Reset stage filter state when filter is cleared
@@ -156,7 +157,7 @@ export const TicketList = () => {
       }
       fetchTickets()
     }
-  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, showStageFilter])
+  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, showStageFilter, showStageFilterForFeature])
 
   const fetchTickets = async () => {
     setLoading(true)
@@ -231,7 +232,11 @@ export const TicketList = () => {
       const allTickets = await fetchAllTicketsWithFilters()
       setAllTicketsForStageFilter(allTickets)
       const filtered = stageFilter
-        ? allTickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
+        ? allTickets.filter((t) =>
+            showStageFilter
+              ? getChoresBugsCurrentStage(t).stageLabel === stageFilter
+              : getFeatureCurrentStage(t).stageLabel === stageFilter
+          )
         : allTickets
       setTickets(filtered.slice((page - 1) * pageSize, page * pageSize))
       setTotal(filtered.length)
@@ -268,21 +273,28 @@ export const TicketList = () => {
   const showChoresBugsDrawer = isChoresBugs || drawerTicketType === 'chore' || drawerTicketType === 'bug'
   const isSolutionsSection = sectionFromUrl === 'solutions'
 
-  /** When stage filter is set (Chores & Bugs only), filter tickets for table, Export and Print */
+  /** When stage filter is set (Chores & Bugs or Feature), filter tickets for table, Export and Print */
   const ticketsForDisplay =
     showStageFilter && stageFilter
       ? tickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
-      : tickets
+      : showStageFilterForFeature && stageFilter
+        ? tickets.filter((t) => getFeatureCurrentStage(t).stageLabel === stageFilter)
+        : tickets
 
   const getStageForExport = isChoresBugs
     ? (t: Record<string, unknown>) => getChoresBugsCurrentStage(t as Parameters<typeof getChoresBugsCurrentStage>[0])
-    : undefined
+    : typeFromUrl === 'feature'
+      ? (t: Record<string, unknown>) => getFeatureCurrentStage(t as Parameters<typeof getFeatureCurrentStage>[0])
+      : undefined
 
   const handleExportClick = async () => {
     const allTickets = await fetchAllForExport()
-    const filteredForExport = showStageFilter && stageFilter
-      ? allTickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
-      : allTickets
+    const filteredForExport =
+      showStageFilter && stageFilter
+        ? allTickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
+        : showStageFilterForFeature && stageFilter
+          ? allTickets.filter((t) => getFeatureCurrentStage(t).stageLabel === stageFilter)
+          : allTickets
     setExportTickets(filteredForExport)
   }
 
@@ -798,6 +810,23 @@ export const TicketList = () => {
               <Option value="Stage 4">Stage 4</Option>
             </Select>
           )}
+          {showStageFilterForFeature && (
+            <Select
+              placeholder="Stage"
+              style={{ width: 200 }}
+              value={stageFilter || undefined}
+              onChange={(v) => {
+                setStageFilter(v ?? '')
+                setPage(1)
+              }}
+              allowClear
+              aria-label="Filter by stage"
+            >
+              <Option value="Stage 1: Staging">Stage 1: Staging</Option>
+              <Option value="Stage 2: Live">Stage 2: Live</Option>
+              <Option value="Stage 3: Live Review">Stage 3: Live Review</Option>
+            </Select>
+          )}
           <RangePicker
             placeholder={['From', 'To']}
             onChange={handleDateRange}
@@ -816,7 +845,12 @@ export const TicketList = () => {
           pagination={{
             current: page,
             pageSize,
-            total: showStageFilter && stageFilter ? allTicketsForStageFilter.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter).length : total,
+            total:
+              showStageFilter && stageFilter
+                ? allTicketsForStageFilter.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter).length
+                : showStageFilterForFeature && stageFilter
+                  ? allTicketsForStageFilter.filter((t) => getFeatureCurrentStage(t).stageLabel === stageFilter).length
+                  : total,
             showSizeChanger: true,
             showTotal: (t) => `Total ${t} tickets`,
             pageSizeOptions: ['10', '20', '50', '100'],

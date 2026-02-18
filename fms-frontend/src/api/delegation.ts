@@ -41,6 +41,6 @@ export const delegationApi = {
   createTask: (data: CreateDelegationTaskPayload) =>
     apiClient.post<DelegationTask>('/delegation/tasks', data).then((r) => r.data),
 
-  updateTask: (taskId: string, data: Partial<{ status: string; title: string; due_date: string; assignee_id: string; delegation_on: string; submission_date: string; has_document: string; document_url: string; submitted_by: string; completed_at: string }>) =>
+  updateTask: (taskId: string, data: Partial<Pick<DelegationTask, 'status' | 'title' | 'due_date' | 'assignee_id' | 'delegation_on' | 'submission_date' | 'has_document' | 'document_url' | 'submitted_by' | 'completed_at'>>) =>
     apiClient.put<DelegationTask>(`/delegation/tasks/${taskId}`, data).then((r) => r.data),
 }

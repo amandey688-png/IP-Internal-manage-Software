@@ -27,10 +27,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         try {
           const response = await authApi.getCurrentUser()
           if (response.data) {
-            setUser(response.data)
-            storage.setUser(response.data)
+            if (response.data.is_active === false) {
+              storage.clear()
+              setToken(null)
+              setUser(null)
+            } else {
+              setUser(response.data)
+              storage.setUser(response.data)
+            }
           } else {
-            // Token invalid, clear storage
             storage.clear()
             setToken(null)
             setUser(null)

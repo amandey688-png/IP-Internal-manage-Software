@@ -3,7 +3,6 @@
 /* Mobile & Tablet: reduce content padding */
 @media (max-width: 1023px) {
   .app-content {
-    margin-left: 0 !important;
     padding: 16px !important;
     margin: 64px 12px 16px !important;
   }

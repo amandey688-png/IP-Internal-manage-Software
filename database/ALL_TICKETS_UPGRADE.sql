@@ -47,7 +47,7 @@ BEGIN
     RETURN NEW;
 EXCEPTION
     WHEN OTHERS THEN
-        NEW.reference_no := prefix || '-' || LPAD(EXTRACT(EPOCH FROM NOW())::BIGINT::TEXT, 4, '0');
+        NEW.reference_no := prefix || '-' || LPAD(((EXTRACT(EPOCH FROM NOW())::BIGINT % 10000)::TEXT), 4, '0');
         RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

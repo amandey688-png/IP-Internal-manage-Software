@@ -80,6 +80,7 @@ export const Dashboard = () => {
 
   const safeMetrics: DashboardMetrics = metrics ?? {
     all_tickets: 0,
+    pending_till_date: 0,
     response_delay: 0,
     completion_delay: 0,
     total_last_week: 0,
@@ -89,11 +90,11 @@ export const Dashboard = () => {
   }
 
   const metricCards = [
-    { title: 'Chores & Bug (this month)', value: Number(safeMetrics.all_tickets) || 0, icon: <FileTextOutlined /> },
+    { title: 'Total Ticket (Current Month)', value: Number(safeMetrics.all_tickets) || 0, icon: <FileTextOutlined /> },
     { title: 'Response Delay', value: Number(safeMetrics.response_delay) || 0, icon: <ClockCircleOutlined /> },
     { title: 'Completion Delay', value: Number(safeMetrics.completion_delay) || 0, icon: <WarningOutlined /> },
     { title: 'Total (Last Week)', value: Number(safeMetrics.total_last_week) || 0, icon: <FileTextOutlined /> },
-    { title: 'Pending (Last Week)', value: Number(safeMetrics.pending_last_week) || 0, icon: <CheckCircleOutlined /> },
+    { title: 'Pending (till date)', value: Number(safeMetrics.pending_till_date) || 0, icon: <CheckCircleOutlined /> },
   ]
 
   const stagingCards = [

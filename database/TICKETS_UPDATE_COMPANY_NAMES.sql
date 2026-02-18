@@ -11,6 +11,7 @@ UPDATE public.tickets SET company_name = 'Nirmaan TMT' WHERE reference_no = 'CH-
 UPDATE public.tickets SET company_name = 'Spintech Tubes Pvt Ltd' WHERE reference_no = 'CH-036';
 UPDATE public.tickets SET company_name = 'Indo East Corporation Private Limited' WHERE reference_no = 'CH-037';
 UPDATE public.tickets SET company_name = 'Karnikripa Power Pvt Ltd' WHERE reference_no IN ('CH-038','BU-008');
-UPDATE public.tickets SET company_name = 'BIHAR FOUNDRY' WHERE reference_no IN ('CH-041','CH-049','CH-050','CH-051','CH-054','CH-058','CH-062','BU-006','CH-064','CH-065','CH-066','CH-067','CH-068','CH-069','CH-070','CH-071','CH-072','CH-073');
+-- BIHAR FOUNDRY: exclude CH-064..CH-070, CH-072, CH-073 (assigned to Bhagwati below)
+UPDATE public.tickets SET company_name = 'BIHAR FOUNDRY' WHERE reference_no IN ('CH-041','CH-049','CH-050','CH-051','CH-054','CH-058','CH-062','BU-006','CH-071');
 UPDATE public.tickets SET company_name = 'Flexicom Industries Pvt. Ltd.' WHERE reference_no = 'BU-004';
 UPDATE public.tickets SET company_name = 'Bhagwati Power Pvt. Ltd.' WHERE reference_no IN ('CH-063','CH-064','CH-065','CH-066','CH-067','CH-068','CH-069','CH-070','CH-072','CH-073','CH-074','CH-075','CH-076','CH-077','CH-078','BU-007','CH-079');

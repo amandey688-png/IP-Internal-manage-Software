@@ -107,6 +107,26 @@ export const getStagingCurrentStage = (t: {
   }
 }
 
+/** Current stage for Feature tickets (Approval + Stage 1–3 + Completed). Matches backend get_staging_feature_stage. */
+export const getFeatureCurrentStage = (t: {
+  staging_planned?: string | null
+  status_2?: string
+  approval_status?: 'approved' | 'unapproved' | null
+  staging_review_status?: string | null
+  live_status?: string | null
+  live_review_status?: string | null
+}): { stageLabel: string; status?: string } => {
+  const hasStaging = !!(t.staging_planned || t.status_2 === 'staging')
+  if (!hasStaging) {
+    if (t.approval_status == null || t.approval_status === undefined) return { stageLabel: 'Approval Pending', status: '-' }
+    return { stageLabel: `Approval (${t.approval_status})`, status: t.approval_status }
+  }
+  if (t.staging_review_status !== 'completed') return { stageLabel: 'Stage 1: Staging', status: t.staging_review_status || 'pending' }
+  if (t.live_status !== 'completed') return { stageLabel: 'Stage 2: Live', status: t.live_status || 'pending' }
+  if (t.live_review_status !== 'completed') return { stageLabel: 'Stage 3: Live Review', status: t.live_review_status || 'pending' }
+  return { stageLabel: 'Completed', status: 'completed' }
+}
+
 /** Current SLA stage summary for Chores & Bugs table */
 export const getChoresBugsCurrentStage = (t: {
   created_at?: string
@@ -259,6 +279,46 @@ export const canAccessSettings = (userRole: UserRole): boolean =>
 /** Can access Users list (Admin = view only, Master Admin = view + edit) */
 export const canAccessUsers = (userRole: UserRole): boolean =>
   userRole === ROLES.ADMIN || userRole === ROLES.MASTER_ADMIN
+
+/** Section key to route/sidebar mapping */
+export const SECTION_KEY_TO_ROUTE: Record<string, string> = {
+  dashboard: '/dashboard',
+  all_tickets: '/tickets',
+  chores_bugs: '/tickets?section=chores-bugs',
+  staging: '/staging',
+  feature: '/tickets?type=feature',
+  approval_status: '/tickets?type=feature&view=approval',
+  completed_chores_bugs: '/tickets?section=completed-chores-bugs',
+  completed_feature: '/tickets?section=completed-feature',
+  solution: '/tickets?section=solutions',
+  task: '/task/checklist',
+  settings: '/settings',
+  users: '/users',
+}
+
+/** Check if user can view a section (uses section_permissions if present; Master Admin sees all) */
+export const canViewSection = (
+  sectionKey: string,
+  userRole: UserRole,
+  sectionPermissions?: { section_key: string; can_view: boolean; can_edit: boolean }[]
+): boolean => {
+  if (userRole === ROLES.MASTER_ADMIN) return true
+  if (!sectionPermissions || sectionPermissions.length === 0) return true
+  const p = sectionPermissions.find((s) => s.section_key === sectionKey)
+  return p ? p.can_view : false
+}
+
+/** Check if user can edit in a section */
+export const canEditSection = (
+  sectionKey: string,
+  userRole: UserRole,
+  sectionPermissions?: { section_key: string; can_view: boolean; can_edit: boolean }[]
+): boolean => {
+  if (userRole === ROLES.MASTER_ADMIN) return true
+  if (!sectionPermissions || sectionPermissions.length === 0) return true
+  const p = sectionPermissions.find((s) => s.section_key === sectionKey)
+  return p ? p.can_edit : false
+}
 
 export const canAccessRoute = (userRole: UserRole, route: string): boolean => {
   if (route === '/users') return canAccessUsers(userRole)
