@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS public.ticket_responses (
 CREATE INDEX IF NOT EXISTS idx_ticket_responses_ticket ON public.ticket_responses(ticket_id);
 CREATE INDEX IF NOT EXISTS idx_ticket_responses_created ON public.ticket_responses(created_at);
 
--- 3. Update reference_no trigger for CH/0001, BU/0001, FE/0001 format
+-- 3. reference_no trigger: CH-0001, BU-0001, FE-0001 (continues after bulk upload e.g. CH-0072)
 DROP TRIGGER IF EXISTS tr_ticket_ref ON public.tickets;
 DROP FUNCTION IF EXISTS public.generate_ticket_reference() CASCADE;
 
@@ -36,13 +36,19 @@ BEGIN
         WHEN 'FEATURE' THEN 'FE'
         ELSE 'TK'
     END;
+    -- Support CH-001 / BU-0007 (and legacy CH/0001): strip prefix + hyphen or slash, max numeric + 1
     SELECT COALESCE(MAX(
-        CAST(NULLIF(REGEXP_REPLACE(reference_no, '^[A-Z]+/', ''), '') AS INT)
+        CAST(NULLIF(TRIM(REGEXP_REPLACE(t.reference_no, '^[A-Z]+[-/]', '')), '') AS INT)
     ), 0) + 1 INTO n
-    FROM public.tickets
-    WHERE type = NEW.type;
-    NEW.reference_no := prefix || '/' || LPAD(n::TEXT, 4, '0');
+    FROM public.tickets t
+    WHERE t.type = NEW.type
+      AND t.reference_no ~ '^[A-Z]+[-/][0-9]+$';
+    NEW.reference_no := prefix || '-' || LPAD(n::TEXT, 4, '0');
     RETURN NEW;
+EXCEPTION
+    WHEN OTHERS THEN
+        NEW.reference_no := prefix || '-' || LPAD(EXTRACT(EPOCH FROM NOW())::BIGINT::TEXT, 4, '0');
+        RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 

@@ -24,6 +24,8 @@ const truncate = (text: string | undefined, len = 40) => {
   return text.length > len ? `${text.slice(0, len)}...` : text
 }
 
+const wrapStyle = { whiteSpace: 'normal' as const, wordBreak: 'break-word' as const }
+
 /** Columns up to and including Reference No (tickets with Stage 2 Status = Staging) */
 const stagingTicketColumns = [
   {
@@ -32,6 +34,13 @@ const stagingTicketColumns = [
     key: 'created_at',
     width: 140,
     render: (v: string) => formatDateTable(v),
+  },
+  {
+    title: 'Reference No',
+    dataIndex: 'reference_no',
+    key: 'reference_no',
+    width: 100,
+    render: (v: string) => v || '-',
   },
   {
     title: 'Company Name',
@@ -99,17 +108,17 @@ const stagingTicketColumns = [
     title: 'Title',
     dataIndex: 'title',
     key: 'title',
-    width: 150,
-    ellipsis: true,
-    render: (v: string) => v || '-',
+    width: 200,
+    ellipsis: false,
+    render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
   },
   {
     title: 'Description',
     dataIndex: 'description',
     key: 'description',
-    width: 120,
-    ellipsis: true,
-    render: (v: string) => truncate(v, 30),
+    width: 220,
+    ellipsis: false,
+    render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
   },
   {
     title: 'Type of Request',
@@ -146,17 +155,17 @@ const stagingTicketColumns = [
     title: 'Quality of Response',
     dataIndex: 'quality_of_response',
     key: 'quality_of_response',
-    width: 120,
-    ellipsis: true,
-    render: (v: string) => v || '-',
+    width: 220,
+    ellipsis: false,
+    render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
   },
   {
     title: 'Customer Questions',
     dataIndex: 'customer_questions',
     key: 'customer_questions',
-    width: 130,
-    ellipsis: true,
-    render: (v: string) => truncate(v, 25),
+    width: 220,
+    ellipsis: false,
+    render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
   },
   {
     title: 'Query Response',
@@ -177,13 +186,6 @@ const stagingTicketColumns = [
         </Tag>
       )
     },
-  },
-  {
-    title: 'Reference No',
-    dataIndex: 'reference_no',
-    key: 'reference_no',
-    width: 100,
-    render: (v: string) => v || '-',
   },
   {
     title: 'Current Stage',

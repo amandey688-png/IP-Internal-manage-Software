@@ -286,6 +286,8 @@ export const TicketList = () => {
     setExportTickets(filteredForExport)
   }
 
+  const wrapStyle = { whiteSpace: 'normal' as const, wordBreak: 'break-word' as const }
+
   const baseColumns = [
     {
       title: 'Timestamp',
@@ -295,6 +297,14 @@ export const TicketList = () => {
       fixed: 'left' as const,
       sorter: true,
       render: (v: string) => formatDateTable(v),
+    },
+    {
+      title: 'Reference No',
+      dataIndex: 'reference_no',
+      key: 'reference_no',
+      width: 100,
+      fixed: 'left' as const,
+      render: (v: string) => v || '-',
     },
     {
       title: 'Company Name',
@@ -370,17 +380,17 @@ export const TicketList = () => {
       title: 'Title',
       dataIndex: 'title',
       key: 'title',
-      width: 150,
-      ellipsis: true,
-      render: (v: string) => v || '-',
+      width: 200,
+      ellipsis: false,
+      render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
     },
     {
       title: 'Description',
       dataIndex: 'description',
       key: 'description',
-      width: 120,
-      ellipsis: true,
-      render: (v: string) => truncate(v, 30),
+      width: 220,
+      ellipsis: false,
+      render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
     },
     {
       title: 'Type of Request',
@@ -415,17 +425,17 @@ export const TicketList = () => {
       title: 'Quality of Response',
       dataIndex: 'quality_of_response',
       key: 'quality_of_response',
-      width: 120,
-      ellipsis: true,
-      render: (v: string) => v || '-',
+      width: 220,
+      ellipsis: false,
+      render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
     },
     {
       title: 'Customer Questions',
       dataIndex: 'customer_questions',
       key: 'customer_questions',
-      width: 130,
-      ellipsis: true,
-      render: (v: string) => truncate(v, 25),
+      width: 220,
+      ellipsis: false,
+      render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
     },
     {
       title: 'Query Response',
@@ -475,13 +485,6 @@ export const TicketList = () => {
           },
         ]
       : []),
-    {
-      title: 'Reference No',
-      dataIndex: 'reference_no',
-      key: 'reference_no',
-      width: 100,
-      render: (v: string) => v || '-',
-    },
     ...(viewFromUrl
       ? [
           {
@@ -599,18 +602,18 @@ export const TicketList = () => {
       render: (v: string) => formatDateTable(v),
     },
     {
+      title: 'Reference No',
+      dataIndex: 'reference_no',
+      key: 'reference_no',
+      width: 110,
+      render: (v: string) => v || '-',
+    },
+    {
       title: 'Company Name',
       dataIndex: 'company_name',
       key: 'company_name',
       width: 140,
       ellipsis: true,
-      render: (v: string) => v || '-',
-    },
-    {
-      title: 'Reference No',
-      dataIndex: 'reference_no',
-      key: 'reference_no',
-      width: 110,
       render: (v: string) => v || '-',
     },
     {
