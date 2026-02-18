@@ -2,6 +2,7 @@ import { apiClient } from './axios'
 
 export interface DashboardMetrics {
   all_tickets: number
+  pending_till_date: number
   response_delay: number
   completion_delay: number
   total_last_week: number
@@ -24,5 +25,9 @@ export const dashboardApi = {
   getTrends: async (): Promise<{ data: TrendPoint[] }> => {
     const r = await apiClient.get<{ data: TrendPoint[] }>('/dashboard/trends')
     return r.data
+  },
+  getActivityCount: async (): Promise<number> => {
+    const r = await apiClient.get<{ count: number }>('/activity/count')
+    return r.data?.count ?? 0
   },
 }

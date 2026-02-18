@@ -465,11 +465,33 @@ def login(payload: LoginRequest):
                 detail="User profile not found. Run database/FIX_USER_PROFILE.sql in Supabase SQL Editor.",
             )
 
+        if profile.data.get("is_active") is False:
+            raise HTTPException(
+                status_code=403,
+                detail="Your account is inactive. Contact your administrator.",
+            )
+
         role_row = supabase.table("roles").select("name").eq(
             "id", profile.data["role_id"]
         ).single().execute()
         role_name = role_row.data["name"] if role_row.data else "user"
         frontend_role = _normalize_role(role_name)
+
+        # Load section permissions for sidebar visibility
+        section_permissions: list[dict] = []
+        try:
+            perm_r = supabase.table("user_section_permissions").select("section_key, can_view, can_edit").eq("user_id", user_id).execute()
+            perm_rows = perm_r.data or []
+            by_key = {p["section_key"]: p for p in perm_rows}
+            for key in SECTION_KEYS:
+                p = by_key.get(key)
+                section_permissions.append({
+                    "section_key": key,
+                    "can_view": p["can_view"] if p else True,
+                    "can_edit": p["can_edit"] if p else False,
+                })
+        except Exception:
+            section_permissions = [{"section_key": k, "can_view": True, "can_edit": False} for k in SECTION_KEYS]
 
         user = {
             "id": user_id,
@@ -479,6 +501,7 @@ def login(payload: LoginRequest):
             "role": frontend_role,
             "is_active": profile.data.get("is_active", True),
             "created_at": str(profile.data.get("created_at", "")),
+            "section_permissions": section_permissions,
         }
 
         return LoginResponse(
@@ -520,6 +543,22 @@ def get_me(auth: dict = Depends(get_current_user)):
     role_name = role_row.data["name"] if role_row.data else "user"
     frontend_role = _normalize_role(role_name)
 
+    # Load section permissions for sidebar visibility
+    section_permissions: list[dict] = []
+    try:
+        perm_r = supabase.table("user_section_permissions").select("section_key, can_view, can_edit").eq("user_id", user_id).execute()
+        perm_rows = perm_r.data or []
+        by_key = {p["section_key"]: p for p in perm_rows}
+        for key in SECTION_KEYS:
+            p = by_key.get(key)
+            section_permissions.append({
+                "section_key": key,
+                "can_view": p["can_view"] if p else True,
+                "can_edit": p["can_edit"] if p else False,
+            })
+    except Exception:
+        section_permissions = [{"section_key": k, "can_view": True, "can_edit": False} for k in SECTION_KEYS]
+
     return {
         "id": user_id,
         "email": auth["email"],
@@ -528,6 +567,7 @@ def get_me(auth: dict = Depends(get_current_user)):
         "role": frontend_role,
         "is_active": profile.data.get("is_active", True),
         "created_at": str(profile.data.get("created_at", "")),
+        "section_permissions": section_permissions,
     }
 
 
@@ -708,41 +748,20 @@ def create_ticket(payload: CreateTicketRequest, auth: dict = Depends(get_current
 
 
 # Fallback: reference_no -> company_name when tickets.company_name is null (e.g. production DB not updated).
-# Matches database/TICKETS_UPDATE_COMPANY_NAMES.sql so live shows correct names without running that SQL.
+# Loaded from tickets table (matching TICKETS_UPDATE_COMPANY_NAMES.sql); cache populated on first use.
 _REF_NO_TO_COMPANY: dict[str, str] = {}
+_REF_NO_TO_COMPANY_LOADED = False
 def _build_ref_no_to_company() -> dict[str, str]:
-    if _REF_NO_TO_COMPANY:
+    global _REF_NO_TO_COMPANY, _REF_NO_TO_COMPANY_LOADED
+    if _REF_NO_TO_COMPANY_LOADED:
         return _REF_NO_TO_COMPANY
-    # Apply same updates as TICKETS_UPDATE_COMPANY_NAMES.sql in order (later overwrites).
-    refs_demo = [
-        "BU-001", "BU-002", "CH-001", "CH-002", "CH-003", "CH-004", "CH-005", "CH-006", "CH-007", "CH-008",
-        "CH-009", "CH-010", "CH-011", "CH-012", "CH-013", "CH-014", "CH-015", "CH-016", "CH-017", "CH-018",
-        "CH-019", "CH-020", "CH-021", "CH-022", "CH-023", "CH-024", "CH-025", "CH-026", "CH-027", "CH-039",
-        "CH-040", "CH-044", "CH-045", "CH-046", "CH-047", "CH-048", "CH-049", "CH-050", "CH-051", "CH-052",
-        "CH-053", "CH-054", "CH-055", "CH-056", "CH-057", "CH-058", "CH-059", "CH-060", "CH-061", "CH-062",
-        "CH-063", "CH-081", "CH-085",
-    ]
-    for ref in refs_demo:
-        _REF_NO_TO_COMPANY[ref] = "Demo_c"
-    _REF_NO_TO_COMPANY["CH-028"] = "Ghankun Steel Pvt Ltd (SMS Division)"
-    _REF_NO_TO_COMPANY["CH-029"] = "Crescent Foundry"
-    _REF_NO_TO_COMPANY["CH-031"] = "Kodarma Chemical Pvt. Ltd."
-    _REF_NO_TO_COMPANY["CH-035"] = "Nirmaan TMT"
-    _REF_NO_TO_COMPANY["CH-036"] = "Spintech Tubes Pvt Ltd"
-    _REF_NO_TO_COMPANY["CH-037"] = "Indo East Corporation Private Limited"
-    for ref in ("CH-038", "BU-008"):
-        _REF_NO_TO_COMPANY[ref] = "Karnikripa Power Pvt Ltd"
-    for ref in (
-        "CH-041", "CH-049", "CH-050", "CH-051", "CH-054", "CH-058", "CH-062", "BU-006",
-        "CH-064", "CH-065", "CH-066", "CH-067", "CH-068", "CH-069", "CH-070", "CH-071", "CH-072", "CH-073",
-    ):
-        _REF_NO_TO_COMPANY[ref] = "BIHAR FOUNDRY"
-    _REF_NO_TO_COMPANY["BU-004"] = "Flexicom Industries Pvt. Ltd."
-    for ref in (
-        "CH-063", "CH-064", "CH-065", "CH-066", "CH-067", "CH-068", "CH-069", "CH-070",
-        "CH-072", "CH-073", "CH-074", "CH-075", "CH-076", "CH-077", "CH-078", "BU-007", "CH-079",
-    ):
-        _REF_NO_TO_COMPANY[ref] = "Bhagwati Power Pvt. Ltd."
+    _REF_NO_TO_COMPANY_LOADED = True
+    try:
+        r = supabase.table("tickets").select("reference_no, company_name").not_.is_("company_name", "null").execute()
+        rows = r.data or []
+        _REF_NO_TO_COMPANY = {row["reference_no"]: row["company_name"] for row in rows if row.get("reference_no") and row.get("company_name")}
+    except Exception as e:
+        _log(f"ref_no_to_company: failed to load from DB: {e}")
     return _REF_NO_TO_COMPANY
 
 
@@ -1217,6 +1236,26 @@ def delete_ticket(ticket_id: str, auth: dict = Depends(get_current_user)):
     return {"message": "Deleted"}
 
 
+# ---------- Activity count (for header badge) ----------
+@api_router.get("/activity/count")
+def activity_count(auth: dict = Depends(get_current_user)):
+    """Return count of recent activity: ticket_history + ticket_comments in the last 30 days."""
+    from datetime import timedelta
+    since = (datetime.utcnow() - timedelta(days=30)).isoformat()
+    total = 0
+    try:
+        r = supabase.table("ticket_history").select("id", count="exact").gte("created_at", since).execute()
+        total += r.count or 0
+    except Exception:
+        pass
+    try:
+        r = supabase.table("ticket_comments").select("id", count="exact").gte("created_at", since).execute()
+        total += r.count or 0
+    except Exception:
+        pass
+    return {"count": total}
+
+
 # ---------- Dashboard Metrics ----------
 @api_router.get("/dashboard/metrics")
 def dashboard_metrics(auth: dict = Depends(get_current_user)):
@@ -1230,7 +1269,7 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     # Chores & Bug only for Support Overview
     types_chores_bugs = ["chore", "bug"]
 
-    # All Chores & Bug tickets this month
+    # Current month: total Chores & Bug tickets created this month
     try:
         q = supabase.table("tickets").select("id", count="exact").in_("type", types_chores_bugs).gte("created_at", month_start.isoformat())
         r = q.execute()
@@ -1238,7 +1277,16 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     except Exception:
         all_tickets = 0
 
-    # Last week Chores & Bug tickets
+    # Pending till date: all Chores & Bug tickets currently open/in_progress/on_hold (no date filter)
+    pending_statuses = ["open", "in_progress", "on_hold"]
+    try:
+        q = supabase.table("tickets").select("id", count="exact").in_("type", types_chores_bugs).in_("status", pending_statuses)
+        r = q.execute()
+        pending_till_date = r.count or 0
+    except Exception:
+        pending_till_date = 0
+
+    # Last week Chores & Bug tickets (for response_delay / completion_delay)
     try:
         q = supabase.table("tickets").select("*").in_("type", types_chores_bugs).gte("created_at", week_start.isoformat())
         r = q.execute()
@@ -1247,7 +1295,7 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
         week_tickets = []
 
     total_last_week = len(week_tickets)
-    pending_last_week = sum(1 for t in week_tickets if t.get("status") in ("open", "in_progress", "on_hold"))
+    pending_last_week = sum(1 for t in week_tickets if t.get("status") in pending_statuses)
 
     # Response delay: Chores & Bug from last week with no assignee (proxy for SLA breach)
     response_delay = sum(1 for t in week_tickets if not t.get("assignee_id"))
@@ -1276,6 +1324,7 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
 
     return {
         "all_tickets": all_tickets,
+        "pending_till_date": pending_till_date,
         "response_delay": response_delay,
         "completion_delay": completion_delay,
         "total_last_week": total_last_week,
@@ -1352,7 +1401,7 @@ def _map_role(name: str) -> str:
 SECTION_KEYS = [
     "dashboard", "all_tickets", "chores_bugs", "staging", "feature",
     "approval_status", "completed_chores_bugs", "completed_feature",
-    "solution", "settings", "users",
+    "solution", "task", "settings", "users",
 ]
 
 
@@ -1974,8 +2023,8 @@ def list_delegation_tasks(
             try:
                 pr = supabase.table("user_profiles").select("id, full_name").in_("id", list(all_user_ids)).execute()
                 user_map = {p["id"]: p.get("full_name", "") for p in (pr.data or [])}
-            except Exception:
-                pass
+            except Exception as e:
+                _log(f"delegation/tasks: failed to load user profiles for ids={list(all_user_ids)[:5]}...: {e}")
         for t in tasks:
             t["assignee_name"] = user_map.get(t.get("assignee_id"), "")
             t["submitted_by_name"] = user_map.get(t.get("submitted_by"), "")
@@ -1996,8 +2045,8 @@ def create_delegation_task(payload: CreateDelegationTaskRequest, auth: dict = De
         if val:
             try:
                 date.fromisoformat(val)
-            except ValueError:
-                raise HTTPException(400, f"Invalid {field_name}. Use YYYY-MM-DD")
+            except ValueError as err:
+                raise HTTPException(400, f"Invalid {field_name}. Use YYYY-MM-DD") from err
     data = {
         "title": payload.title,
         "assignee_id": payload.assignee_id,
@@ -2176,7 +2225,10 @@ async def _run_checklist_reminders_background():
                 continue
             freq = task.get("frequency", "D")
             holidays = _get_holidays_for_year(today.year)
-            is_holiday = lambda d, h=holidays: d in h
+
+            def is_holiday(d: date, h: set[date] | None = None) -> bool:
+                return d in (h if h is not None else holidays)
+
             dates = get_occurrence_dates(start, freq, today.year, is_holiday)
             for d in dates:
                 if d == today:
@@ -2200,8 +2252,8 @@ async def _run_checklist_reminders_background():
                         "reminder_date": today.isoformat(),
                     }).execute()
                     sent_count += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    _log(f"checklist reminder: failed recording send for user_id={uid} date={today.isoformat()}: {e}")
         _log(f"Checklist reminder background: sent {sent_count} for {today.isoformat()}")
     except Exception as e:
         _log(f"Checklist reminder background error: {e}")

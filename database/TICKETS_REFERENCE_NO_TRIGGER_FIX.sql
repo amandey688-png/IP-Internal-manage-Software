@@ -32,7 +32,7 @@ BEGIN
 EXCEPTION
     WHEN OTHERS THEN
         -- If any row has unexpected format, fallback: use timestamp-based unique ref
-        NEW.reference_no := prefix || '-' || LPAD(EXTRACT(EPOCH FROM NOW())::BIGINT::TEXT, 4, '0');
+        NEW.reference_no := prefix || '-' || LPAD(((EXTRACT(EPOCH FROM NOW())::BIGINT % 10000)::TEXT), 4, '0');
         RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

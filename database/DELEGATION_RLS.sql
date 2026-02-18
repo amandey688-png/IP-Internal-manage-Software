@@ -14,18 +14,18 @@ ALTER TABLE public.delegation_tasks ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS delegation_tasks_select_authenticated ON public.delegation_tasks;
 CREATE POLICY delegation_tasks_select_authenticated ON public.delegation_tasks
     FOR SELECT TO authenticated
-    USING (true);
+    USING (assignee_id = auth.uid() OR created_by = auth.uid());
 
 DROP POLICY IF EXISTS delegation_tasks_insert_authenticated ON public.delegation_tasks;
 CREATE POLICY delegation_tasks_insert_authenticated ON public.delegation_tasks
     FOR INSERT TO authenticated
-    WITH CHECK (true);
+    WITH CHECK (assignee_id = auth.uid() OR created_by = auth.uid());
 
 DROP POLICY IF EXISTS delegation_tasks_update_authenticated ON public.delegation_tasks;
 CREATE POLICY delegation_tasks_update_authenticated ON public.delegation_tasks
     FOR UPDATE TO authenticated
-    USING (true)
-    WITH CHECK (true);
+    USING (assignee_id = auth.uid() OR created_by = auth.uid())
+    WITH CHECK (assignee_id = auth.uid() OR created_by = auth.uid());
 
 -- Optional: allow authenticated users to delete (uncomment if app supports delete)
 -- DROP POLICY IF EXISTS delegation_tasks_delete_authenticated ON public.delegation_tasks;

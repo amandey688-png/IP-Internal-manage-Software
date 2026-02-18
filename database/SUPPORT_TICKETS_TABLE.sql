@@ -52,7 +52,7 @@ DECLARE
 BEGIN
   IF NEW.reference_no IS NULL OR TRIM(NEW.reference_no) = '' THEN
     next_num := nextval('public.support_tickets_ref_seq');
-    NEW.reference_no := 'CH-' || LPAD(next_num::TEXT, 3, '0');
+    NEW.reference_no := 'CH-' || LPAD(next_num::TEXT, 6, '0');
   END IF;
   RETURN NEW;
 END;

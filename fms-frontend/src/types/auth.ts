@@ -1,5 +1,11 @@
 export type UserRole = 'user' | 'admin' | 'master_admin' | 'approver'
 
+export interface SectionPermission {
+  section_key: string
+  can_view: boolean
+  can_edit: boolean
+}
+
 export interface User {
   id: string
   email: string
@@ -10,6 +16,8 @@ export interface User {
   is_active: boolean
   created_at: string
   last_login?: string
+  /** Per-section view/edit permissions (Master Admin sets these) */
+  section_permissions?: SectionPermission[]
 }
 
 export interface AuthState {

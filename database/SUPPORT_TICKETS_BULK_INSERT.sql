@@ -2,6 +2,7 @@
 -- Delete sample rows first if you already ran SUPPORT_TICKETS_MIGRATION.sql:
 -- DELETE FROM public.support_tickets WHERE response_source = 'upload';
 
+BEGIN;
 INSERT INTO public.support_tickets (
   old_reference_no, description, stage, status, created_at, planned_resolution_date, actual_resolution_date, response_source,
   title, type_of_request, page, company_name, submitted_by, query_arrival_at, query_response_at
@@ -767,14 +768,14 @@ INSERT INTO public.support_tickets (
   title, type_of_request, page, company_name, submitted_by, query_arrival_at, query_response_at
 ) VALUES (
   'CH-0594',
-  'Purchase order view and item stock options should be visible in the gate entry person''s maingate417@gmail.com. Original Ref: CH-0594',
+  'Purchase order view and item stock options should be visible in the gate entry person''s [redacted-email]. Original Ref: CH-0594',
   'Pending',
   'Pending',
   '2025-07-11 12:10:35+00'::TIMESTAMPTZ,
   NULL,
   NULL,
   'upload',
-  'Purchase order view and item stock options should be visible in the gate entry person''s maingate417@gmail.com',
+  'Purchase order view and item stock options should be visible in the gate entry person''s [redacted-email]',
   'Chores',
   'Dashboard',
   'Nirmaan TMT',
@@ -1572,3 +1573,4 @@ SELECT setval(
     WHERE reference_no ~ '^CH-[0-9]+$'
   ), 0) + 1
 );
+COMMIT;

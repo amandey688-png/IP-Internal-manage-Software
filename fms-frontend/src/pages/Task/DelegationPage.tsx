@@ -50,7 +50,6 @@ export const DelegationPage = () => {
   const [editModalTask, setEditModalTask] = useState<DelegationTask | null>(null)
 
   useEffect(() => {
-    setReferenceNoFilter('__all__')
     loadTasks()
   }, [statusFilter, userFilter])
 
@@ -397,6 +396,7 @@ export const DelegationPage = () => {
           multiple={false}
           maxCount={1}
           showUploadList={{ showRemoveIcon: true }}
+          disabled={uploadingDoc}
           beforeUpload={(file) => {
             setUploadingDoc(true)
             uploadAttachment(file)

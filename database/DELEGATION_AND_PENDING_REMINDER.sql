@@ -34,15 +34,19 @@ ALTER TABLE public.delegation_tasks ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS delegation_tasks_select_authenticated ON public.delegation_tasks;
 CREATE POLICY delegation_tasks_select_authenticated ON public.delegation_tasks
-    FOR SELECT TO authenticated USING (true);
+    FOR SELECT TO authenticated
+    USING (assignee_id = auth.uid() OR created_by = auth.uid());
 
 DROP POLICY IF EXISTS delegation_tasks_insert_authenticated ON public.delegation_tasks;
 CREATE POLICY delegation_tasks_insert_authenticated ON public.delegation_tasks
-    FOR INSERT TO authenticated WITH CHECK (true);
+    FOR INSERT TO authenticated
+    WITH CHECK (assignee_id = auth.uid() OR created_by = auth.uid());
 
 DROP POLICY IF EXISTS delegation_tasks_update_authenticated ON public.delegation_tasks;
 CREATE POLICY delegation_tasks_update_authenticated ON public.delegation_tasks
-    FOR UPDATE TO authenticated USING (true);
+    FOR UPDATE TO authenticated
+    USING (assignee_id = auth.uid() OR created_by = auth.uid())
+    WITH CHECK (assignee_id = auth.uid() OR created_by = auth.uid());
 
 -- Track pending digest sent to Level 1 & 2 (one per user per date)
 CREATE TABLE IF NOT EXISTS public.pending_reminder_sent (

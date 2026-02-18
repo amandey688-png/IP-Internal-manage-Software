@@ -1,10 +1,12 @@
-import { Layout, Dropdown, Avatar, Space, Typography, Button } from 'antd'
-import { UserOutlined, LogoutOutlined, PlusOutlined, MenuOutlined } from '@ant-design/icons'
+import { Layout, Dropdown, Avatar, Space, Typography, Button, Badge } from 'antd'
+import { UserOutlined, LogoutOutlined, PlusOutlined, MenuOutlined, BellOutlined } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { getInitials } from '../../utils/helpers'
 import { ROUTES, APP_NAME } from '../../utils/constants'
+import { dashboardApi } from '../../api/dashboard'
 
 const { Header: AntHeader } = Layout
 const { Text } = Typography
@@ -19,10 +21,15 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout } = useAuth()
+  const [activityCount, setActivityCount] = useState(0)
   const searchParams = new URLSearchParams(location.search)
   const section = searchParams.get('section')
   const viewApproval = searchParams.get('view') === 'approval'
   const hideAddNew = section === 'chores-bugs' || section === 'completed-chores-bugs' || section === 'completed-feature' || section === 'solutions' || location.pathname === ROUTES.STAGING || location.pathname === ROUTES.CHECKLIST || location.pathname === ROUTES.DELEGATION || viewApproval
+
+  useEffect(() => {
+    dashboardApi.getActivityCount().then(setActivityCount).catch(() => setActivityCount(0))
+  }, [])
 
   const handleLogout = () => {
     logout()
@@ -73,7 +80,7 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
         position: 'fixed',
         top: 0,
         right: 0,
-        left: 220,
+        left: 'var(--sidebar-width, 220px)',
         zIndex: 1000,
         height: 64,
       }}
@@ -105,6 +112,38 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
             <span className="submit-btn-text">Submit Support Ticket</span>
           </Button>
         )}
+        <Dropdown
+          trigger={['click']}
+          dropdownRender={() => (
+            <div
+              style={{
+                background: '#fff',
+                borderRadius: 8,
+                boxShadow: '0 6px 16px rgba(0,0,0,0.08)',
+                minWidth: 320,
+                maxWidth: 400,
+                maxHeight: 400,
+                overflow: 'auto',
+              }}
+            >
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #f0f0f0', fontWeight: 600 }}>
+                Activity
+              </div>
+              <div style={{ padding: 24, color: '#8c8c8c', textAlign: 'center' }}>
+                Recent activity will appear here.
+              </div>
+            </div>
+          )}
+        >
+          <Badge count={activityCount} size="small" offset={[-2, 2]}>
+            <Button
+              type="text"
+              icon={<BellOutlined />}
+              style={{ fontSize: 18 }}
+              aria-label="Activity"
+            />
+          </Badge>
+        </Dropdown>
         <Space>
           <div style={{ textAlign: 'right' }}>
             <Text strong style={{ display: 'block' }}>{user?.full_name}</Text>

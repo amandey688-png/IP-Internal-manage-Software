@@ -8,6 +8,10 @@
 ALTER TABLE public.delegation_tasks ADD COLUMN IF NOT EXISTS delegation_on DATE;
 ALTER TABLE public.delegation_tasks ADD COLUMN IF NOT EXISTS submission_date DATE;
 ALTER TABLE public.delegation_tasks ADD COLUMN IF NOT EXISTS has_document TEXT;
+DO $$ BEGIN
+  ALTER TABLE public.delegation_tasks ADD CONSTRAINT chk_delegation_tasks_has_document CHECK (has_document IS NULL OR has_document IN ('yes', 'no'));
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
 ALTER TABLE public.delegation_tasks ADD COLUMN IF NOT EXISTS document_url TEXT;
 ALTER TABLE public.delegation_tasks ADD COLUMN IF NOT EXISTS submitted_by UUID REFERENCES auth.users(id) ON DELETE SET NULL;
 ALTER TABLE public.delegation_tasks ADD COLUMN IF NOT EXISTS reference_no TEXT;

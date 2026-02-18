@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS public.checklist_tasks (
     created_by UUID NOT NULL REFERENCES auth.users(id) ON DELETE RESTRICT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
-    reference_no TEXT UNIQUE
+    reference_no TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_checklist_tasks_doer ON public.checklist_tasks(doer_id);

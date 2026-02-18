@@ -59,11 +59,8 @@ export const ChecklistPage = () => {
 
   useEffect(() => {
     loadTasks()
-  }, [selectedUserId, referenceNoFilter])
-
-  useEffect(() => {
     loadOccurrences()
-  }, [filter, selectedUserId, referenceNoFilter])
+  }, [selectedUserId, referenceNoFilter, filter])
 
   useEffect(() => {
     if (isAdmin) {
@@ -93,7 +90,7 @@ export const ChecklistPage = () => {
 
   const referenceNoOptions = [
     { label: 'All', value: '__all__' },
-    ...Array.from(new Set(occurrences.map((o) => o.reference_no).filter(Boolean)))
+    ...Array.from(new Set(tasks.map((t) => t.reference_no).filter(Boolean)))
       .sort()
       .map((ref) => ({ label: ref!, value: ref! })),
   ]
