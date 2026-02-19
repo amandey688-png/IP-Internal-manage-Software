@@ -131,7 +131,7 @@ export const StagingDetailDrawer = ({
 
           {/* Stage 1: Staging — Pending, Completed & Back */}
           <div style={{ marginBottom: 20, padding: 12, background: '#e6f7ff', borderRadius: 8 }}>
-            <Text strong style={{ color: '#1890ff' }}>Stage 1: Staging</Text>
+            <Text strong style={{ color: '#1890ff' }}>Stage 1: Staging Planned</Text>
             <div style={{ marginTop: 8 }}>
               <Text type="secondary">Staging Planned: </Text>
               {formatDateTable(ticket.staging_planned)}
@@ -199,7 +199,7 @@ export const StagingDetailDrawer = ({
           {/* Stage 2: Live */}
           {showStage2 && (
             <div style={{ marginBottom: 20, padding: 12, background: '#f6ffed', borderRadius: 8 }}>
-              <Text strong style={{ color: '#52c41a' }}>Stage 2: Live</Text>
+              <Text strong style={{ color: '#52c41a' }}>Stage 2: Live Planned</Text>
               <div style={{ marginTop: 8 }}>
                 <Text type="secondary">Live Planned: </Text>
                 {formatDateTable(ticket.live_planned || ticket.staging_review_actual)}
@@ -244,7 +244,7 @@ export const StagingDetailDrawer = ({
           {/* Stage 3: Live Review */}
           {showStage3 && (
             <div style={{ marginBottom: 20, padding: 12, background: '#fffbe6', borderRadius: 8 }}>
-              <Text strong style={{ color: '#faad14' }}>Stage 3: Live Review</Text>
+              <Text strong style={{ color: '#faad14' }}>Stage 3: Review Planned</Text>
               <div style={{ marginTop: 8 }}>
                 <Text type="secondary">Live Review Planned: </Text>
                 {formatDateTable(ticket.live_review_planned || ticket.live_actual)}

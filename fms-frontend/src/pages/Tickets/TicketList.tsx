@@ -9,8 +9,9 @@ import {
   Tag,
   DatePicker,
   Button,
+  Dropdown,
 } from 'antd'
-import { SearchOutlined, PhoneOutlined, MailOutlined, MessageOutlined, LinkOutlined } from '@ant-design/icons'
+import { SearchOutlined, PhoneOutlined, MailOutlined, MessageOutlined, LinkOutlined, MoreOutlined } from '@ant-design/icons'
 import { useSearchParams, useLocation, useNavigate } from 'react-router-dom'
 import { ticketsApi } from '../../api/tickets'
 import { supportApi } from '../../api/support'
@@ -72,11 +73,13 @@ export const TicketList = () => {
     }
   }, [isApprovalSection, canAccessApproval, navigate])
   const [searchInput, setSearchInput] = useState('')
+  const [referenceFilterInput, setReferenceFilterInput] = useState('')
   const [companies, setCompanies] = useState<Company[]>([])
   const [drawerTicketId, setDrawerTicketId] = useState<string | null>(null)
   const [drawerTicketType, setDrawerTicketType] = useState<string | null>(null)
   const [filters, setFilters] = useState({
     search: '',
+    reference_filter: '',
     status: '',
     type: typeFromUrl,
     types_in: sectionFromUrl === 'chores-bugs' ? 'chore,bug' : sectionFromUrl === 'completed-chores-bugs' ? 'chore,bug' : '',
@@ -177,6 +180,7 @@ export const TicketList = () => {
         page,
         limit: pageSize,
         ...(filters.search && { search: filters.search }),
+        ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
@@ -213,6 +217,7 @@ export const TicketList = () => {
         page: currentPage,
         limit,
         ...(filters.search && { search: filters.search }),
+        ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
@@ -279,6 +284,11 @@ export const TicketList = () => {
 
   const handleSearch = () => {
     setFilters((f) => ({ ...f, search: searchInput }))
+    setPage(1)
+  }
+
+  const handleReferenceFilterApply = () => {
+    setFilters((f) => ({ ...f, reference_filter: referenceFilterInput }))
     setPage(1)
   }
 
@@ -359,6 +369,42 @@ export const TicketList = () => {
       fixed: 'left' as const,
       render: (v: string) => v || '-',
     },
+    ...(isMasterAdmin
+      ? [
+          {
+            title: '',
+            key: 'actions',
+            width: 48,
+            fixed: 'left' as const,
+            render: (_: unknown, r: Ticket) => (
+              <Dropdown
+                menu={{
+                  items: [
+                    {
+                      key: 'edit',
+                      label: 'Edit',
+                      onClick: () => {
+                        setDrawerTicketId(r.id)
+                        setDrawerTicketType(r.type ?? null)
+                      },
+                    },
+                  ],
+                }}
+                trigger={['click']}
+                getPopupContainer={() => document.body}
+              >
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<MoreOutlined />}
+                  onClick={(e) => e.stopPropagation()}
+                  aria-label="Master Admin actions"
+                />
+              </Dropdown>
+            ),
+          },
+        ]
+      : []),
     {
       title: 'Company Name',
       dataIndex: 'company_name',
@@ -804,6 +850,14 @@ export const TicketList = () => {
           <Button type="primary" onClick={handleSearch}>
             Search
           </Button>
+          <Input
+            placeholder="Reference Filter"
+            style={{ width: 160 }}
+            value={referenceFilterInput}
+            onChange={(e) => setReferenceFilterInput(e.target.value)}
+            onPressEnter={handleReferenceFilterApply}
+            allowClear
+          />
           {isApprovalSection && (
             <Select
               placeholder="Approval"

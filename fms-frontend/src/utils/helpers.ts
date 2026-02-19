@@ -50,6 +50,32 @@ export const formatDelay = (seconds: number | null | undefined): string => {
   return parts.join(' ') || '0 sec'
 }
 
+/** Feature Stage 1 delay: starts after 1 day from planned. Returns seconds over 1d or 0. */
+export const featureStage1DelaySeconds = (
+  plannedIso: string | null | undefined,
+  status: string | null | undefined,
+  actualIso?: string | null
+): number => {
+  const SLA_1D = 24 * 3600
+  if (!plannedIso || status === 'completed') return 0
+  const planned = new Date(plannedIso).getTime()
+  const end = actualIso ? new Date(actualIso).getTime() : Date.now()
+  return Math.max(0, Math.floor((end - planned) / 1000) - SLA_1D)
+}
+
+/** Feature Stage 2 delay: starts after 2 hours from planned. Returns seconds over 2h or 0. */
+export const featureStage2DelaySeconds = (
+  plannedIso: string | null | undefined,
+  status: string | null | undefined,
+  actualIso?: string | null
+): number => {
+  const SLA_2H = 2 * 3600
+  if (!plannedIso || status === 'completed') return 0
+  const planned = new Date(plannedIso).getTime()
+  const end = actualIso ? new Date(actualIso).getTime() : Date.now()
+  return Math.max(0, Math.floor((end - planned) / 1000) - SLA_2H)
+}
+
 /** Staging delay: start after 2 hours from planned. Returns seconds over 2h or 0. */
 export const stagingDelaySeconds = (
   plannedIso: string | null | undefined,
@@ -80,7 +106,7 @@ export const getStagingCurrentStage = (t: {
   if (t.staging_review_status !== 'completed') {
     const delaySec = stagingDelaySeconds(t.staging_planned, t.staging_review_status, t.staging_review_actual)
     return {
-      stageLabel: 'Stage 1: Staging',
+      stageLabel: 'Stage 1: Staging Planned',
       planned: fmt(t.staging_planned),
       actual: fmt(t.staging_review_actual),
       status: t.staging_review_status || 'pending',
@@ -90,7 +116,7 @@ export const getStagingCurrentStage = (t: {
   if (t.live_status !== 'completed') {
     const delaySec = stagingDelaySeconds(t.live_planned, t.live_status, t.live_actual)
     return {
-      stageLabel: 'Stage 2: Live',
+      stageLabel: 'Stage 2: Live Planned',
       planned: fmt(t.live_planned || t.staging_review_actual),
       actual: fmt(t.live_actual),
       status: t.live_status || 'pending',
@@ -99,7 +125,7 @@ export const getStagingCurrentStage = (t: {
   }
   const delaySec = stagingDelaySeconds(t.live_review_planned, t.live_review_status, t.live_review_actual)
   return {
-    stageLabel: 'Stage 3: Live Review',
+    stageLabel: 'Stage 3: Review Planned',
     planned: fmt(t.live_review_planned || t.live_actual),
     actual: fmt(t.live_review_actual),
     status: t.live_review_status || 'pending',
@@ -232,11 +258,29 @@ export const getOverallDelaySeconds = (t: {
   return Math.max(0, Math.floor((Date.now() - start) / 1000))
 }
 
-/** Time delay string for ticket: use status-based delay when available, otherwise overall delay so it is always visible. */
-export const getTicketTimeDelayDisplay = (t: Parameters<typeof getChoresBugsCurrentStage>[0] & { type?: string; query_arrival_at?: string | null; created_at?: string }): string => {
+/** Time delay string for ticket: use status-based delay when available. Feature: Stage 1 after 1 day, Stage 2 after 2 hrs. */
+export const getTicketTimeDelayDisplay = (t: Parameters<typeof getChoresBugsCurrentStage>[0] & {
+  type?: string
+  query_arrival_at?: string | null
+  created_at?: string
+  status_2?: string
+  actual_1?: string | null
+  live_status?: string | null
+  live_planned?: string | null
+  live_actual?: string | null
+}): string => {
   if (t.type === 'chore' || t.type === 'bug') {
     const stage = getChoresBugsCurrentStage(t)
     if (stage.timeDelay !== '-') return stage.timeDelay
+  }
+  if (t.type === 'feature') {
+    if (t.status_2 !== 'completed') {
+      const sec = featureStage1DelaySeconds(t.query_arrival_at || t.created_at, t.status_2, t.actual_1)
+      if (sec > 0) return formatDelay(sec)
+    } else {
+      const sec = featureStage2DelaySeconds(t.actual_1 || t.live_planned, t.live_status, t.live_actual)
+      if (sec > 0) return formatDelay(sec)
+    }
   }
   const sec = getOverallDelaySeconds(t)
   return sec > 0 ? formatDelay(sec) : '-'

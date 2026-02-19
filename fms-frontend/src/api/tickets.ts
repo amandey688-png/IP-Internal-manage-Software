@@ -67,6 +67,11 @@ export interface Ticket {
   live_review_status?: 'pending' | 'completed'
   /** Set by backend for Level 3 (user) role: true = this user has used their one-time edit; drawer is view-only except Stage 2 */
   level3_used_by_current_user?: boolean
+  /** Stage locks: Admin/User can edit once; after that only Master Admin can edit */
+  stage_1_locked?: boolean
+  stage_3_locked?: boolean
+  stage_4_locked?: boolean
+  feature_stage_2_edit_used?: boolean
 }
 
 export interface TicketResponse {
@@ -145,6 +150,7 @@ export const ticketsApi = {
     date_from?: string
     date_to?: string
     search?: string
+    reference_filter?: string
     sort_by?: string
     sort_order?: string
   }): Promise<ApiResponse<PaginatedResponse<Ticket>>> => {

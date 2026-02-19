@@ -51,6 +51,9 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
 
   const isLevel3 = user?.role === 'user'
   const level3Restricted = isLevel3 && !isMasterAdmin && ticket?.level3_used_by_current_user === true
+  const stage1Locked = ticket?.stage_1_locked && !isMasterAdmin
+  const stage3Locked = ticket?.stage_3_locked && !isMasterAdmin
+  const stage4Locked = ticket?.stage_4_locked && !isMasterAdmin
 
   useEffect(() => {
     if (open && ticketId) {
@@ -246,7 +249,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
               </Descriptions.Item>
             </Descriptions>
 
-            {!readOnly && !ticket.staging_planned && status1 === 'no' && !level3Restricted && (
+            {!readOnly && !ticket.staging_planned && status1 === 'no' && (
               <div style={{ marginBottom: 16 }}>
                 <Button
                   type="primary"
@@ -308,7 +311,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                   }}
                   style={{ width: 100 }}
                   placeholder="Select"
-                  disabled={saving || readOnly || level3Restricted}
+                  disabled={saving || readOnly || stage1Locked}
                 >
                   <Select.Option value="yes">Yes</Select.Option>
                   <Select.Option value="no">No</Select.Option>
@@ -387,7 +390,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
               <>
                 <Divider>Staging Workflow</Divider>
                 <div style={{ marginBottom: 20, padding: 12, background: '#e6f7ff', borderRadius: 8 }}>
-                  <Text strong style={{ color: '#1890ff' }}>Stage 1: Staging</Text>
+                  <Text strong style={{ color: '#1890ff' }}>Stage 1: Staging Planned</Text>
                   <div style={{ marginTop: 8 }}>
                     <Text type="secondary">Staging Planned: </Text>
                     {formatDateTable(ticket.staging_planned)}
@@ -410,7 +413,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                 </div>
                 {ticket.staging_review_status === 'completed' && (
                   <div style={{ marginBottom: 20, padding: 12, background: '#f6ffed', borderRadius: 8 }}>
-                    <Text strong style={{ color: '#52c41a' }}>Stage 2: Live</Text>
+                    <Text strong style={{ color: '#52c41a' }}>Stage 2: Live Planned</Text>
                     <div style={{ marginTop: 8 }}>
                       <Text type="secondary">Live Planned: </Text>
                       {formatDateTable(ticket.live_planned || ticket.staging_review_actual)}
@@ -434,7 +437,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                 )}
                 {ticket.live_status === 'completed' && (
                   <div style={{ marginBottom: 20, padding: 12, background: '#fffbe6', borderRadius: 8 }}>
-                    <Text strong style={{ color: '#faad14' }}>Stage 3: Live Review</Text>
+                    <Text strong style={{ color: '#faad14' }}>Stage 3: Review Planned</Text>
                     <div style={{ marginTop: 8 }}>
                       <Text type="secondary">Live Review Planned: </Text>
                       {formatDateTable(ticket.live_review_planned || ticket.live_actual)}
@@ -484,7 +487,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                     }}
                     style={{ width: 120 }}
                     placeholder="Select"
-                    disabled={saving || readOnly || level3Restricted}
+                    disabled={saving || readOnly || stage3Locked}
                   >
                     <Select.Option value="completed">Completed</Select.Option>
                     <Select.Option value="pending">Pending</Select.Option>
@@ -528,7 +531,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                     }}
                     style={{ width: 120 }}
                     placeholder="Select"
-                    disabled={saving || readOnly || level3Restricted}
+                    disabled={saving || readOnly || stage4Locked}
                   >
                     <Select.Option value="completed">Completed</Select.Option>
                     <Select.Option value="pending">Pending</Select.Option>

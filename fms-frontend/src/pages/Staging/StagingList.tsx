@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Table, Card, Typography, Tag, Select, Space } from 'antd'
+import { Table, Card, Typography, Tag, Select, Space, Input } from 'antd'
 import { PhoneOutlined, MailOutlined, MessageOutlined, LinkOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
 import { formatDateTable, formatReplySla, getStagingCurrentStage, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
@@ -253,6 +253,8 @@ export const StagingList = () => {
   const [drawerTicketId, setDrawerTicketId] = useState<string | null>(openId || null)
   /** Stage filter: applies to table, Export and Print */
   const [stageFilter, setStageFilter] = useState<string>('')
+  const [referenceFilter, setReferenceFilter] = useState('')
+  const [referenceFilterInput, setReferenceFilterInput] = useState('')
   const [allStagingTicketsForStageFilter, setAllStagingTicketsForStageFilter] = useState<Ticket[]>([])
   const [exportTickets, setExportTickets] = useState<Ticket[]>([])
 
@@ -271,7 +273,7 @@ export const StagingList = () => {
       }
       fetchStagingTickets()
     }
-  }, [page, pageSize, stageFilter])
+  }, [page, pageSize, stageFilter, referenceFilter])
 
   const fetchStagingTickets = async () => {
     setLoading(true)
@@ -280,6 +282,7 @@ export const StagingList = () => {
         section: 'staging',
         page,
         limit: pageSize,
+        ...(referenceFilter && { reference_filter: referenceFilter }),
         sort_by: 'created_at',
         sort_order: 'desc',
       })
@@ -304,6 +307,7 @@ export const StagingList = () => {
         section: 'staging',
         page: currentPage,
         limit,
+        ...(referenceFilter && { reference_filter: referenceFilter }),
         sort_by: 'created_at',
         sort_order: 'desc',
       })
@@ -335,7 +339,7 @@ export const StagingList = () => {
 
   const fetchAllForExport = async (): Promise<Ticket[]> => fetchAllStagingPages()
 
-  const stagingStageLabels = ['Stage 1: Staging', 'Stage 2: Live', 'Stage 3: Live Review']
+  const stagingStageLabels = ['Stage 1: Staging Planned', 'Stage 2: Live Planned', 'Stage 3: Review Planned']
   const ticketsForDisplay = tickets
   const getStageForExport = (t: Record<string, unknown>) => getStagingCurrentStage(t as Parameters<typeof getStagingCurrentStage>[0])
   const exportColumns = [...TICKET_EXPORT_COLUMNS]
@@ -362,6 +366,17 @@ export const StagingList = () => {
           <Typography.Paragraph type="secondary" style={{ margin: 0 }}>
             Tickets in Staging workflow (Stage 1–3). All columns up to Reference No. Click a row to open staging details.
           </Typography.Paragraph>
+          <Input
+            placeholder="Reference Filter"
+            style={{ width: 160 }}
+            value={referenceFilterInput}
+            onChange={(e) => setReferenceFilterInput(e.target.value)}
+            onPressEnter={() => {
+              setReferenceFilter(referenceFilterInput)
+              setPage(1)
+            }}
+            allowClear
+          />
           <Select
             placeholder="Stage"
             style={{ width: 180 }}
