@@ -4,6 +4,7 @@ import { CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
 import { formatDateTable, formatDuration } from '../../utils/helpers'
 import type { Ticket } from '../../api/tickets'
+import { useRole } from '../../hooks/useRole'
 
 const { TextArea } = Input
 const { Text } = Typography
@@ -68,6 +69,7 @@ const getTypeColor = (type: string) => (type === 'chore' ? 'green' : type === 'b
 const getPriorityColor = (p: string) => (p === 'high' ? 'red' : p === 'medium' ? 'gold' : 'green')
 
 export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly = false, approvalMode = false }: TicketDetailDrawerProps) => {
+  const { isUser, isMasterAdmin } = useRole()
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -236,7 +238,7 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
                     </Button>
                   )}
                 </Descriptions.Item>
-                {approvalMode && (ticket.approval_status == null || ticket.approval_status === undefined) && (
+                {approvalMode && (!isUser || isMasterAdmin) && (ticket.approval_status == null || ticket.approval_status === undefined) && (
                   <Descriptions.Item label="Actions">
                     <Space>
                       <Button
@@ -318,7 +320,7 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
                     handleFeatureStageUpdate(updates)
                   }}
                   saving={saving}
-                  readOnly={readOnly || approvalMode}
+                  readOnly={readOnly || approvalMode || (isUser && !isMasterAdmin && !!ticket?.level3_used_by_current_user)}
                 />
               )}
             </>

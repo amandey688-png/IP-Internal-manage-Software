@@ -7,6 +7,7 @@ import { formatDateTable, formatReplySla, getStagingCurrentStage, TICKET_EXPORT_
 import type { Ticket } from '../../api/tickets'
 import { StagingDetailDrawer } from '../../components/tickets/StagingDetailDrawer'
 import { PrintExport } from '../../components/common/PrintExport'
+import { useRole } from '../../hooks/useRole'
 
 const { Option } = Select
 
@@ -177,13 +178,14 @@ const stagingTicketColumns = [
   {
     title: 'Reply Status',
     key: 'reply_status',
-    width: 120,
+    width: 180,
+    ellipsis: false,
     render: (_: unknown, r: Ticket) => {
       const sla = formatReplySla(r.query_arrival_at, r.query_response_at)
       return (
-        <Tag color={sla.status === 'on-time' ? 'green' : 'red'}>
-          {sla.text}
-        </Tag>
+        <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+          <Tag color={sla.status === 'on-time' ? 'green' : 'red'}>{sla.text}</Tag>
+        </span>
       )
     },
   },
@@ -240,6 +242,7 @@ const stagingTicketColumns = [
 ]
 
 export const StagingList = () => {
+  const { isUser, isMasterAdmin } = useRole()
   const [searchParams, setSearchParams] = useSearchParams()
   const openId = searchParams.get('open')
   const [loading, setLoading] = useState(true)
@@ -410,6 +413,7 @@ export const StagingList = () => {
           if (openId) setSearchParams({})
           fetchStagingTickets()
         }}
+        readOnly={isUser && !isMasterAdmin}
       />
     </div>
   )

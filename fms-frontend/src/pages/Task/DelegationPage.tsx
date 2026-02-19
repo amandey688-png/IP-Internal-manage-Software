@@ -33,8 +33,8 @@ const STATUS_COLORS: Record<string, string> = {
 
 export const DelegationPage = () => {
   const { user } = useAuth()
-  const { isAdmin, isApprover, isMasterAdmin } = useRole()
-  const canManage = isAdmin || isApprover
+  const { isAdmin, isApprover, isMasterAdmin, isUser } = useRole()
+  const canManage = (isAdmin || isApprover || isMasterAdmin) && !isUser
   const [form] = Form.useForm()
   const [editForm] = Form.useForm()
   const [tasks, setTasks] = useState<DelegationTask[]>([])

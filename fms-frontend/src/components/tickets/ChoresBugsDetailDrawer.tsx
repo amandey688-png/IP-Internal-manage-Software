@@ -17,6 +17,7 @@ import { ticketsApi } from '../../api/tickets'
 import { formatDateTable, formatReplySla, formatDelay, stagingDelaySeconds } from '../../utils/helpers'
 import type { Ticket } from '../../api/tickets'
 import { useAuth } from '../../hooks/useAuth'
+import { useRole } from '../../hooks/useRole'
 
 const { TextArea } = Input
 const { Text } = Typography
@@ -40,6 +41,7 @@ const getSlaColor = (seconds: number, limitSeconds: number) => {
 
 export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly = false }: ChoresBugsDetailDrawerProps) => {
   const { user } = useAuth()
+  const { isMasterAdmin } = useRole()
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -48,7 +50,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
   const [markingStaging, setMarkingStaging] = useState(false)
 
   const isLevel3 = user?.role === 'user'
-  const level3Restricted = isLevel3 && ticket?.level3_used_by_current_user === true
+  const level3Restricted = isLevel3 && !isMasterAdmin && ticket?.level3_used_by_current_user === true
 
   useEffect(() => {
     if (open && ticketId) {

@@ -49,7 +49,7 @@ const truncate = (text: string | undefined, len = 40) => {
 
 export const TicketList = () => {
   const navigate = useNavigate()
-  const { canAccessApproval } = useRole()
+  const { canAccessApproval, isUser, isMasterAdmin } = useRole()
   const [loading, setLoading] = useState(true)
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [allTicketsForStageFilter, setAllTicketsForStageFilter] = useState<Ticket[]>([])
@@ -502,13 +502,14 @@ export const TicketList = () => {
           {
             title: 'Reply Status',
             key: 'reply_status',
-            width: 120,
+            width: 180,
+            ellipsis: false,
             render: (_: unknown, r: Ticket) => {
               const sla = formatReplySla(r.query_arrival_at, r.query_response_at)
               return (
-                <Tag color={sla.status === 'on-time' ? 'green' : 'red'}>
-                  {sla.text}
-                </Tag>
+                <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>
+                  <Tag color={sla.status === 'on-time' ? 'green' : 'red'}>{sla.text}</Tag>
+                </span>
               )
             },
           },
@@ -972,7 +973,7 @@ export const TicketList = () => {
             setDrawerTicketType(null)
           }}
           onUpdate={fetchTickets}
-          readOnly={sectionFromUrl === 'completed-feature'}
+          readOnly={sectionFromUrl === 'completed-feature' || (isApprovalSection && isUser && !isMasterAdmin)}
           approvalMode={isApprovalSection}
         />
       )}
