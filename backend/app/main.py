@@ -998,11 +998,14 @@ def update_ticket(ticket_id: str, payload: UpdateTicketRequest, auth: dict = Dep
             }).execute()
         except Exception:
             pass
-    # Level 3 (user): one-time edit for Chores & Bugs (except Stage 2). Feature Stage 1 (remarks/approval) is always allowed.
+    # Level 3 (user): Chores&Bug Stage 2 = always allowed. Chores&Bug Stage 1/3/4 = one-time.
+    # Feature Stage 1 = always allowed. Feature Stage 2 = one-time.
     if role == "user":
         updated = r.data[0]
         ticket_type = updated.get("type") or (supabase.table("tickets").select("type").eq("id", ticket_id).single().execute().data or {}).get("type")
         if ticket_type in ("chore", "bug") and (data.keys() & _LEVEL3_RESTRICTED_CHORES_BUGS_KEYS):
+            _mark_level3_edit_used(ticket_id, auth["id"])
+        if ticket_type == "feature" and (data.keys() & {"live_status", "live_actual", "live_planned"}):
             _mark_level3_edit_used(ticket_id, auth["id"])
     return r.data[0]
 
