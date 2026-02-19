@@ -125,6 +125,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
           height: 64,
           display: 'flex',
           alignItems: 'center',
+          gap: 12,
           paddingLeft: 24,
           borderBottom: '1px solid #f0f0f0',
           fontWeight: 600,
@@ -132,6 +133,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
           color: '#2c3e50',
         }}
       >
+        <img src="/logo.png" alt="Logo" style={{ height: 36, width: 'auto', objectFit: 'contain' }} />
         {APP_NAME}
       </div>
       <Menu
@@ -173,7 +175,12 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   return (
     <Drawer
-      title={APP_NAME}
+      title={
+        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <img src="/logo.png" alt="Logo" style={{ height: 28, width: 'auto', objectFit: 'contain' }} />
+          {APP_NAME}
+        </span>
+      }
       placement="left"
       open={open}
       onClose={onClose}

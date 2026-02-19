@@ -95,7 +95,8 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
             aria-label="Open menu"
           />
         )}
-        <Space>
+        <Space size="small">
+          <img src="/logo.png" alt="Logo" style={{ height: 32, width: 'auto', objectFit: 'contain' }} />
           <Text strong style={{ fontSize: 16 }}>{APP_NAME}</Text>
           <Text type="secondary" className="breadcrumb-text" style={{ marginLeft: 16 }}>{breadcrumb}</Text>
         </Space>
