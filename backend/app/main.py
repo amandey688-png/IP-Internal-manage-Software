@@ -823,6 +823,7 @@ def list_tickets(
     date_from: str | None = None,
     date_to: str | None = None,
     search: str | None = None,
+    reference_filter: str | None = None,  # Filter by reference_no (partial match)
     sort_by: str = "created_at",
     sort_order: str = "desc",
     page: int = 1,
@@ -846,9 +847,9 @@ def list_tickets(
     elif section == "solutions":
         q = q.not_.is_("quality_solution", "null")
     elif section == "completed-feature":
-        # Only Feature type; only when last stage completed (live_review_status = completed)
+        # Feature: when Stage 2 (live) completed -> auto-move to Completed Feature
         q = q.eq("type", "feature")
-        q = q.eq("live_review_status", "completed")
+        q = q.eq("live_status", "completed")
     elif section == "staging":
         # Tickets in Staging: (new workflow: staging_planned set OR old: status_2 = staging) AND not completed Stage 3
         q = q.or_("staging_planned.not.is.null,status_2.eq.staging")
@@ -879,9 +880,10 @@ def list_tickets(
     elif type:
         q = q.eq("type", type)
         if type == "feature":
-            # Feature section: only tickets already approved/unapproved (pending ones show in Approval Status only)
+            # Feature section: approved/unapproved, not yet in Completed Feature (live_status != completed)
             q = q.not_.is_("approval_status", "null")
             q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
+            q = q.or_("live_status.is.null,live_status.neq.completed")
     if company_id:
         q = q.eq("company_id", company_id)
     if priority:
@@ -891,7 +893,11 @@ def list_tickets(
     if date_to:
         q = q.lte("created_at", date_to)
     if search:
-        q = q.or_(f"title.ilike.%{search}%,description.ilike.%{search}%,user_name.ilike.%{search}%,submitted_by.ilike.%{search}%,customer_questions.ilike.%{search}%")
+        q = q.or_(f"title.ilike.%{search}%,description.ilike.%{search}%,user_name.ilike.%{search}%,submitted_by.ilike.%{search}%,customer_questions.ilike.%{search}%,reference_no.ilike.%{search}%")
+    if reference_filter and reference_filter.strip():
+        safe_ref = reference_filter.strip().replace("%", "").replace("_", "")[:80]
+        if safe_ref:
+            q = q.ilike("reference_no", f"%{safe_ref}%")
     order_col = sort_by if sort_by in ("created_at", "updated_at", "query_arrival_at", "query_response_at", "title", "status", "priority") else "created_at"
     q = q.order(order_col, desc=(sort_order.lower() == "desc"))
     q = q.range((page - 1) * limit, page * limit - 1)
@@ -960,10 +966,39 @@ def _apply_approval_actual_times(data: dict) -> dict:
     return data
 
 
-# Chores & Bugs: keys that count as "restricted" for Level 3 one-time edit (Stage 2 = status_2/actual_2 is allowed anytime)
-_LEVEL3_RESTRICTED_CHORES_BUGS_KEYS = {
-    "status_1", "actual_1", "planned_2", "status_3", "actual_3", "planned_3", "status_4", "actual_4", "planned_4",
-}
+# Chores & Bugs: keys per stage (Stage 2 = status_2/actual_2 always editable)
+_STAGE_1_KEYS = {"status_1", "actual_1", "planned_2"}
+_STAGE_3_KEYS = {"status_3", "actual_3", "planned_3"}
+_STAGE_4_KEYS = {"status_4", "actual_4", "planned_4"}
+_FEATURE_STAGE_2_KEYS = {"live_status", "live_actual", "live_planned"}
+
+
+def _check_stage_locks_and_set(ticket_id: str, data: dict, role: str) -> None:
+    """Check stage locks (Admin/User) and set locks when they edit. Master Admin bypasses."""
+    if role == "master_admin":
+        return
+    ticket = supabase.table("tickets").select("stage_1_locked,stage_3_locked,stage_4_locked,feature_stage_2_edit_used,type").eq("id", ticket_id).single().execute()
+    row = ticket.data or {}
+    updates = {}
+    if row.get("type") in ("chore", "bug"):
+        if row.get("stage_1_locked") and (data.keys() & _STAGE_1_KEYS):
+            raise HTTPException(status_code=403, detail="Stage 1 is locked. Only Master Admin can edit.")
+        if row.get("stage_3_locked") and (data.keys() & _STAGE_3_KEYS):
+            raise HTTPException(status_code=403, detail="Stage 3 is locked. Only Master Admin can edit.")
+        if row.get("stage_4_locked") and (data.keys() & _STAGE_4_KEYS):
+            raise HTTPException(status_code=403, detail="Stage 4 is locked. Only Master Admin can edit.")
+        if data.keys() & _STAGE_1_KEYS:
+            updates["stage_1_locked"] = True
+        if data.keys() & _STAGE_3_KEYS:
+            updates["stage_3_locked"] = True
+        if data.keys() & _STAGE_4_KEYS:
+            updates["stage_4_locked"] = True
+    if row.get("type") == "feature" and (data.keys() & _FEATURE_STAGE_2_KEYS):
+        if row.get("feature_stage_2_edit_used"):
+            raise HTTPException(status_code=403, detail="Feature Stage 2 is locked. Only Master Admin can edit.")
+        updates["feature_stage_2_edit_used"] = True
+    for k, v in updates.items():
+        data[k] = v
 
 
 @api_router.put("/tickets/{ticket_id}")
@@ -981,6 +1016,7 @@ def update_ticket(ticket_id: str, payload: UpdateTicketRequest, auth: dict = Dep
         data["resolved_at"] = datetime.utcnow().isoformat()
     data = _apply_approval_actual_times(data)
     data = _apply_staging_cascade(data, ticket_id)
+    _check_stage_locks_and_set(ticket_id, data, role)
     r = supabase.table("tickets").update(data).eq("id", ticket_id).execute()
     if not r.data:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -998,14 +1034,13 @@ def update_ticket(ticket_id: str, payload: UpdateTicketRequest, auth: dict = Dep
             }).execute()
         except Exception:
             pass
-    # Level 3 (user): Chores&Bug Stage 2 = always allowed. Chores&Bug Stage 1/3/4 = one-time.
-    # Feature Stage 1 = always allowed. Feature Stage 2 = one-time.
+    # Level 3 (user): legacy level3_used for backward compat (Chores&Bug mark-staging etc)
     if role == "user":
         updated = r.data[0]
         ticket_type = updated.get("type") or (supabase.table("tickets").select("type").eq("id", ticket_id).single().execute().data or {}).get("type")
-        if ticket_type in ("chore", "bug") and (data.keys() & _LEVEL3_RESTRICTED_CHORES_BUGS_KEYS):
+        if ticket_type in ("chore", "bug") and (data.keys() & (_STAGE_1_KEYS | _STAGE_3_KEYS | _STAGE_4_KEYS)):
             _mark_level3_edit_used(ticket_id, auth["id"])
-        if ticket_type == "feature" and (data.keys() & {"live_status", "live_actual", "live_planned"}):
+        if ticket_type == "feature" and (data.keys() & _FEATURE_STAGE_2_KEYS):
             _mark_level3_edit_used(ticket_id, auth["id"])
     return r.data[0]
 

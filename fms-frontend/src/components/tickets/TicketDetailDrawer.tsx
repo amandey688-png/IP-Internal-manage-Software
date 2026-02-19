@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { Drawer, Descriptions, Tag, Typography, Input, Button, Space, message, Modal, Divider, Select } from 'antd'
 import { CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
-import { formatDateTable, formatDuration } from '../../utils/helpers'
+import { formatDateTable, formatDuration, featureStage1DelaySeconds, featureStage2DelaySeconds, formatDelay } from '../../utils/helpers'
 import type { Ticket } from '../../api/tickets'
 import { useRole } from '../../hooks/useRole'
 
@@ -20,6 +20,7 @@ const FeatureStageBlock = ({
   onStatusChange,
   saving,
   readOnly,
+  delaySeconds,
 }: {
   title: string
   planned: string
@@ -30,6 +31,7 @@ const FeatureStageBlock = ({
   onStatusChange?: (v: string) => void
   saving?: boolean
   readOnly?: boolean
+  delaySeconds?: number
 }) => (
   <div style={{ marginBottom: 16, padding: 12, background: bg, borderRadius: 8 }}>
     <Text strong>{title}</Text>
@@ -51,6 +53,11 @@ const FeatureStageBlock = ({
         )}
       </Descriptions.Item>
       <Descriptions.Item label="Actual">{actual}</Descriptions.Item>
+      {delaySeconds != null && delaySeconds > 0 && (
+        <Descriptions.Item label="Delay">
+          <Tag color={delaySeconds > 2 * 3600 ? 'red' : 'gold'}>{formatDelay(delaySeconds)}</Tag>
+        </Descriptions.Item>
+      )}
     </Descriptions>
   </div>
 )
@@ -273,6 +280,7 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
                 status={ticket.status_2 ?? 'pending'}
                 actual={formatDateTable(ticket.actual_1) || '-'}
                 bg="#e6f7ff"
+                delaySeconds={featureStage1DelaySeconds(ticket.query_arrival_at || ticket.created_at, ticket.status_2, ticket.actual_1)}
                 statusOptions={[
                   { value: 'pending', label: 'Pending' },
                   { value: 'completed', label: 'Completed' },
@@ -306,6 +314,7 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
                   status={ticket.live_status ?? 'pending'}
                   actual={formatDateTable(ticket.live_actual) || '-'}
                   bg="#f6ffed"
+                  delaySeconds={featureStage2DelaySeconds(ticket.actual_1 || ticket.live_planned, ticket.live_status, ticket.live_actual)}
                   statusOptions={[
                     { value: 'pending', label: 'Pending' },
                     { value: 'completed', label: 'Completed' },
@@ -320,7 +329,7 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
                     handleFeatureStageUpdate(updates)
                   }}
                   saving={saving}
-                  readOnly={readOnly || approvalMode || (isUser && !isMasterAdmin && !!ticket?.level3_used_by_current_user)}
+                  readOnly={readOnly || approvalMode || (!!ticket?.feature_stage_2_edit_used && !isMasterAdmin)}
                 />
               )}
             </>

@@ -34,7 +34,7 @@ const STATUS_COLORS: Record<string, string> = {
 export const DelegationPage = () => {
   const { user } = useAuth()
   const { isAdmin, isApprover, isMasterAdmin, isUser } = useRole()
-  const canManage = (isAdmin || isApprover || isMasterAdmin) && !isUser
+  const canManage = isAdmin || isApprover || isMasterAdmin
   const [form] = Form.useForm()
   const [editForm] = Form.useForm()
   const [tasks, setTasks] = useState<DelegationTask[]>([])
@@ -56,8 +56,10 @@ export const DelegationPage = () => {
   useEffect(() => {
     if (canManage) {
       delegationApi.getUsers().then((r) => setUsers(r.users || [])).catch(() => setUsers([]))
+    } else if (user?.id) {
+      setUsers([{ id: user.id, full_name: user.full_name || user.email || 'You' }])
     }
-  }, [canManage])
+  }, [canManage, user?.id, user?.full_name, user?.email])
 
   const loadTasks = () => {
     setLoading(true)
@@ -92,16 +94,21 @@ export const DelegationPage = () => {
       message.error('Please select submission date')
       return
     }
+    const submitterId = values.submitted_by || user?.id
+    if (!submitterId) {
+      message.error('Unable to detect user. Please refresh and try again.')
+      return
+    }
     setLoading(true)
     delegationApi
       .createTask({
         title: values.title,
-        assignee_id: values.submitted_by!,
+        assignee_id: submitterId,
         due_date: values.submission_date.format('YYYY-MM-DD'),
         submission_date: values.submission_date.format('YYYY-MM-DD'),
         delegation_on: values.delegation_on?.format('YYYY-MM-DD'),
         has_document: values.has_document,
-        submitted_by: values.submitted_by,
+        submitted_by: submitterId,
       })
       .then(() => {
         message.success('Delegation task created')
@@ -317,18 +324,17 @@ export const DelegationPage = () => {
                 options={[{ value: '__all__', label: 'All' }, ...users.map((u) => ({ value: u.id, label: u.full_name }))]}
               />
             )}
-            {canManage && (
-              <Button
-                type="primary"
-                icon={<PlusOutlined />}
-                onClick={() => {
-                  form.resetFields()
-                  setModalOpen(true)
-                }}
-              >
-                Add Task
-              </Button>
-            )}
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                form.resetFields()
+                form.setFieldsValue({ submitted_by: user?.id })
+                setModalOpen(true)
+              }}
+            >
+              Add Task
+            </Button>
           </Space>
         </div>
         <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
@@ -364,9 +370,9 @@ export const DelegationPage = () => {
           <Form.Item name="has_document" label="Document" rules={[{ required: true, message: 'Please select' }]}>
             <Select placeholder="Select Yes or No" options={[{ value: 'yes', label: 'Yes' }, { value: 'no', label: 'No' }]} />
           </Form.Item>
-          <Form.Item name="submitted_by" label="Submitted By" rules={[{ required: true, message: 'Please select submitter' }]}>
+          <Form.Item name="submitted_by" label="Submitted By" hidden={!canManage}>
             <Select
-              placeholder="Select who submitted"
+              placeholder="Select who submitted (Admin/Approver only)"
               options={users.map((u) => ({ value: u.id, label: u.full_name }))}
               showSearch
               optionFilterProp="label"
