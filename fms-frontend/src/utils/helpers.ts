@@ -357,25 +357,25 @@ export const SECTION_KEY_TO_ROUTE: Record<string, string> = {
   users: '/users',
 }
 
-/** Check if user can view a section (uses section_permissions if present; Master Admin sees all) */
+/** Check if user can view a section. Master Admin/Admin/Approver always see all. User role uses section_permissions. */
 export const canViewSection = (
   sectionKey: string,
   userRole: UserRole,
   sectionPermissions?: { section_key: string; can_view: boolean; can_edit: boolean }[]
 ): boolean => {
-  if (userRole === ROLES.MASTER_ADMIN) return true
+  if (userRole === ROLES.MASTER_ADMIN || userRole === ROLES.ADMIN || userRole === ROLES.APPROVER) return true
   if (!sectionPermissions || sectionPermissions.length === 0) return true
   const p = sectionPermissions.find((s) => s.section_key === sectionKey)
-  return p ? p.can_view : false
+  return p ? p.can_view : true
 }
 
-/** Check if user can edit in a section */
+/** Check if user can edit in a section. Master Admin/Admin/Approver always can edit. User role uses section_permissions. */
 export const canEditSection = (
   sectionKey: string,
   userRole: UserRole,
   sectionPermissions?: { section_key: string; can_view: boolean; can_edit: boolean }[]
 ): boolean => {
-  if (userRole === ROLES.MASTER_ADMIN) return true
+  if (userRole === ROLES.MASTER_ADMIN || userRole === ROLES.ADMIN || userRole === ROLES.APPROVER) return true
   if (!sectionPermissions || sectionPermissions.length === 0) return true
   const p = sectionPermissions.find((s) => s.section_key === sectionKey)
   return p ? p.can_edit : false
