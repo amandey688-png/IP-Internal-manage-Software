@@ -20,7 +20,6 @@ import { useAuth } from '../../hooks/useAuth'
 import { useRole } from '../../hooks/useRole'
 import {
   checklistApi,
-  DEPARTMENTS,
   FREQUENCY_OPTIONS,
   type ChecklistTask,
   type ChecklistOccurrence,
@@ -48,6 +47,7 @@ export const ChecklistPage = () => {
   const [loading, setLoading] = useState(false)
   const [submitLoading, setSubmitLoading] = useState<string | null>(null)
   const [addTaskModalOpen, setAddTaskModalOpen] = useState(false)
+  const [departments, setDepartments] = useState<string[]>([])
   const [holidayModalOpen, setHolidayModalOpen] = useState(false)
   const [holidayUploadLoading, setHolidayUploadLoading] = useState(false)
   const today = new Date()
@@ -61,6 +61,10 @@ export const ChecklistPage = () => {
     loadTasks()
     loadOccurrences()
   }, [selectedUserId, referenceNoFilter, filter])
+
+  useEffect(() => {
+    checklistApi.getDepartments().then((r) => setDepartments(r.departments || [])).catch(() => setDepartments([]))
+  }, [])
 
   useEffect(() => {
     if (isAdmin) {
@@ -317,7 +321,7 @@ export const ChecklistPage = () => {
           >
             <Select
               placeholder="Select department"
-              options={DEPARTMENTS.map((d) => ({ label: d, value: d }))}
+              options={departments.map((d) => ({ label: d, value: d }))}
             />
           </Form.Item>
           <Form.Item

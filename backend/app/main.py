@@ -1714,7 +1714,8 @@ def update_staging(deployment_id: str, payload: dict = None, auth: dict = Depend
 # ---------------------------------------------------------------------------
 # CHECKLIST MODULE (Task -> Checklist)
 # ---------------------------------------------------------------------------
-DEPARTMENTS = [
+# Fallback if checklist_departments table is empty or fails
+DEPARTMENTS_FALLBACK = [
     "Customer Support & Success",
     "Marketing",
     "Accounts & Admin",
@@ -1753,10 +1754,20 @@ def _get_checklist_occurrence_dates(task: dict, year: int) -> list:
     return get_occurrence_dates(start, freq, year, is_holiday)
 
 
+def _get_checklist_departments() -> list[str]:
+    """Fetch department names from checklist_departments table; fallback to hardcoded list."""
+    try:
+        r = supabase.table("checklist_departments").select("name").order("name").execute()
+        names = [row["name"] for row in (r.data or []) if row.get("name")]
+        return names if names else DEPARTMENTS_FALLBACK
+    except Exception:
+        return DEPARTMENTS_FALLBACK
+
+
 @api_router.get("/checklist/departments")
 def list_checklist_departments(auth: dict = Depends(get_current_user)):
-    """List departments for checklist dropdown."""
-    return {"departments": DEPARTMENTS}
+    """List departments for checklist dropdown (from checklist_departments table)."""
+    return {"departments": _get_checklist_departments()}
 
 
 @api_router.get("/checklist/holidays")
@@ -1798,8 +1809,9 @@ def upload_holiday_list(payload: HolidayUploadRequest, auth: dict = Depends(requ
 @api_router.post("/checklist/tasks")
 def create_checklist_task(payload: CreateChecklistTaskRequest, auth: dict = Depends(get_current_user)):
     """Create a checklist task. Doer is the logged-in user."""
-    if payload.department not in DEPARTMENTS:
-        raise HTTPException(400, f"Invalid department. Use one of: {DEPARTMENTS}")
+    allowed = _get_checklist_departments()
+    if payload.department not in allowed:
+        raise HTTPException(400, f"Invalid department. Use one of: {allowed}")
     if payload.frequency not in ("D", "W", "M", "Q", "F", "Y"):
         raise HTTPException(400, "Frequency must be D, W, M, Q, F or Y")
     try:
