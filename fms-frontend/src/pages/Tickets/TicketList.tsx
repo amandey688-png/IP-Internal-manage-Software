@@ -17,7 +17,7 @@ import { supportApi } from '../../api/support'
 import { TicketDetailDrawer } from '../../components/tickets/TicketDetailDrawer'
 import { ChoresBugsDetailDrawer } from '../../components/tickets/ChoresBugsDetailDrawer'
 import { PrintExport } from '../../components/common/PrintExport'
-import { formatDateTable, formatDuration, formatReplySla, getChoresBugsCurrentStage, getFeatureCurrentStage, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
+import { formatDateTable, formatDuration, formatReplySla, getChoresBugsCurrentStage, getFeatureCurrentStage, getTicketTimeDelayDisplay, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
 import { useRole } from '../../hooks/useRole'
 import type { Ticket } from '../../api/tickets'
 import type { Company } from '../../api/support'
@@ -142,6 +142,17 @@ export const TicketList = () => {
     })
   }, [searchParams])
 
+  /** Feature page: default 100 per page; other sections: 20 per page */
+  useEffect(() => {
+    if (typeFromUrl === 'feature' || sectionFromUrl === 'completed-feature') {
+      setPageSize(100)
+      setPage(1)
+    } else {
+      setPageSize(20)
+      setPage(1)
+    }
+  }, [typeFromUrl, sectionFromUrl])
+
   useEffect(() => {
     supportApi.getCompanies().then(setCompanies).catch(() => setCompanies([]))
   }, [])
@@ -230,16 +241,25 @@ export const TicketList = () => {
     setLoading(true)
     try {
       const allTickets = await fetchAllTicketsWithFilters()
-      setAllTicketsForStageFilter(allTickets)
-      const filtered = stageFilter
+      let list = stageFilter
         ? allTickets.filter((t) =>
             showStageFilter
               ? getChoresBugsCurrentStage(t).stageLabel === stageFilter
               : getFeatureCurrentStage(t).stageLabel === stageFilter
           )
         : allTickets
-      setTickets(filtered.slice((page - 1) * pageSize, page * pageSize))
-      setTotal(filtered.length)
+      if (typeFromUrl === 'feature' || sectionFromUrl === 'completed-feature') {
+        list = [...list].sort((a, b) => {
+          const refCompare = (b.reference_no || '').localeCompare(a.reference_no || '', undefined, { numeric: true })
+          if (refCompare !== 0) return refCompare
+          const tA = a.created_at ? new Date(a.created_at).getTime() : 0
+          const tB = b.created_at ? new Date(b.created_at).getTime() : 0
+          return tB - tA
+        })
+      }
+      setAllTicketsForStageFilter(list)
+      setTickets(list.slice((page - 1) * pageSize, page * pageSize))
+      setTotal(list.length)
     } catch (error) {
       console.error('Failed to fetch all tickets for stage filter:', error)
     } finally {
@@ -274,12 +294,24 @@ export const TicketList = () => {
   const isSolutionsSection = sectionFromUrl === 'solutions'
 
   /** When stage filter is set (Chores & Bugs or Feature), filter tickets for table, Export and Print */
-  const ticketsForDisplay =
+  const baseList =
     showStageFilter && stageFilter
       ? tickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
       : showStageFilterForFeature && stageFilter
         ? tickets.filter((t) => getFeatureCurrentStage(t).stageLabel === stageFilter)
         : tickets
+
+  /** Feature section: new tickets on top (FE-0091 above FE-0090), then by created_at desc */
+  const ticketsForDisplay =
+    typeFromUrl === 'feature' || sectionFromUrl === 'completed-feature'
+      ? [...baseList].sort((a, b) => {
+          const refCompare = (b.reference_no || '').localeCompare(a.reference_no || '', undefined, { numeric: true })
+          if (refCompare !== 0) return refCompare
+          const tA = a.created_at ? new Date(a.created_at).getTime() : 0
+          const tB = b.created_at ? new Date(b.created_at).getTime() : 0
+          return tB - tA
+        })
+      : baseList
 
   const getStageForExport = isChoresBugs
     ? (t: Record<string, unknown>) => getChoresBugsCurrentStage(t as Parameters<typeof getChoresBugsCurrentStage>[0])
@@ -289,12 +321,21 @@ export const TicketList = () => {
 
   const handleExportClick = async () => {
     const allTickets = await fetchAllForExport()
-    const filteredForExport =
+    let filteredForExport =
       showStageFilter && stageFilter
         ? allTickets.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter)
         : showStageFilterForFeature && stageFilter
           ? allTickets.filter((t) => getFeatureCurrentStage(t).stageLabel === stageFilter)
           : allTickets
+    if (typeFromUrl === 'feature' || sectionFromUrl === 'completed-feature') {
+      filteredForExport = [...filteredForExport].sort((a, b) => {
+        const refCompare = (b.reference_no || '').localeCompare(a.reference_no || '', undefined, { numeric: true })
+        if (refCompare !== 0) return refCompare
+        const tA = a.created_at ? new Date(a.created_at).getTime() : 0
+        const tB = b.created_at ? new Date(b.created_at).getTime() : 0
+        return tB - tA
+      })
+    }
     setExportTickets(filteredForExport)
   }
 
@@ -476,6 +517,18 @@ export const TicketList = () => {
     ...(!isChoresBugs
       ? [
           {
+            title: 'Current Stage',
+            key: 'current_stage_feature',
+            width: 140,
+            ellipsis: false,
+            render: (_: unknown, r: Ticket) =>
+              r.type === 'feature' ? (
+                <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{getFeatureCurrentStage(r).stageLabel}</span>
+              ) : (
+                '-'
+              ),
+          },
+          {
             title: 'Priority',
             dataIndex: 'priority',
             key: 'priority',
@@ -583,8 +636,8 @@ export const TicketList = () => {
           width: 100,
           ellipsis: false,
           render: (_: unknown, r: Ticket) => {
-            const stage = getChoresBugsCurrentStage(r)
-            return <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{stage.timeDelay}</span>
+            const display = getTicketTimeDelayDisplay(r)
+            return <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{display}</span>
           },
         },
       ]
@@ -681,6 +734,18 @@ export const TicketList = () => {
             ellipsis: true,
             render: (_: unknown, r: Ticket) => (r.type === 'feature' ? truncate(r.remarks, 20) : '-'),
           },
+          {
+            title: 'Time Delay',
+            key: 'time_delay',
+            width: 100,
+            ellipsis: false,
+            render: (_: unknown, r: Ticket) =>
+              r.type === 'feature' ? (
+                <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{getTicketTimeDelayDisplay(r)}</span>
+              ) : (
+                '-'
+              ),
+          },
         ]
       : []),
   ]
@@ -747,6 +812,7 @@ export const TicketList = () => {
                 setApprovalFilter(v ?? 'pending')
                 setPage(1)
               }}
+              getPopupContainer={() => document.body}
               options={[
                 { value: 'pending', label: 'Pending' },
                 { value: 'unapproved', label: 'Unapproved' },
@@ -760,6 +826,7 @@ export const TicketList = () => {
             value={filters.company_id || undefined}
             onChange={(v) => setFilters((f) => ({ ...f, company_id: v || '' }))}
             allowClear
+            getPopupContainer={() => document.body}
           >
             {companies.map((c) => (
               <Option key={c.id} value={c.id}>
@@ -773,6 +840,7 @@ export const TicketList = () => {
             value={filters.status || undefined}
             onChange={(v) => setFilters((f) => ({ ...f, status: v || '' }))}
             allowClear
+            getPopupContainer={() => document.body}
           >
             <Option value="open">Open</Option>
             <Option value="in_progress">In Progress</Option>
@@ -787,6 +855,7 @@ export const TicketList = () => {
             value={filters.priority || undefined}
             onChange={(v) => setFilters((f) => ({ ...f, priority: v || '' }))}
             allowClear
+            getPopupContainer={() => document.body}
           >
             <Option value="high">High</Option>
             <Option value="medium">Medium</Option>
@@ -803,6 +872,7 @@ export const TicketList = () => {
               }}
               allowClear
               aria-label="Filter by stage"
+              getPopupContainer={() => document.body}
             >
               <Option value="Stage 1">Stage 1</Option>
               <Option value="Stage 2">Stage 2</Option>
@@ -813,7 +883,7 @@ export const TicketList = () => {
           {showStageFilterForFeature && (
             <Select
               placeholder="Stage"
-              style={{ width: 200 }}
+              style={{ width: 140 }}
               value={stageFilter || undefined}
               onChange={(v) => {
                 setStageFilter(v ?? '')
@@ -821,10 +891,11 @@ export const TicketList = () => {
               }}
               allowClear
               aria-label="Filter by stage"
+              getPopupContainer={() => document.body}
             >
-              <Option value="Stage 1: Staging">Stage 1: Staging</Option>
-              <Option value="Stage 2: Live">Stage 2: Live</Option>
-              <Option value="Stage 3: Live Review">Stage 3: Live Review</Option>
+              <Option value="Stage 1">Stage 1</Option>
+              <Option value="Stage 2">Stage 2</Option>
+              <Option value="Completed">Completed</Option>
             </Select>
           )}
           <RangePicker

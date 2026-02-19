@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Drawer, Descriptions, Tag, Typography, Input, Button, Space, message, Modal } from 'antd'
+import { Drawer, Descriptions, Tag, Typography, Input, Button, Space, message, Modal, Divider, Select } from 'antd'
 import { CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
 import { formatDateTable, formatDuration } from '../../utils/helpers'
@@ -7,6 +7,52 @@ import type { Ticket } from '../../api/tickets'
 
 const { TextArea } = Input
 const { Text } = Typography
+
+/** Stage block: Planned, Status (editable), Actual - for Feature drawer */
+const FeatureStageBlock = ({
+  title,
+  planned,
+  status,
+  actual,
+  bg,
+  statusOptions,
+  onStatusChange,
+  saving,
+  readOnly,
+}: {
+  title: string
+  planned: string
+  status: string
+  actual: string
+  bg: string
+  statusOptions: { value: string; label: string }[]
+  onStatusChange?: (v: string) => void
+  saving?: boolean
+  readOnly?: boolean
+}) => (
+  <div style={{ marginBottom: 16, padding: 12, background: bg, borderRadius: 8 }}>
+    <Text strong>{title}</Text>
+    <Descriptions column={1} size="small" style={{ marginTop: 8 }}>
+      <Descriptions.Item label="Planned">{planned}</Descriptions.Item>
+      <Descriptions.Item label="Status">
+        {readOnly || !onStatusChange ? (
+          <Tag>{status || '-'}</Tag>
+        ) : (
+          <Select
+            value={status || undefined}
+            onChange={onStatusChange}
+            style={{ width: 140 }}
+            placeholder="Select"
+            disabled={saving}
+            getPopupContainer={() => document.body}
+            options={statusOptions}
+          />
+        )}
+      </Descriptions.Item>
+      <Descriptions.Item label="Actual">{actual}</Descriptions.Item>
+    </Descriptions>
+  </div>
+)
 
 interface TicketDetailDrawerProps {
   ticketId: string | null
@@ -24,9 +70,26 @@ const getPriorityColor = (p: string) => (p === 'high' ? 'red' : p === 'medium' ?
 export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly = false, approvalMode = false }: TicketDetailDrawerProps) => {
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [unapproveModalOpen, setUnapproveModalOpen] = useState(false)
   const [unapproveRemarks, setUnapproveRemarks] = useState('')
   const [approvalActionLoading, setApprovalActionLoading] = useState(false)
+
+  const handleFeatureStageUpdate = async (updates: Partial<Ticket>) => {
+    if (!ticketId || readOnly || approvalMode) return
+    setSaving(true)
+    try {
+      await ticketsApi.update(ticketId, updates)
+      const fresh = await ticketsApi.get(ticketId)
+      setTicket(fresh && typeof fresh === 'object' ? (fresh as Ticket) : null)
+      onUpdate?.()
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      message.error(err?.response?.data?.detail || 'Failed to update')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   useEffect(() => {
     if (open && ticketId) {
@@ -198,6 +261,68 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
               </>
             )}
           </Descriptions>
+
+          {ticket.type === 'feature' && (
+            <>
+              <Divider orientation="left">Stage</Divider>
+              <FeatureStageBlock
+                title="Stage 1"
+                planned={formatDateTable(ticket.query_arrival_at || ticket.created_at) || '-'}
+                status={ticket.status_2 ?? 'pending'}
+                actual={formatDateTable(ticket.actual_1) || '-'}
+                bg="#e6f7ff"
+                statusOptions={[
+                  { value: 'pending', label: 'Pending' },
+                  { value: 'completed', label: 'Completed' },
+                  { value: 'staging', label: 'Staging' },
+                  { value: 'hold', label: 'Hold' },
+                  { value: 'na', label: 'NA' },
+                ]}
+                onStatusChange={(v) => {
+                  const nowIso = new Date().toISOString()
+                  const updates: Partial<Ticket> = { status_2: v as Ticket['status_2'] }
+                  if (v === 'completed' || v === 'staging' || v === 'hold') {
+                    updates.actual_1 = nowIso
+                    if (v === 'completed') {
+                      updates.planned_2 = nowIso
+                      updates.live_planned = nowIso
+                    }
+                    if (v === 'staging') {
+                      updates.staging_planned = nowIso
+                      updates.staging_review_status = 'pending'
+                    }
+                  }
+                  handleFeatureStageUpdate(updates)
+                }}
+                saving={saving}
+                readOnly={readOnly || approvalMode}
+              />
+              {ticket.status_2 === 'completed' && (
+                <FeatureStageBlock
+                  title="Stage 2"
+                  planned={formatDateTable(ticket.actual_1 || ticket.live_planned) || '-'}
+                  status={ticket.live_status ?? 'pending'}
+                  actual={formatDateTable(ticket.live_actual) || '-'}
+                  bg="#f6ffed"
+                  statusOptions={[
+                    { value: 'pending', label: 'Pending' },
+                    { value: 'completed', label: 'Completed' },
+                  ]}
+                  onStatusChange={(v) => {
+                    const nowIso = new Date().toISOString()
+                    const updates: Partial<Ticket> = { live_status: v as 'pending' | 'completed' }
+                    if (v === 'completed') {
+                      updates.live_actual = nowIso
+                      if (ticket.actual_1) updates.live_planned = ticket.actual_1
+                    }
+                    handleFeatureStageUpdate(updates)
+                  }}
+                  saving={saving}
+                  readOnly={readOnly || approvalMode}
+                />
+              )}
+            </>
+          )}
 
           <Text strong>Description</Text>
           <div style={{ marginBottom: 24, marginTop: 4 }}>{ticket.description || '-'}</div>

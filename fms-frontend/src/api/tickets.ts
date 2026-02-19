@@ -124,8 +124,11 @@ export interface UpdateTicketRequest {
   staging_planned?: string
   staging_review_status?: 'pending' | 'completed'
   staging_review_actual?: string
+  live_planned?: string
+  live_actual?: string
   live_status?: 'pending' | 'completed'
   live_review_status?: 'pending' | 'completed'
+  live_review_actual?: string
 }
 
 export const ticketsApi = {

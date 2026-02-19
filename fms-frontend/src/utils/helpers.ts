@@ -107,23 +107,19 @@ export const getStagingCurrentStage = (t: {
   }
 }
 
-/** Current stage for Feature tickets (Approval + Stage 1–3 + Completed). Matches backend get_staging_feature_stage. */
+/** Current stage for Feature tickets: Approval + Stage 1 (Planned/Status/Actual) + Stage 2 (Completed/Pending). */
 export const getFeatureCurrentStage = (t: {
-  staging_planned?: string | null
   status_2?: string
   approval_status?: 'approved' | 'unapproved' | null
-  staging_review_status?: string | null
   live_status?: string | null
-  live_review_status?: string | null
+  staging_planned?: string | null
 }): { stageLabel: string; status?: string } => {
-  const hasStaging = !!(t.staging_planned || t.status_2 === 'staging')
-  if (!hasStaging) {
-    if (t.approval_status == null || t.approval_status === undefined) return { stageLabel: 'Approval Pending', status: '-' }
-    return { stageLabel: `Approval (${t.approval_status})`, status: t.approval_status }
+  if (t.approval_status == null || t.approval_status === undefined) return { stageLabel: 'Approval Pending', status: '-' }
+  if (t.approval_status === 'unapproved') return { stageLabel: 'Approval (unapproved)', status: 'unapproved' }
+  if (t.status_2 !== 'completed') {
+    return { stageLabel: 'Stage 1', status: t.status_2 || 'pending' }
   }
-  if (t.staging_review_status !== 'completed') return { stageLabel: 'Stage 1: Staging', status: t.staging_review_status || 'pending' }
-  if (t.live_status !== 'completed') return { stageLabel: 'Stage 2: Live', status: t.live_status || 'pending' }
-  if (t.live_review_status !== 'completed') return { stageLabel: 'Stage 3: Live Review', status: t.live_review_status || 'pending' }
+  if (t.live_status !== 'completed') return { stageLabel: 'Stage 2', status: t.live_status || 'pending' }
   return { stageLabel: 'Completed', status: 'completed' }
 }
 
@@ -223,6 +219,27 @@ export const getChoresBugsCurrentStage = (t: {
     status: t.status_2 || '-',
     timeDelay: delaySec > 0 ? formatDelay(delaySec) : '-',
   }
+}
+
+/** Overall delay in seconds from query_arrival_at or created_at to now (for display when status-based delay is missing). */
+export const getOverallDelaySeconds = (t: {
+  query_arrival_at?: string | null
+  created_at?: string
+}): number => {
+  const from = t.query_arrival_at || t.created_at
+  if (!from) return 0
+  const start = new Date(from).getTime()
+  return Math.max(0, Math.floor((Date.now() - start) / 1000))
+}
+
+/** Time delay string for ticket: use status-based delay when available, otherwise overall delay so it is always visible. */
+export const getTicketTimeDelayDisplay = (t: Parameters<typeof getChoresBugsCurrentStage>[0] & { type?: string; query_arrival_at?: string | null; created_at?: string }): string => {
+  if (t.type === 'chore' || t.type === 'bug') {
+    const stage = getChoresBugsCurrentStage(t)
+    if (stage.timeDelay !== '-') return stage.timeDelay
+  }
+  const sec = getOverallDelaySeconds(t)
+  return sec > 0 ? formatDelay(sec) : '-'
 }
 
 /** SLA 30 min: On-time or Delay with format (e.g. Delay: 12 min) */
