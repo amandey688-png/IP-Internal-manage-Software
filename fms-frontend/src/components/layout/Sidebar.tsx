@@ -21,7 +21,8 @@ const { useBreakpoint } = Grid
 
 const isSupportPage = (pathname: string) =>
   pathname.startsWith(ROUTES.TICKETS) ||
-  pathname === ROUTES.STAGING
+  pathname === ROUTES.STAGING ||
+  pathname === ROUTES.SUPPORT_DASHBOARD
 
 const isTaskPage = (pathname: string) =>
   pathname === ROUTES.CHECKLIST || pathname === ROUTES.DELEGATION
@@ -50,6 +51,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const linkStyle = { color: 'inherit', display: 'block' }
   const allSupportItems: MenuProps['items'] = [
+    { key: ROUTES.SUPPORT_DASHBOARD, icon: <DashboardOutlined />, label: <Link to={ROUTES.SUPPORT_DASHBOARD} style={linkStyle}>Support Dashboard</Link>, sectionKey: 'support_dashboard' },
     { key: ROUTES.TICKETS, icon: <FileTextOutlined />, label: <Link to={ROUTES.TICKETS} style={linkStyle}>All Tickets</Link>, sectionKey: 'all_tickets' },
     { key: `${ROUTES.TICKETS}?section=chores-bugs`, icon: <FileTextOutlined />, label: <Link to={{ pathname: ROUTES.TICKETS, search: 'section=chores-bugs' }} style={linkStyle}>Chores & Bugs</Link>, sectionKey: 'chores_bugs' },
     { key: ROUTES.STAGING, icon: <RocketOutlined />, label: <Link to={ROUTES.STAGING} style={linkStyle}>Staging</Link>, sectionKey: 'staging' },

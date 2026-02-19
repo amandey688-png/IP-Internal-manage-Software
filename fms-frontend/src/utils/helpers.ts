@@ -344,6 +344,7 @@ export const canAccessUsers = (userRole: UserRole): boolean =>
 /** Section key to route/sidebar mapping */
 export const SECTION_KEY_TO_ROUTE: Record<string, string> = {
   dashboard: '/dashboard',
+  support_dashboard: '/support/dashboard',
   all_tickets: '/tickets',
   chores_bugs: '/tickets?section=chores-bugs',
   staging: '/staging',
