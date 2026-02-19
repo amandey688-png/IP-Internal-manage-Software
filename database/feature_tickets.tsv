@@ -1,0 +1,122 @@
+Company Name	Users Name	Page	Division	If you selected "Others," please specify.	Attachment	Title	Description	Type of request	Communicated Though	Submitted By	Referance No	Why Feature ?	Numbers
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Issue			https://drive.google.com/open?id=1N1U21AWPfIVmsllZSknnVp4l-F_CcOo0	Issue posting karte samay rate or amount dikhana chahiye		Feature	Chat	Rimpa			504
+Nutan Ispat & Power Pvt Ltd	Nitesh Gupta	Create Indent	Power			Indent in Draft	They want to create indent in draft through through month and then final indent on 1st of every month	Feature	Phone	Rimpa			504
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Pending Po (GRN)	All			Indenter Name search in Pending PO (GRN)		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Pending Indent RFQ	All			Freight Cost to be included in item rate ?		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	GRN Register	All			Department column in GRN Register 		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Pending Indent RFQ	All			Item group in vendor selection (RFQ)- Multiple selection		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Issue	All			Employee list (at time of Issue),Loan -No dues		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Issue Register	All			1 item export - Issue & GRN to be allowed for 1year		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Non returnable gate pass	All			NRGP show brand wise stock 		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Monthly Budget	All			Monthly budget Deducted for Indent Amount. Track that Amount for every Action, like PO Amount ,GRN Amount		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Pending Indent RFQ	All			QC export - restrict edit access		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Indents to Approve	All			Pending Indent - Delay from Approval days		Feature	Phone	Rimpa			484
+Nutan Ispat & Power Pvt Ltd	O P Sahu	PO Register	All			 Should show QC status in PO approval & register 		Feature	Phone	Rimpa			484
+Demo_c	Shreyasi Mukherjee	Quotation Comparision	All			Update Quotation Comparison Page for WO 	Quotation Comparison should be same in all functionality for WO as like PO.	Feature	Phone	Shreyasi			483
+Hariom Ingots & Power Pvt. Ltd.	Pradeep Kumar Satpati	GRN Register	CCM			Other expenses like freight, etc have an option  during preparation of GRN to add in GRN valuation		Feature	Chat	Rimpa			479
+Demo_c	Shreyasi Mukherjee	GRN Register	All			Multiple Approver Should be Reflect in GRN Slip	"When Approvals  will be in multiple level, in GRN Slip it should be showing as 'Approved By: Approver 1- <Name>
+      Approver 2- <Name>'."	Feature	Phone	Shreyasi			462
+Odissa Concrete & Allied Industries Ltd	Praharsh Agarwal	GRN Approval	All			Update GRN approval process	Add two button in unapproved GRN slip. One is for GRN Date and another one is for Current Date approval. 	Feature	Chat	Rimpa			411
+Dadijee Steel Manufacturing & Trading Private Limited	Sudhir Kumar	ITEM	All			WhatsApp Notification for Item Approval	Once the item is approved, they would like to receive a notification indicating that the item has been approved so they can proceed with further action. 	Feature	Chat	Shreyasi			409
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Stock Summary	All			Add Item Nature & Category details in Stock Summary and Stock Movement Report		Feature	Phone	Rimpa			405
+Demo_c	Rimpa Manik	Payment Sheet	All			Add partial payment option 	In Payment sheet now we can pay the amount in total at a time but feature needs to be implemented , so that payment code be done in partial way as needed on different.	Feature	Phone	Rimpa			399
+Demo_c	Rimpa Manik	PO Register	All			If PO has been edited it should be track	If anyone edit the PO it should be track on trail under status column in PO Register	Feature	Phone	Rimpa			395
+Demo_c	Rimpa Manik	Quotation Comparison	All			Feature in QC page of WO customised item picked QC export		Feature	Phone	Rimpa	FE-0001		390
+Demo_c	Rimpa Manik	Items Pending to be sent for repair	All			Tag to Repair--> Return by	When tagging an item for repair, after selecting the return-by date and proceeding to the next step, the items are shown under Returnable Items as "Not Yet Received." However, the overdue date is not being displayed.	Feature	Phone	Rimpa	FE-0002		390
+Spintech Tubes Pvt Ltd	STPL Central Stores	Dashboard	All			Enable Print Option in WO & WRN Register.		Feature	Phone	Rimpa	FE-0005		365
+Nutan Ispat & Power Pvt Ltd	Dilip Das	Indents to Approve	All			Enable the Feature for Remark Note Box when Approving Indent and Add Column for Remark	"Step 1: There should be an optional note box in Indent Approval, so that Level1 Approver can explain why is he approving Indent instead of not any requirement.
+Step 2: A column should be shown in Indents to Approve and Pending Indent RFQ and Indent Register Page named as ""Remarks"" So that, Level 2 or management can check what is the clarification before Indent Approval."	Feature	Chat	Rimpa	FE-0006		356
+Nutan Ispat & Power Pvt Ltd	O P Sahu	Stock Summary	All			Stock Summary--> Stock Movement Report add location column	Add a column for Location in the Stock Movement report	Feature	Phone	Rimpa	FE-0009		346
+Demo_c	Ayush Jhunjhunwala	Payment Sheet	All			Column customization should be enabled during the export of the payment sheet.		Feature	Phone	Rimpa	FE-0013		333
+Agroha Steel and Power Pvt Ltd	Kamal Sahu	Create Po	All			System should allow to Add Freight Cost Item wise when creating PO. wise.	User Requirement is to add Freight Cost flexibly Item wise as per requirement. 	Feature	Chat	Aman	FE-0030		315
+Demo_c	Rimpa Manik	PO Audit Report	All			PO audit report export option should be customisable column		Feature	Phone	Rimpa	FE-0033		313
+MVK Industries Pvt Ltd	Dinesh Bareth	Pending Indent RFQ	All			Enable a filter option "Auto Short Close" in status filter under Pending Indent (RFQ) page		Feature	Phone	Rimpa	FE-0037		309
+Rashmi Sponge Iron & Power Industries Pvt. Limited	Gautam Kaushal	PO Register	All			Add MSME no in PO slip	Add MSME no in PO slip same as GST no under Supplier details	Feature	Phone	Rimpa	FE-0042		297
+Rausheena Udyog Limited	Abhranil Paul	Reports	All			Implement a customise report for QC 	In this report user want to see the item wise enquires, quotes, rate given by vendors and date for each requirement they have faced. 	Feature	Chat	Rimpa	FE-0047		290
+Maanheruka	Satish Dokania	Pending for Tally Entry	All			Implement the feature for all companies of Maan group	Please arrange gross total in last page	Feature	Chat	Rimpa	FE-0048		290
+Maanheruka	Satish Dokania	Pending Bills	All			Implement the feature for all companies of Maan group	Please arrange gross total in last page	Feature	Chat	Rimpa	FE-0049		290
+Maanheruka	Satish Dokania	Payment Sheet	All			Implement the feature for all companies of Maan group	Please arrange gross total in last page	Feature	Chat	Rimpa	FE-0050		290
+Sky Alloys and Power Limited	Dhirendra Patra	Stock Summary	All			IGST toggle should be on for outside vendors.		Feature	Mail	Shreyasi	FE-0053		284
+Demo_c	Shubham Kejriwal	Pending Indent RFQ	All			Date in order	There is should be a feature in this page by which in the filter section, i can select date of request made/ date of approved in ascending/ desending order. Currently, its in descending order. Also, not only in this page, but in all pages, this feature should be added	Feature	Phone	Aman	FE-0055		280
+Balmukund Sponge Iron Pvt. Ltd.	Ankit Verma	Quotation Comparison	All			"Quote By" add in Quotation page	Add Quotation revised by user or vendor it reflect on the QC page.	Feature	Phone	Rimpa	FE-0060		274
+Balmukund Sponge Iron Pvt. Ltd.	Ankit Verma	Quotation Comparison	All			Add Negotiation rate in QC	"Add negotiated percentage after negotiation just under ""Price bid history"", basically in QC page reflect the negotiation percentage.
+
+Example: Initial rate ₹10, negotiated rate ₹5, we have to reflect just under the price bid history ""Negotiated 50%"""	Feature	Phone	Rimpa	FE-0061		274
+Demo_c	Rimpa Manik	Quotation Comparison	All			Add Price bid history in WO RFQ QC page		Feature	Phone	Shreyasi	FE-0064		260
+Balmukund Sponge Iron Pvt. Ltd.	Ankit Verma	ITEM	All			A new field named 'TYPE' will be added to the Add New Item page, and it will contain a dropdown with the options: 'RM', 'Store & Spare', and 'Consumable'.		Feature	Chat	Aman	FE-0065		256
+Demo_c	Shreyasi Mukherjee	GRNs to Approve	All			Add an Unapprove Button 		Feature	Phone	Shreyasi	FE-0067		253
+Demo_c	Shreyasi Mukherjee	Stock Adjustment Approvals	All			Add an Unapprove Button 		Feature	Phone	Shreyasi	FE-0070		253
+Demo_c	Shreyasi Mukherjee	Physical Stocks to Approve	All			Add an Unapprove Button 		Feature	Phone	Shreyasi	FE-0071		253
+MVK Industries Pvt Ltd	Dinesh Bareth	Dashboard	All			WO  Indents  Approvals  should reflect over Dashboard		Feature	Chat	Shreyasi	FE-0072		253
+Demo_c	Rimpa Manik	GRN Entry	All			We should track items shelf life	When an user input an item shelf life in GRN Entry page it should be tracked in system within  any register or report. Also there should be a functionality to take further action when the warranty period get exceed. Also we can highlight it in Dashboard for which item there is remaining last three month or one month to be expired.	Feature	Phone	Shreyasi	FE-0076		244
+Demo_c	Shreyasi Mukherjee	Reports	All			Track the all deleted details like Indent, PO, GRN, Issue		Feature	Phone	Shreyasi	FE-0078		228
+Brahmaputra Metallics Ltd.	Mrityunjoy Debnath	Dashboard	All			Add a feature for Gate entry without PO		Feature	Chat	Rimpa	FE-0080		218
+Roopgarh Power & Alloys Pvt. Ltd	Divyesh Singhaniya	Pending Indent RFQ	All			The purchaser wants to use a notification for the 'Clarify' option under Pending Indent RFQ. When this 'Clarify' button is clicked, a notification should go to the indent raiser requesting clarification on the indent. Notification should send in mail or whtasapp		Feature	Phone	Rimpa	FE-0081		199
+Sky Alloys and Power Limited	Manoj Kumar Mohanty 	Issue Tools on Returnable Basis	All			The user wants to add multiple items in Issue Tools on a returnable basis, same like issue		Feature	Phone	Rimpa	FE-0082		189
+Demo_c	Ayush Jhunjhunwala	Approvals	All			Enable Approval option for Tag vendor	If a user tags a vendor with a brand, item, and item group, an approval process should be  enabled after the vendor tagging.	Feature	Chat	Rimpa	FE-0083		187
+Hi-Tech Power & Steel Ltd.	Kamal Agrawal	Pending Indent RFQ	All			The user wants to see, during QC, how many relevant vendors have not received the enquiry from us — meaning they want to know the details of the vendors to whom the purchaser has not sent the RFQ.		Feature	Phone	Rimpa	FE-0084		176
+Demo_c	Rimpa	Create Indent	All			Test Feature		Feature	Phone	Rimpa	FE-0085		159
+B.R.Sponge & Power Ltd.	test	Cost Centre History Report	Ferro			dgf- Test		Feature	Chat	Aman	FE-0086		159
+Bharat Hi-Tech (Cements) Pvt. Ltd	test	Cost Centre History Report	Ferro			TEST		Feature	Phone	Aman	FE-0087		159
+BlackRock Steel & Power Pvt. Ltd	Test	Create Indent	General			Test		Feature	Mail	Aman	FE-0088		159
+Balmukund Sponge Iron Pvt. Ltd.	Test	Create Item				Test		Feature	Chat	Aman	FE-0089		159
+BlackRock Steel & Power Pvt. Ltd	ASS	Create Wo	Pellet			AD		Feature	Phone	Aman	FE-0090		159
+Demo_c	Rimpa	Division	All			Test Feature Approval		Feature	Phone	Rimpa	FE-0091		159
+Demo_c	TEST	WRN Register	All			TEST	TEST - rtytrertytrdfghjuytrdcvbhjuytrfdcvhygfdcvhygfcvhgfc	Feature	Chat	Aman	FE-0092		158
+BR Group	test	Create Indent	Ferro			test		Feature	Chat	Aman	FE-0093		158
+Hi-Tech Power & Steel Ltd.	Pallav Tiwari	Users	All			Make master i'd for approval 	For now just implement the system with any i'd one of us. Where from a single i'd approval could be given at any level even if that user not added in each of the approval level and from that particular i'd if user wants to close the further approval process for remaining levels after approving from that particular master i'd, they can do that so. 	Feature	Phone	Shreyasi	FE-0096		97
+BIHAR FOUNDRY	Somnath Roy	Dashboard	All			Build mobile application	Build mobile application with the most important things - dashboard, approvals, Pending Indent and GRN, item stock, notifications.	Feature	Mail	Shreyasi	FE-0097		75
+BIHAR FOUNDRY	Somnath Roy	Reports	All			Generate all Reports for Sevices also	As we are maintaining the Inventory and Purchases for products, user want to manage the inventory through our software for Services (Work Orders).	Feature	Mail	Shreyasi	FE-0098		75
+Flexicom Industries Pvt. Ltd.	pallab salampuria	Indents to Approve	All			We need an Indent Approval in email, similar to the one used for PO.	"Formate Will be same like PO approval format via mail. 
+Mandatory to be mentioned:
+1. Indent Number
+2. Approve and Un-Approve button"	Feature	Chat	Shreyasi	FE-0099		71
+Demo_c	Ayush Jhunjhunwala  	Approvals	All			Enable all approval processes through WhatsApp.		Feature	Chat	Shreyasi	FE-0100		71
+BIHAR FOUNDRY	Somnath	Create Indent	All			Enable  Draft in Indent.		Feature	Phone	Shreyasi	FE-0101		71
+BIHAR FOUNDRY	Somnath Roy	Indent Register	All			Mentioned the edited element(exactly which field has been edited)		Feature	Mail	Shreyasi	FE-0103		70
+BIHAR FOUNDRY	Somnath Roy	Work Order Indent Register	All			Add information in status trail	"""Add informations for if any user or approver edit anything. 
+1.Mentioned """"Edited by""""
+2.Exactly which field has been edited"""	Feature	Mail	Shreyasi	FE-0104		70
+BIHAR FOUNDRY	Somnath Roy	PO Register	All			Add information in status trail	"""""""Add informations for if any user or approver edit anything. 
+1.Mentioned """"""""Edited by""""""""
+2.Exactly which field has been edited"""""""	Feature	Mail	Shreyasi	FE-0105		70
+BIHAR FOUNDRY	Somnath Roy	Work Order Register	All			Add information in status trail	"""""""Add informations for if any user or approver edit anything. 
+1.Mentioned """"""""Edited by""""""""
+2.Exactly which field has been edited"""""""	Feature	Mail	Shreyasi	FE-0106		70
+BIHAR FOUNDRY	Somnath Roy	Vendors	All			Add information in status trail	"""Add informations for if any user or approver edit anything. 
+1.Mentioned """"Edited by""""
+2.Exactly which field has been edited"""	Feature	Mail	Shreyasi	FE-0107		69
+BIHAR FOUNDRY	Somnath Roy	GRN Register	All			Add information in status trail	"""Add informations for if any user or approver edit anything. (GRN approval Transactions & Notifications)
+1.Mentioned """"Edited by""""
+2.Exactly which field has been edited"""	Feature	Mail	Shreyasi	FE-0108		69
+BIHAR FOUNDRY	Somnath Roy	WRN Register	All			Add information in status trail	"""Add informations for if any user or approver edit anything. 
+1.Mentioned """"Edited by""""
+2.Exactly which field has been edited"""	Feature	Mail	Shreyasi	FE-0109		69
+BIHAR FOUNDRY	Somnath Roy	Issue Register	All			Add information in status trail	"""Add informations for if any user or approver edit anything. 
+1.Mentioned """"Edited by""""
+2.Exactly which field has been edited"""	Feature	Mail	Shreyasi	FE-0110		69
+BIHAR FOUNDRY	Somnath Roy	Stock Adjustment Register	All			Add information in status trail	"""Add informations for if any user or approver edit anything. 
+1.Mentioned """"Edited by"""" 
+2.Exactly which field has been edited"""	Feature	Mail	Shreyasi	FE-0111		69
+Demo_c	Rimpa	EMS Dashboard	All			Create Production--> User-->Pull from Indenter		Feature	Phone	Rimpa	FE-0112		69
+BIHAR FOUNDRY	Abhas	POs To Approve	All			Add feature (Level filter option)	Notification>PO's to approve page , add level filter option for better search .	Feature	Chat	Subhomoy	FE-0113		56
+BIHAR FOUNDRY	Somnath Roy	POs To Approve	All			Add department filter as new feature	Asked a department-wise filter in POs to Approve sections.	Feature	Chat	Subhomoy	FE-0114		53
+BIHAR FOUNDRY	Somnath Roy	PO Register	All			Add department filter as new feature	Asked a department-wise filter in PO Register sections.	Feature	Chat	Subhomoy	FE-0115		53
+BIHAR FOUNDRY	Somnath Roy	Whatsapp IndustryPrime	All			PO related notification to be enabled	PO related notification to be sent in WhatsApp with complete PO details.	Feature	Chat	Subhomoy	FE-0116		53
+BIHAR FOUNDRY	Somnath Roy	Dashboard	All			Add checkbox feature beside divisions	New Feature of checkboxes next to divisions, allowing them to select multiple divisions (e.g., 2 divisions) and view combined data for only the selected divisions on the dashboard.	Feature	Chat	Subhomoy	FE-0117		53
+BIHAR FOUNDRY	Somnath Roy	Notifications	All			Notifications to be sent (Division - Department Wise) on the basis of approvals needed or access given	As there are many departments under divisions in Bihar foundry, therefore one who have access to a particular department under Divisions , should get notifications related to that specified departments only. Then the segregation of the approval notifications will be more accurate.	Feature	Chat	Subhomoy	FE-0118		53
+KSK Engineering Industries Pvt Ltd	Manish Kumar	EMS Dashboard	All			Notification feature needed for Sales Order	After creating a sales order user wants a WhatsApp notification like, 'Sales order arrive <Sales Order Number>'	Feature	Chat	Shreyasi	FE-0119		33
+Bhagwati Power Pvt. Ltd.	Vishawnath 	GRN Entry	All			Calculate the difference in between the vendor invoice and actual GRN	"Calculate each and every difference in between the vendor invoice and actual GRN
+For example: Let say, tolerance added 15%. Above the 15% system wouldn't allow to entry so system has to calculate the difference under this 15%. Again, for example invoice Qty 20, PO Qty 10, Vendor has given the rate against 20 Qty but system showing the rate against 10 Qty which will be actual GRN amount so system should reflect the difference in calculation.
+
+This difference should be reflected in GRN slip and GRN register."	Feature	Phone	Rimpa	FE-0120		19
+KSK Engineering Industries Pvt Ltd	Prateek	EMS Dashboard	All			User wants auto item creation and bulk enquiry upload 	"""Same feature which enabled for crescent has to be enabled for KSK which is, when system pull the enquiry from a different system or if we allow to bulk upload the enquiries system should check first if the requested item is present in software or not then if it is not present system should auto create the item.
+Basically we have to allow user-->
+ 1. Upload enquiry in bulk from user end 
+2. Item auto creation if the item present in enquiry  but not in system  """	Feature	Chat	Shreyasi	FE-0121		18
+Odissa Concrete & Allied Industries Ltd	P Suresh	EMS Dashboard	All			Add Production in Enquiry central	Link ENQUIRIES--> QUOTATIONS-->ORDERS-->PRODUCTION-->DISPATCH	Feature	Phone	Rimpa	FE-0123		8
+Sky Alloys and Power Limited	Dhiren Patra	ITEM	All			"NR" Required to Add for item Stock 	"Add an option in the Stock Ledger under the Detailed View of Item Stock where data displayed by splitting in Brand-Wise view. Users should be able to mark stocks as NR by clicking on this option.
+The Stock Ledger should properly track NR-marked stock with all required fields. It should also be reflected in the Stock Movement Report for analysis purposes.
+Additionally, NR-marked stock should not be available for any transactions such as Create Indent, Create Issue, Create Stock Adjustment, etc."	Feature	Chat	Rimpa	FE-0125		7
+Bhagwati Power Pvt. Ltd.	Kashyap Kejriwal	GRN Entry	All			User want tolerance in GRN basis of valuation of the PO instead of UOM		Feature	Phone	Rimpa	FE-0127		5
+Bhagwati Power Pvt. Ltd.	Kashyap Kejriwal	Create Po	All			Add tolerance in create PO page and by default tolerance will be blank or 0	Add a option to add tolerance in PO creation time. Basically add a checkbox for tolerance in PO by default tolerance will be blank or 0 and if user click the checkbox in PO creation time then there put tolerance %.	Feature	Phone	Rimpa	FE-0128		1

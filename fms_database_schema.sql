@@ -419,7 +419,7 @@ CREATE INDEX idx_dashboard_aggregates_lookup ON public.dashboard_aggregates(aggr
 -- FUNCTIONS
 -- ============================================================================
 
--- Function to generate ticket reference number
+-- Function to generate ticket reference number (format: CH-0001, BU-0001, FE-0001)
 CREATE OR REPLACE FUNCTION generate_ticket_reference()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -431,13 +431,13 @@ BEGIN
         WHEN 'bug' THEN prefix := 'BU';
         WHEN 'feature' THEN prefix := 'FE';
     END CASE;
-    
+    -- Numeric part: refs like CH-0109 → number after hyphen (position 4)
     SELECT COALESCE(MAX(CAST(SUBSTRING(reference_no FROM 4) AS INTEGER)), 0) + 1
     INTO next_num
     FROM public.tickets
-    WHERE type = NEW.type;
-    
-    NEW.reference_no := prefix || '-' || LPAD(next_num::TEXT, 6, '0');
+    WHERE type = NEW.type
+      AND reference_no LIKE prefix || '-%';
+    NEW.reference_no := prefix || '-' || LPAD(next_num::TEXT, 4, '0');
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;

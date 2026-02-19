@@ -12,6 +12,7 @@ import {
 } from 'antd'
 import { RollbackOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
+import { useRole } from '../../hooks/useRole'
 import { formatDateTable, formatDelay, stagingDelaySeconds } from '../../utils/helpers'
 import type { Ticket } from '../../api/tickets'
 
@@ -33,6 +34,7 @@ export const StagingDetailDrawer = ({
   onUpdate,
   readOnly = false,
 }: StagingDetailDrawerProps) => {
+  const { isMasterAdmin } = useRole()
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -44,7 +46,13 @@ export const StagingDetailDrawer = ({
       ticketsApi
         .get(ticketId)
         .then((res) => {
-          const t = res && typeof res === 'object' && res.data && typeof res.data === 'object' && 'id' in res.data ? (res.data as Ticket) : null
+          const raw = res && typeof res === 'object' ? res as Record<string, unknown> : null
+          const t =
+            raw && typeof raw === 'object' && 'id' in raw
+              ? (raw as Ticket)
+              : raw?.data && typeof raw.data === 'object' && raw.data !== null && 'id' in (raw.data as object)
+                ? (raw.data as Ticket)
+                : null
           setTicket(t)
         })
         .catch(() => message.error('Failed to load ticket'))
@@ -61,7 +69,10 @@ export const StagingDetailDrawer = ({
       const payload = { ...updates, approval_status: updates.approval_status ?? undefined }
       await ticketsApi.update(ticketId, payload)
       const fresh = await ticketsApi.get(ticketId)
-      setTicket(fresh && typeof fresh === 'object' ? (fresh as Ticket) : null)
+      const raw = fresh && typeof fresh === 'object' ? (fresh as Record<string, unknown>) : null
+      const t =
+        raw && 'id' in raw ? (raw as Ticket) : raw?.data && typeof raw.data === 'object' && raw.data !== null && 'id' in (raw.data as object) ? (raw.data as Ticket) : null
+      setTicket(t)
       onUpdate?.()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
@@ -70,8 +81,6 @@ export const StagingDetailDrawer = ({
       setSaving(false)
     }
   }
-
-  if (!ticket && !loading) return null
 
   const stage1Delay = stagingDelaySeconds(
     ticket?.staging_planned,
@@ -100,6 +109,9 @@ export const StagingDetailDrawer = ({
       onClose={onClose}
       loading={loading}
     >
+      {!loading && !ticket && (
+        <Text type="secondary">Failed to load ticket. It may have been deleted or you may not have access.</Text>
+      )}
       {ticket && (
         <>
           <Descriptions column={1} size="small" bordered style={{ marginBottom: 16 }}>
@@ -139,28 +151,30 @@ export const StagingDetailDrawer = ({
                     { value: 'completed', label: 'Completed' },
                   ]}
                 />
-                <Button
-                  type="default"
-                  icon={<RollbackOutlined />}
-                  loading={backing}
-                  onClick={async () => {
-                    if (!ticketId) return
-                    setBacking(true)
-                    try {
-                      await ticketsApi.stagingBack(ticketId)
-                      message.success('Ticket moved back to Chores & Bugs. Staging data cleared.')
-                      onUpdate?.()
-                      onClose()
-                    } catch (e: unknown) {
-                      const err = e as { response?: { data?: { detail?: string } } }
-                      message.error(err?.response?.data?.detail || 'Failed to move back')
-                    } finally {
-                      setBacking(false)
-                    }
-                  }}
-                >
-                  Back
-                </Button>
+                {((ticket.staging_review_status !== 'completed') || isMasterAdmin) && (
+                  <Button
+                    type="default"
+                    icon={<RollbackOutlined />}
+                    loading={backing}
+                    onClick={async () => {
+                      if (!ticketId) return
+                      setBacking(true)
+                      try {
+                        await ticketsApi.stagingBack(ticketId)
+                        message.success('Ticket moved back to Chores & Bugs. Staging data cleared.')
+                        onUpdate?.()
+                        onClose()
+                      } catch (e: unknown) {
+                        const err = e as { response?: { data?: { detail?: string } } }
+                        message.error(err?.response?.data?.detail || 'Failed to move back')
+                      } finally {
+                        setBacking(false)
+                      }
+                    }}
+                  >
+                    Back
+                  </Button>
+                )}
               </Space>
             )}
             {readOnly && (

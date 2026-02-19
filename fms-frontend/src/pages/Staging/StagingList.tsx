@@ -382,7 +382,7 @@ export const StagingList = () => {
           loading={loading}
           scroll={{ x: 'max-content' }}
           onRow={(record) => ({
-            onClick: () => setDrawerTicketId(record.id),
+            onClick: () => record?.id && setDrawerTicketId(record.id),
             style: { cursor: 'pointer' },
           })}
           pagination={{

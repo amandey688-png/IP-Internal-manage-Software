@@ -1,0 +1,36 @@
+# Company name (as in ticket data) -> UUID from public.companies
+# Format: alias<TAB>uuid   (one per line; # is comment)
+# Use this for resolving company_id in bulk ticket INSERTs.
+Demo C	c57a07d6-1751-4601-b0e5-6dba2ab52689
+Demo_c	c57a07d6-1751-4601-b0e5-6dba2ab52689
+Ghankun Steels Pvt Ltd	747f51f6-1b8e-44db-915b-e6210179178f
+Ghankun Steel Pvt Ltd (SMS Division)	747f51f6-1b8e-44db-915b-e6210179178f
+Crescent Foundry Co Pvt.Ltd.	f54cf6e2-e68d-40d1-ac00-4c7bbf6b4dff
+Crescent Foundry	f54cf6e2-e68d-40d1-ac00-4c7bbf6b4dff
+Kodarma Chemical Pvt. Ltd.	96f250cc-a604-4adb-bf5a-61acbbecd2f5
+Spintech Tubes Pvt. Ltd.	22271708-2eca-48ac-9846-8e6c14a92543
+Spintech Tubes Pvt Ltd	22271708-2eca-48ac-9846-8e6c14a92543
+Indo East Corporation Private Limited	0836fd22-8796-489f-8d72-d14fb3ec7274
+Indo East Corporation Pvt. Ltd.	0836fd22-8796-489f-8d72-d14fb3ec7274
+Karni Kripa Power Pvt Ltd	f6070d1f-f536-40df-b401-daf90feb46c2
+Karnikripa Power Pvt Ltd	f6070d1f-f536-40df-b401-daf90feb46c2
+Bihar Foundry & Casting Limited	abd6873e-eb90-43e4-b861-d5f906f83d10
+BIHAR FOUNDRY	abd6873e-eb90-43e4-b861-d5f906f83d10
+Balmukund Sponge Iron Pvt. Ltd.	1d7b3592-4353-4172-a5c8-7087681ea5d8
+Mangal Sponge & Steel Pvt. Ltd.	b564579c-db9b-4d43-a8b1-8c84c72679bc
+Mangal Sponge and Steel Pvt. Ltd.	b564579c-db9b-4d43-a8b1-8c84c72679bc
+Nirmaan TMT	6b62fea1-cd6a-4d79-971f-85e8fad45654
+Flexicom Industries Pvt. Ltd.	e1c0081a-6823-4332-a0be-d4575a2e392e
+Dynamic Engineers Pvt Ltd	8c4d1820-b285-40f1-b2e8-f4a279f6917c
+Bhagwati Power Pvt. Ltd.	b3f647a2-c757-4acd-8ef3-d6fed5a1fb55
+Odissa Concrete & Allied Industries Ltd	ef35fcd5-51bd-489c-8926-4dd4b36a2b76
+Orissa Concrete & Allied Industries Ltd	ef35fcd5-51bd-489c-8926-4dd4b36a2b76
+Bharat Hi-Tech (Cements) Pvt. Ltd	0da111f5-5f41-4637-b3b8-3c9a06f336d1
+Bharat Hi-Tech (Cements) Pvt. Ltd.	0da111f5-5f41-4637-b3b8-3c9a06f336d1
+Hi-Tech Power & Steel Ltd.	3fedad0b-1aea-45c7-87bf-ebfece5778aa
+Hi.Tech Power & Steel Ltd.	3fedad0b-1aea-45c7-87bf-ebfece5778aa
+M/s. Singhal Enterprises (Jharsuguda) Pvt. Ltd	6e4e536f-f6a7-4a7a-a8ce-d41f0bd2b284
+Singhal Enterprises(Jharsuguda)Pvt Ltd	6e4e536f-f6a7-4a7a-a8ce-d41f0bd2b284
+Ugen Ferro Alloys Pvt. Ltd.	e11e234f-b740-4f85-aed6-2135bf37eec9
+Ugen Ferro Alloys Pvt. Ltd	e11e234f-b740-4f85-aed6-2135bf37eec9
+All Company	2142d04b-67bc-4a7f-bd80-47cff23aa379
