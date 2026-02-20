@@ -69,6 +69,7 @@ export interface Ticket {
   level3_used_by_current_user?: boolean
   /** Stage locks: Admin/User can edit once; after that only Master Admin can edit */
   stage_1_locked?: boolean
+  stage_2_locked?: boolean
   stage_3_locked?: boolean
   stage_4_locked?: boolean
   feature_stage_2_edit_used?: boolean

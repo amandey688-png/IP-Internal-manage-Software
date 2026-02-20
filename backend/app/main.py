@@ -966,39 +966,12 @@ def _apply_approval_actual_times(data: dict) -> dict:
     return data
 
 
-# Chores & Bugs: keys per stage (Stage 2 = status_2/actual_2 always editable)
-_STAGE_1_KEYS = {"status_1", "actual_1", "planned_2"}
-_STAGE_3_KEYS = {"status_3", "actual_3", "planned_3"}
-_STAGE_4_KEYS = {"status_4", "actual_4", "planned_4"}
+# Stage keys for Level 3 one-time edit tracking. Stage 2 is excluded so Users can edit it multiple times.
+_STAGE_1_EDIT_KEYS = {"status_1", "actual_1"}
+_STAGE_2_EDIT_KEYS = {"status_2", "actual_2"}
+_STAGE_3_EDIT_KEYS = {"status_3", "actual_3"}
+_STAGE_4_EDIT_KEYS = {"status_4", "actual_4"}
 _FEATURE_STAGE_2_KEYS = {"live_status", "live_actual", "live_planned"}
-
-
-def _check_stage_locks_and_set(ticket_id: str, data: dict, role: str) -> None:
-    """Check stage locks (Admin/User) and set locks when they edit. Master Admin bypasses."""
-    if role == "master_admin":
-        return
-    ticket = supabase.table("tickets").select("stage_1_locked,stage_3_locked,stage_4_locked,feature_stage_2_edit_used,type").eq("id", ticket_id).single().execute()
-    row = ticket.data or {}
-    updates = {}
-    if row.get("type") in ("chore", "bug"):
-        if row.get("stage_1_locked") and (data.keys() & _STAGE_1_KEYS):
-            raise HTTPException(status_code=403, detail="Stage 1 is locked. Only Master Admin can edit.")
-        if row.get("stage_3_locked") and (data.keys() & _STAGE_3_KEYS):
-            raise HTTPException(status_code=403, detail="Stage 3 is locked. Only Master Admin can edit.")
-        if row.get("stage_4_locked") and (data.keys() & _STAGE_4_KEYS):
-            raise HTTPException(status_code=403, detail="Stage 4 is locked. Only Master Admin can edit.")
-        if data.keys() & _STAGE_1_KEYS:
-            updates["stage_1_locked"] = True
-        if data.keys() & _STAGE_3_KEYS:
-            updates["stage_3_locked"] = True
-        if data.keys() & _STAGE_4_KEYS:
-            updates["stage_4_locked"] = True
-    if row.get("type") == "feature" and (data.keys() & _FEATURE_STAGE_2_KEYS):
-        if row.get("feature_stage_2_edit_used"):
-            raise HTTPException(status_code=403, detail="Feature Stage 2 is locked. Only Master Admin can edit.")
-        updates["feature_stage_2_edit_used"] = True
-    for k, v in updates.items():
-        data[k] = v
 
 
 @api_router.put("/tickets/{ticket_id}")
@@ -1016,7 +989,6 @@ def update_ticket(ticket_id: str, payload: UpdateTicketRequest, auth: dict = Dep
         data["resolved_at"] = datetime.utcnow().isoformat()
     data = _apply_approval_actual_times(data)
     data = _apply_staging_cascade(data, ticket_id)
-    _check_stage_locks_and_set(ticket_id, data, role)
     r = supabase.table("tickets").update(data).eq("id", ticket_id).execute()
     if not r.data:
         raise HTTPException(status_code=404, detail="Ticket not found")
@@ -1034,11 +1006,11 @@ def update_ticket(ticket_id: str, payload: UpdateTicketRequest, auth: dict = Dep
             }).execute()
         except Exception:
             pass
-    # Level 3 (user): legacy level3_used for backward compat (Chores&Bug mark-staging etc)
+    # Level 3 (user): one-time edit for Stage 1, 3, 4. Stage 2 stays editable multiple times for all users.
     if role == "user":
         updated = r.data[0]
         ticket_type = updated.get("type") or (supabase.table("tickets").select("type").eq("id", ticket_id).single().execute().data or {}).get("type")
-        if ticket_type in ("chore", "bug") and (data.keys() & (_STAGE_1_KEYS | _STAGE_3_KEYS | _STAGE_4_KEYS)):
+        if ticket_type in ("chore", "bug") and (data.keys() & (_STAGE_1_EDIT_KEYS | _STAGE_3_EDIT_KEYS | _STAGE_4_EDIT_KEYS)):
             _mark_level3_edit_used(ticket_id, auth["id"])
         if ticket_type == "feature" and (data.keys() & _FEATURE_STAGE_2_KEYS):
             _mark_level3_edit_used(ticket_id, auth["id"])
