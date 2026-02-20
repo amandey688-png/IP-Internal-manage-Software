@@ -20,6 +20,7 @@ export const ROLE_DISPLAY_NAMES: Record<string, string> = {
 /** Section keys and labels for Edit User permissions (View / Edit checkboxes). Add new app sections here and in backend SECTION_KEYS. */
 export const SECTION_LABELS: Record<string, string> = {
   dashboard: 'Dashboard',
+  support_dashboard: 'Support Dashboard',
   all_tickets: 'All Tickets',
   chores_bugs: 'Chores & Bugs',
   staging: 'Staging',
@@ -39,6 +40,7 @@ export const ROUTES = {
   OTP: '/otp',
   CONFIRMATION_SUCCESS: '/confirmation-success',
   DASHBOARD: '/dashboard',
+  SUPPORT_DASHBOARD: '/support/dashboard',
   TICKETS: '/tickets',
   TICKET_DETAIL: '/tickets/:id',
   SOLUTIONS: '/solutions/:ticketId',

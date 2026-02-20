@@ -126,28 +126,6 @@ export const Dashboard = () => {
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
         <PrintExport pageTitle="Dashboard" exportData={exportData} exportFilename="dashboard_recent_tickets" />
       </div>
-      {/* Support Overview - static informational banner (non-clickable) */}
-      <div style={{ marginBottom: 28 }}>
-        <Card
-          style={{
-            borderRadius: 16,
-            border: 'none',
-            boxShadow: '0 4px 16px rgba(102, 126, 234, 0.2)',
-            overflow: 'hidden',
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            cursor: 'default',
-          }}
-          bodyStyle={{ padding: '24px 28px' }}
-        >
-          <Title level={3} style={{ margin: 0, color: '#fff', fontWeight: 700, whiteSpace: 'normal', wordBreak: 'break-word' }}>
-            Support Overview
-          </Title>
-          <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 14, display: 'block', marginTop: 6, whiteSpace: 'normal', wordBreak: 'break-word' }}>
-            Chores & Bug metrics only
-          </Text>
-        </Card>
-      </div>
-
       {error && (
         <Alert
           type="error"

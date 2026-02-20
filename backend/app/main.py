@@ -15,7 +15,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request, UploadFile, File, Query, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -1372,6 +1372,504 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     }
 
 
+# ---------- Support Dashboard Stats (FMS-style: weekly, pending grouped, top companies, features) ----------
+def _week_of_month(dt: datetime) -> int:
+    """Week of month (1-5) based on first Monday of month."""
+    year, month = dt.year, dt.month
+    first = datetime(year, month, 1)
+    first_day = first.weekday()  # 0=Mon, 6=Sun
+    first_monday = 1 + (7 - first_day) % 7 if first_day != 0 else 1
+    day = dt.day
+    week_num = ((day - first_monday) // 7) + 1
+    return max(1, min(week_num, 5))
+
+
+def _days_pending(created_iso: str | None, resolved_iso: str | None) -> int:
+    """Days from created (or query_arrival) to now if pending, else 0.
+    Uses timezone-aware UTC for comparisons (Supabase returns aware datetimes)."""
+    start = created_iso or ""
+    if not start:
+        return 0
+    try:
+        start_dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone.utc)
+    except Exception:
+        return 0
+    if resolved_iso:
+        try:
+            end_dt = datetime.fromisoformat(resolved_iso.replace("Z", "+00:00"))
+            if end_dt.tzinfo is None:
+                end_dt = end_dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            end_dt = datetime.now(timezone.utc)
+    else:
+        end_dt = datetime.now(timezone.utc)
+    delta = end_dt - start_dt
+    return max(0, delta.days)
+
+
+def _is_resolved(status: str | None, completed: str | None) -> bool:
+    resolved_statuses = ("completed", "complete", "resolved", "closed", "done", "fixed", "cancelled", "na", "n/a", "rejected")
+    s = (status or "").lower().strip()
+    c = (completed or "").lower().strip()
+    if any(x in s for x in resolved_statuses):
+        return True
+    if any(x in c for x in resolved_statuses):
+        return True
+    return False
+
+
+def _is_on_hold(status: str | None) -> bool:
+    h = ("on hold", "on-hold", "hold", "paused", "waiting", "pending more info")
+    s = (status or "").lower()
+    return any(x in s for x in h)
+
+
+def _is_pending(status: str | None) -> bool:
+    if _is_resolved(status, None):
+        return False
+    p = ("pending", "open", "in progress", "in-progress", "assigned", "active", "new", "received")
+    s = (status or "").lower()
+    return any(x in s for x in p)
+
+
+SLA_RESPONSE_MINUTES = 30
+
+
+def _has_response_delay(query_arrival: str | None, query_response: str | None) -> tuple[bool, str]:
+    """Returns (has_delay, delay_time_text). Response SLA = 30 min."""
+    if not query_arrival:
+        return False, ""
+    try:
+        arr = datetime.fromisoformat(str(query_arrival).replace("Z", "+00:00"))
+        if query_response:
+            resp = datetime.fromisoformat(str(query_response).replace("Z", "+00:00"))
+            if arr.tzinfo is None:
+                arr = arr.replace(tzinfo=timezone.utc)
+            if resp.tzinfo is None:
+                resp = resp.replace(tzinfo=timezone.utc)
+            delta_min = (resp - arr).total_seconds() / 60
+            if delta_min <= SLA_RESPONSE_MINUTES:
+                return False, ""
+            h, m = int(delta_min // 60), int(delta_min % 60)
+            d = h // 24
+            hr = h % 24
+            if d > 0:
+                text = f"Delay: {d}d {hr}h {m}m"
+            elif h > 0:
+                text = f"Delay: {h}h {m}m"
+            else:
+                text = f"Delay: {m}m"
+            return True, text
+        return True, "Awaiting response"
+    except Exception:
+        return False, ""
+
+
+SLA_STAGE2_DAYS = 1  # Chores & Bugs Stage 2 TAT: 1 day from planned
+
+
+def _has_completion_delay(
+    resolved_at: str | None,
+    created_at: str | None,
+    ticket_type: str | None = None,
+    planned_2: str | None = None,
+    actual_2: str | None = None,
+    status_2: str | None = None,
+    actual_1: str | None = None,
+) -> tuple[bool, str]:
+    """Returns (has_delay, delay_time_text).
+    Completion delay = ONLY (Chores & Bugs) where Stage 2 Status is 'Completed' AND TAT crossed (actual_2 - planned_2 > 1 day).
+    If Stage 2 is Pending, do NOT show in completion delay."""
+    if ticket_type not in ("chore", "bug"):
+        return False, ""
+    if not status_2 or str(status_2).lower() != "completed":
+        return False, ""
+    p2 = planned_2 or actual_1
+    if not p2 or not actual_2:
+        return False, ""
+    try:
+        planned = datetime.fromisoformat(str(p2).replace("Z", "+00:00"))
+        actual = datetime.fromisoformat(str(actual_2).replace("Z", "+00:00"))
+        if planned.tzinfo is None:
+            planned = planned.replace(tzinfo=timezone.utc)
+        if actual.tzinfo is None:
+            actual = actual.replace(tzinfo=timezone.utc)
+        delta_days = (actual - planned).days
+        if delta_days > SLA_STAGE2_DAYS:
+            return True, f"TAT crossed: {delta_days}d"
+        return False, ""
+    except Exception:
+        return False, ""
+
+
+@api_router.get("/support-dashboard/stats")
+def support_dashboard_stats(auth: dict = Depends(get_current_user)):
+    """Support Dashboard: weekly stats, pending grouped by 1-2/2-7/7+/hold, top companies, feature metrics."""
+    now = datetime.utcnow()
+    current_month = now.month
+    current_year = now.year
+    prev_month = current_month - 1 if current_month > 1 else 12
+    prev_year = current_year if current_month > 1 else current_year - 1
+
+    # Fetch ALL chores & bugs for weekly stats (include completed); exclude staging
+    # For pending items we filter by quality_solution=null in Python
+    try:
+        q = supabase.table("tickets").select(
+            "id, type, status, company_name, created_at, resolved_at, assignee_id, query_arrival_at, query_response_at, quality_solution, planned_2, actual_2, actual_1, status_2"
+        ).in_("type", ["chore", "bug"])
+        q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
+        q = q.or_("status_2.is.null,status_2.neq.staging")
+        r = q.execute()
+        all_tickets = r.data or []
+        # Tickets for pending items: only those still in Chores & Bugs (quality_solution null)
+        def _in_chores_bugs_section(ticket: dict) -> bool:
+            qs = ticket.get("quality_solution")
+            return qs is None or qs == "" or (isinstance(qs, str) and qs.lower() in ("null", "none"))
+        tickets_for_pending = [t for t in all_tickets if _in_chores_bugs_section(t)]
+    except Exception as e:
+        return {"success": False, "message": str(e)[:200]}
+
+    # Fetch feature tickets for feature metrics
+    try:
+        fq = supabase.table("tickets").select("id, type, status").eq("type", "feature")
+        fr = fq.execute()
+        feature_tickets = fr.data or []
+    except Exception:
+        feature_tickets = []
+
+    pending_statuses = ("open", "in_progress", "on_hold", "pending")
+    month_names = ["January", "February", "March", "April", "May", "June",
+                   "July", "August", "September", "October", "November", "December"]
+
+    # Weekly stats (4 weeks: current + 3 previous)
+    weeks_data = []
+    current_week = _week_of_month(now)
+    for i in range(4):
+        w = current_week - i
+        month, year = current_month, current_year
+        if w < 1:
+            w = 4 + w
+            month, year = prev_month, prev_year
+        week_label = f"Week {w}"
+        week_tickets = [t for t in all_tickets if _get_ticket_week(t) == (w, month, year)]
+        total = len(week_tickets)
+        chores = sum(1 for t in week_tickets if t.get("type") == "chore")
+        bugs = sum(1 for t in week_tickets if t.get("type") == "bug")
+        completed = sum(1 for t in week_tickets if _is_resolved(t.get("status"), None) or t.get("resolved_at"))
+        response_delay = sum(1 for t in week_tickets if _has_response_delay(t.get("query_arrival_at") or t.get("created_at"), t.get("query_response_at"))[0])
+        completion_delay = sum(1 for t in week_tickets if _has_completion_delay(
+            t.get("resolved_at"), t.get("created_at"),
+            ticket_type=t.get("type"),
+            planned_2=t.get("planned_2"), actual_2=t.get("actual_2"),
+            status_2=t.get("status_2"), actual_1=t.get("actual_1"),
+        )[0])
+        weeks_data.append({
+            "weekNumber": w,
+            "months": [month_names[month - 1]],
+            "years": [str(year)],
+            "weekDateRange": _week_date_range(w, month, year),
+            "success": True,
+            "stats": {
+                "totalTickets": total,
+                "totalChores": chores,
+                "totalBugs": bugs,
+                "completed": completed,
+                "pendingBugs": bugs - sum(1 for t in week_tickets if t.get("type") == "bug" and (_is_resolved(t.get("status"), None) or t.get("resolved_at"))),
+                "pendingChores": chores - sum(1 for t in week_tickets if t.get("type") == "chore" and (_is_resolved(t.get("status"), None) or t.get("resolved_at"))),
+                "responseDelay": response_delay,
+                "completionDelay": completion_delay,
+            },
+        })
+
+    # Pending chores & bugs grouped (only from tickets still in Chores & Bugs section)
+    pending_chores = []
+    pending_bugs = []
+    prev_month_chores = {}
+    prev_month_bugs = {}
+
+    for t in tickets_for_pending:
+        status = t.get("status") or ""
+        if _is_resolved(status, None) or t.get("resolved_at"):
+            continue
+        if not _is_pending(status) and status not in pending_statuses:
+            continue
+        created = t.get("query_arrival_at") or t.get("created_at")
+        days = _days_pending(created, t.get("resolved_at"))
+        if days == 0:
+            days = 1
+        company = (t.get("company_name") or "").strip() or "Unknown"
+        item = {"company": company, "daysPending": days, "status": status, "isOnHold": _is_on_hold(status), "type": t.get("type")}
+        if t.get("type") == "chore":
+            pending_chores.append(item)
+        elif t.get("type") == "bug":
+            pending_bugs.append(item)
+    for t in all_tickets:
+        created_at = t.get("created_at") or ""
+        if not created_at:
+            continue
+        try:
+            dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            if dt.month == prev_month and dt.year == prev_year:
+                company = (t.get("company_name") or "").strip() or "Unknown"
+                if t.get("type") == "chore":
+                    prev_month_chores[company] = prev_month_chores.get(company, 0) + 1
+                elif t.get("type") == "bug":
+                    prev_month_bugs[company] = prev_month_bugs.get(company, 0) + 1
+        except Exception:
+            pass
+
+    def group_items(items):
+        g = {"1-2": [], "2-7": [], "7+": [], "hold": []}
+        for it in items:
+            if it.get("isOnHold"):
+                g["hold"].append(it)
+            elif 1 <= it["daysPending"] <= 2:
+                g["1-2"].append(it)
+            elif 3 <= it["daysPending"] <= 7:
+                g["2-7"].append(it)
+            else:
+                g["7+"].append(it)
+        return g
+
+    grouped_chores = group_items(pending_chores)
+    grouped_bugs = group_items(pending_bugs)
+
+    # Explicit counts for frontend display (same as grouped array lengths)
+    counts = {
+        "chores": {"1-2": len(grouped_chores["1-2"]), "2-7": len(grouped_chores["2-7"]), "7+": len(grouped_chores["7+"]), "hold": len(grouped_chores["hold"])},
+        "bugs": {"1-2": len(grouped_bugs["1-2"]), "2-7": len(grouped_bugs["2-7"]), "7+": len(grouped_bugs["7+"]), "hold": len(grouped_bugs["hold"])},
+    }
+
+    def top_companies(m, limit=5):
+        pairs = sorted(m.items(), key=lambda x: -x[1])[:limit]
+        return [{"company": k, "requests": v} for k, v in pairs]
+
+    # Feature metrics
+    feature_pending = sum(1 for t in feature_tickets if t.get("status") in ("open", "in_progress", "on_hold", "pending"))
+    feature_total = len(feature_tickets)
+
+    return {
+        "success": True,
+        "weeksData": weeks_data,
+        "pendingItems": {"grouped": {"chores": grouped_chores, "bugs": grouped_bugs}},
+        "counts": counts,
+        "monthlyTopCompanies": {
+            "chores": top_companies(prev_month_chores),
+            "bugs": top_companies(prev_month_bugs),
+            "period": f"{month_names[prev_month - 1]} {prev_year}",
+        },
+        "statistics": {
+            "totalChores": len(pending_chores),
+            "totalBugs": len(pending_bugs),
+            "onHoldChores": len([x for x in pending_chores if x.get("isOnHold")]),
+            "onHoldBugs": len([x for x in pending_bugs if x.get("isOnHold")]),
+        },
+        "featureMetrics": {
+            "total": feature_total,
+            "pending": feature_pending,
+        },
+        "summary": {
+            "period": f"{month_names[current_month - 1]} {current_year}",
+            "lastUpdated": now.strftime("%Y-%m-%d %H:%M:%S"),
+        },
+    }
+
+
+def _get_ticket_week(t: dict) -> tuple[int, int, int]:
+    """Return (week_num, month, year) for ticket based on created_at."""
+    created = t.get("created_at") or ""
+    if not created:
+        return 0, 0, 0
+    try:
+        dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        return _week_of_month(dt), dt.month, dt.year
+    except Exception:
+        return 0, 0, 0
+
+
+def _week_date_range(week_num: int, month: int, year: int) -> str:
+    """Return human-readable date range for week (e.g. '1 Jan – 7 Jan')."""
+    first = datetime(year, month, 1)
+    first_day = first.weekday()
+    first_monday = 1 + (7 - first_day) % 7 if first_day != 0 else 1
+    start_day = first_monday + (week_num - 1) * 7
+    start = datetime(year, month, min(start_day, 28))
+    end = datetime(year, month, min(start_day + 5, 28))
+    names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    return f"{start.day} {names[month - 1]} – {end.day} {names[month - 1]}"
+
+
+@api_router.get("/support-dashboard/filtered")
+def support_dashboard_filtered(
+    filter_type: str = Query(..., description="1-2, 2-7, 7+, hold"),
+    category: str = Query(..., description="chores or bugs"),
+    auth: dict = Depends(get_current_user),
+):
+    """Filtered tickets for Support Dashboard modal (chores/bugs by days or hold)."""
+    try:
+        q = supabase.table("tickets").select(
+            "id, reference_no, title, description, type, status, company_name, company_id, user_name, created_at, resolved_at, query_arrival_at"
+        ).in_("type", ["chore", "bug"])
+        q = q.is_("quality_solution", "null")
+        q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
+        q = q.or_("status_2.is.null,status_2.neq.staging")
+        r = q.execute()
+        tickets = r.data or []
+        _enrich_tickets_with_lookups(tickets)
+    except Exception as e:
+        return {"success": False, "message": str(e)[:200], "data": [], "totalRecords": 0}
+
+    pending_statuses = ("open", "in_progress", "on_hold", "pending")
+    result = []
+    for t in tickets:
+        status = t.get("status") or ""
+        if _is_resolved(status, None) or t.get("resolved_at"):
+            continue
+        if status not in pending_statuses and not _is_pending(status):
+            continue
+        ttype = t.get("type")
+        if category == "chores" and ttype != "chore":
+            continue
+        if category == "bugs" and ttype != "bug":
+            continue
+        days = _days_pending(t.get("query_arrival_at") or t.get("created_at"), t.get("resolved_at"))
+        if days == 0:
+            days = 1
+        on_hold = _is_on_hold(status)
+        match = False
+        if filter_type == "hold" and on_hold:
+            match = True
+        elif filter_type == "1-2" and not on_hold and 1 <= days <= 2:
+            match = True
+        elif filter_type == "2-7" and not on_hold and 3 <= days <= 7:
+            match = True
+        elif filter_type == "7+" and not on_hold and days > 7:
+            match = True
+        if match:
+            result.append({
+                "company": (t.get("company_name") or "").strip() or "Unknown",
+                "requestedPerson": (t.get("user_name") or "").strip() or "Not specified",
+                "status": status,
+                "pendingDays": days,
+                "referenceNo": (t.get("reference_no") or "").strip() or "N/A",
+                "title": (t.get("title") or "").strip(),
+                "description": (t.get("description") or "").strip() or "",
+                "queryArrival": t.get("query_arrival_at") or t.get("created_at") or "",
+                "rowNumber": 0,
+            })
+    return {"success": True, "data": result, "totalRecords": len(result), "filterType": filter_type, "category": category}
+
+
+@api_router.get("/support-dashboard/weekly-details")
+def support_dashboard_weekly_details(
+    week_number: int = Query(...),
+    months: str = Query("", description="comma-separated months"),
+    years: str = Query("", description="comma-separated years"),
+    ticket_type: str = Query("total", description="total, pending, or completed"),
+    auth: dict = Depends(get_current_user),
+):
+    """Weekly ticket details for Support Dashboard modal.
+    ticket_type: total, pending, completed, response_delay, completion_delay.
+    Uses ALL chores+bugs (no quality_solution filter) to match weekly stats."""
+    try:
+        q = supabase.table("tickets").select(
+            "id, reference_no, title, description, type, status, company_name, company_id, user_name, assignee_id, created_at, query_arrival_at, query_response_at, resolved_at, planned_2, actual_2, actual_1, status_2"
+        ).in_("type", ["chore", "bug"])
+        q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
+        q = q.or_("status_2.is.null,status_2.neq.staging")
+        r = q.execute()
+        tickets = r.data or []
+        _enrich_tickets_with_lookups(tickets)
+    except Exception as e:
+        return {"success": False, "message": str(e)[:200], "tickets": []}
+
+    month_list = [m.strip() for m in months.split(",") if m.strip()]
+    year_list = [y.strip() for y in years.split(",") if y.strip()]
+    result = []
+    for t in tickets:
+        w, m, y = _get_ticket_week(t)
+        if w != week_number:
+            continue
+        month_name = datetime(2000, m, 1).strftime("%B") if 1 <= m <= 12 else ""
+        if month_list and month_name not in month_list:
+            continue
+        if year_list and str(y) not in year_list:
+            continue
+        resolved = _is_resolved(t.get("status"), None) or bool(t.get("resolved_at"))
+        if ticket_type == "pending" and resolved:
+            continue
+        if ticket_type == "completed" and not resolved:
+            continue
+        q_arrival = t.get("query_arrival_at") or t.get("created_at")
+        q_response = t.get("query_response_at")
+        has_resp_delay, resp_delay_text = _has_response_delay(q_arrival, q_response)
+        has_comp_delay, comp_delay_text = _has_completion_delay(
+            t.get("resolved_at"), t.get("created_at"),
+            ticket_type=t.get("type"),
+            planned_2=t.get("planned_2"), actual_2=t.get("actual_2"),
+            status_2=t.get("status_2"), actual_1=t.get("actual_1"),
+        )
+        if ticket_type == "response_delay" and not has_resp_delay:
+            continue
+        if ticket_type == "completion_delay" and not has_comp_delay:
+            continue
+        result.append({
+            "type": "Bug" if t.get("type") == "bug" else "Chore",
+            "company": (t.get("company_name") or "").strip() or "Unknown",
+            "requestedPerson": (t.get("user_name") or "").strip() or "Not specified",
+            "submittedBy": (t.get("user_name") or "").strip() or "Not specified",
+            "title": (t.get("title") or "").strip(),
+            "description": (t.get("description") or "").strip() or "",
+            "referenceNo": (t.get("reference_no") or "").strip() or "N/A",
+            "week": f"Week {week_number}",
+            "month": month_name,
+            "year": str(y),
+            "status": t.get("status") or "",
+            "completed": "completed" if resolved else "",
+            "queryArrival": q_arrival or "",
+            "responseDelayTime": resp_delay_text if has_resp_delay else "",
+            "completionDelayTime": comp_delay_text if has_comp_delay else "",
+        })
+    return {"success": True, "tickets": result, "ticketType": ticket_type, "weekNumber": week_number, "totalTickets": len(result)}
+
+
+@api_router.get("/support-dashboard/feature-tickets")
+def support_dashboard_feature_tickets(
+    filter_type: str = Query("all", description="all or pending"),
+    auth: dict = Depends(get_current_user),
+):
+    """Feature tickets for Support Dashboard modal (all or pending only)."""
+    try:
+        q = supabase.table("tickets").select(
+            "id, reference_no, title, description, type, status, company_name, user_name, created_at, query_arrival_at, resolved_at"
+        ).eq("type", "feature")
+        r = q.execute()
+        tickets = r.data or []
+    except Exception as e:
+        return {"success": False, "message": str(e)[:200], "data": [], "totalRecords": 0}
+    pending_statuses = ("open", "in_progress", "on_hold", "pending")
+    result = []
+    for t in tickets:
+        status = t.get("status") or ""
+        resolved = _is_resolved(status, None) or bool(t.get("resolved_at"))
+        if filter_type == "pending" and resolved:
+            continue
+        if filter_type == "pending" and status not in pending_statuses and not _is_pending(status):
+            continue
+        result.append({
+            "company": (t.get("company_name") or "").strip() or "Unknown",
+            "requestedPerson": (t.get("user_name") or "").strip() or "Not specified",
+            "status": status,
+            "referenceNo": (t.get("reference_no") or "").strip() or "N/A",
+            "title": (t.get("title") or "").strip(),
+            "description": (t.get("description") or "").strip() or "",
+            "queryArrival": t.get("query_arrival_at") or t.get("created_at") or "",
+        })
+    return {"success": True, "data": result, "totalRecords": len(result), "filterType": filter_type}
+
+
 @api_router.get("/dashboard/trends")
 def dashboard_trends(auth: dict = Depends(get_current_user)):
     """Monthly trend data for charts (Chores & Bug only)."""
@@ -1437,7 +1935,7 @@ def _map_role(name: str) -> str:
 
 # Section keys for user_section_permissions (match sidebar sections)
 SECTION_KEYS = [
-    "dashboard", "all_tickets", "chores_bugs", "staging", "feature",
+    "dashboard", "support_dashboard", "all_tickets", "chores_bugs", "staging", "feature",
     "approval_status", "completed_chores_bugs", "completed_feature",
     "solution", "task", "settings", "users",
 ]

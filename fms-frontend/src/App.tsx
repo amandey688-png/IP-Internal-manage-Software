@@ -21,6 +21,7 @@ import { DelegationPage } from "./pages/Task/DelegationPage"
 import { UserList } from "./pages/Users/UserList"
 import { SettingsPage } from "./pages/Settings/SettingsPage"
 import { ApprovalConfirmPage } from "./pages/Approval/ApprovalConfirmPage"
+import { SupportDashboard } from "./pages/Support/SupportDashboard"
 
 import { ROUTES, ROLES, APP_NAME } from "./utils/constants"
 
@@ -31,6 +32,7 @@ function AppTitle() {
       [ROUTES.LOGIN]: "Login",
       [ROUTES.REGISTER]: "Register",
       [ROUTES.DASHBOARD]: "Dashboard",
+      [ROUTES.SUPPORT_DASHBOARD]: "Support Dashboard",
       [ROUTES.TICKETS]: "Tickets",
       [ROUTES.STAGING]: "Staging",
       [ROUTES.CHECKLIST]: "Checklist",
@@ -88,6 +90,19 @@ function App() {
                   <AppLayout>
                     <ErrorBoundary>
                       <Dashboard />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path={ROUTES.SUPPORT_DASHBOARD}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <SupportDashboard />
                     </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>
