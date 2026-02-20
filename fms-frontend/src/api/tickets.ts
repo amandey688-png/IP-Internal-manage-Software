@@ -142,6 +142,7 @@ export const ticketsApi = {
     page?: number
     limit?: number
     status?: string
+    status_2_filter?: string  // For Chores & Bugs: pending | completed | staging | hold
     type?: string
     types_in?: string
     section?: string
@@ -151,6 +152,7 @@ export const ticketsApi = {
     date_from?: string
     date_to?: string
     search?: string
+    search_all_sections?: boolean
     reference_filter?: string
     sort_by?: string
     sort_order?: string

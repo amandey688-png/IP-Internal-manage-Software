@@ -66,6 +66,7 @@ export const TicketList = () => {
   const isApprovalSection = viewFromUrl || sectionFromUrl === 'approval-status'
   const showStageFilter = sectionFromUrl === 'chores-bugs'
   const showStageFilterForFeature = typeFromUrl === 'feature' && !isApprovalSection
+  const isChoresBugsSection = sectionFromUrl === 'chores-bugs'
 
   useEffect(() => {
     if (isApprovalSection && !canAccessApproval) {
@@ -94,6 +95,12 @@ export const TicketList = () => {
   const [stageFilter, setStageFilter] = useState<string>('')
   /** Approval Status view: pending (default) | unapproved | all */
   const [approvalFilter, setApprovalFilter] = useState<string>('pending')
+  /** Chores & Bugs only: filter by Stage 2 status (pending | completed | staging | hold) */
+  const [status2Filter, setStatus2Filter] = useState<string>('')
+
+  useEffect(() => {
+    if (sectionFromUrl !== 'chores-bugs') setStatus2Filter('')
+  }, [sectionFromUrl])
 
   useEffect(() => {
     const t = searchParams.get('type') || ''
@@ -114,7 +121,7 @@ export const TicketList = () => {
       } else if (s === 'chores-bugs') {
         next.type = ''
         next.types_in = 'chore,bug'
-        next.status = urlStatus || ''
+        next.status = '' // Chores & Bugs uses status_2_filter (Pending/Completed/Staging/Hold), not old status
         next.date_from = urlDateFrom || ''
         next.date_to = urlDateTo || ''
       } else if (s === 'completed-chores-bugs') {
@@ -171,7 +178,7 @@ export const TicketList = () => {
       }
       fetchTickets()
     }
-  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, showStageFilter, showStageFilterForFeature])
+  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, status2Filter, showStageFilter, showStageFilterForFeature])
 
   const fetchTickets = async () => {
     setLoading(true)
@@ -179,9 +186,10 @@ export const TicketList = () => {
       const response = await ticketsApi.list({
         page,
         limit: pageSize,
-        ...(filters.search && { search: filters.search }),
+        ...(filters.search && { search: filters.search, search_all_sections: true }),
         ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
+        ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
+        ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
         ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
@@ -216,9 +224,10 @@ export const TicketList = () => {
       const response = await ticketsApi.list({
         page: currentPage,
         limit,
-        ...(filters.search && { search: filters.search }),
+        ...(filters.search && { search: filters.search, search_all_sections: true }),
         ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
+        ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
+        ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
         ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
@@ -889,21 +898,40 @@ export const TicketList = () => {
               </Option>
             ))}
           </Select>
-          <Select
-            placeholder="Status"
-            style={{ width: 130 }}
-            value={filters.status || undefined}
-            onChange={(v) => setFilters((f) => ({ ...f, status: v || '' }))}
-            allowClear
-            getPopupContainer={() => document.body}
-          >
-            <Option value="open">Open</Option>
-            <Option value="in_progress">In Progress</Option>
-            <Option value="resolved">Resolved</Option>
-            <Option value="closed">Closed</Option>
-            <Option value="cancelled">Cancelled</Option>
-            <Option value="on_hold">On Hold</Option>
-          </Select>
+          {isChoresBugsSection ? (
+            <Select
+              placeholder="Status"
+              style={{ width: 130 }}
+              value={status2Filter || undefined}
+              onChange={(v) => {
+                setStatus2Filter(v ?? '')
+                setPage(1)
+              }}
+              allowClear
+              getPopupContainer={() => document.body}
+            >
+              <Option value="pending">Pending</Option>
+              <Option value="completed">Completed</Option>
+              <Option value="staging">Staging</Option>
+              <Option value="hold">Hold</Option>
+            </Select>
+          ) : (
+            <Select
+              placeholder="Status"
+              style={{ width: 130 }}
+              value={filters.status || undefined}
+              onChange={(v) => setFilters((f) => ({ ...f, status: v || '' }))}
+              allowClear
+              getPopupContainer={() => document.body}
+            >
+              <Option value="open">Open</Option>
+              <Option value="in_progress">In Progress</Option>
+              <Option value="resolved">Resolved</Option>
+              <Option value="closed">Closed</Option>
+              <Option value="cancelled">Cancelled</Option>
+              <Option value="on_hold">On Hold</Option>
+            </Select>
+          )}
           <Select
             placeholder="Priority"
             style={{ width: 110 }}
