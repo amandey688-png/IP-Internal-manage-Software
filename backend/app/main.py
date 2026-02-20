@@ -710,6 +710,58 @@ class CreateTicketResponseRequest(BaseModel):
     response_text: str
 
 
+class SupportTicketDraftPayload(BaseModel):
+    """Draft form data for Submit Support Ticket (JSON-serializable)."""
+    draft_data: dict
+
+
+_DRAFT_EXPIRY_HOURS = 24
+
+
+@api_router.get("/drafts/support-ticket")
+def get_support_ticket_draft(auth: dict = Depends(get_current_user)):
+    """Get current user's support ticket draft. Returns 404 if none or if draft is older than 24 hours."""
+    user_id = auth["id"]
+    r = supabase.table("support_ticket_drafts").select("draft_data, updated_at").eq("user_id", user_id).limit(1).execute()
+    if not r.data or len(r.data) == 0:
+        raise HTTPException(status_code=404, detail="No draft found")
+    row = r.data[0]
+    updated_at_str = row.get("updated_at")
+    if updated_at_str:
+        try:
+            updated = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=timezone.utc)
+            expiry = datetime.now(timezone.utc) - timedelta(hours=_DRAFT_EXPIRY_HOURS)
+            if updated < expiry:
+                supabase.table("support_ticket_drafts").delete().eq("user_id", user_id).execute()
+                raise HTTPException(status_code=404, detail="Draft expired (older than 24 hours)")
+        except (ValueError, TypeError):
+            pass
+    return {"draft_data": row.get("draft_data") or {}}
+
+
+@api_router.put("/drafts/support-ticket")
+def save_support_ticket_draft(payload: SupportTicketDraftPayload, auth: dict = Depends(get_current_user)):
+    """Save or update support ticket draft for current user. One draft per user."""
+    user_id = auth["id"]
+    data = {"user_id": user_id, "draft_data": payload.draft_data or {}}
+    try:
+        r = supabase.table("support_ticket_drafts").upsert(data, on_conflict="user_id").execute()
+        return {"ok": True}
+    except Exception as e:
+        _log(f"Save draft error: {e}")
+        raise HTTPException(status_code=400, detail=str(e)[:200])
+
+
+@api_router.delete("/drafts/support-ticket")
+def delete_support_ticket_draft(auth: dict = Depends(get_current_user)):
+    """Delete current user's support ticket draft (e.g. after successful submit)."""
+    user_id = auth["id"]
+    supabase.table("support_ticket_drafts").delete().eq("user_id", user_id).execute()
+    return {"ok": True}
+
+
 @api_router.post("/tickets")
 def create_ticket(payload: CreateTicketRequest, auth: dict = Depends(get_current_user)):
     data = {
