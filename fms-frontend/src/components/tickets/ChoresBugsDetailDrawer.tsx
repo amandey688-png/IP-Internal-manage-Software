@@ -51,10 +51,6 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
 
   const isLevel3 = user?.role === 'user'
   const level3Restricted = isLevel3 && !isMasterAdmin && ticket?.level3_used_by_current_user === true
-  const stage1Locked = ticket?.stage_1_locked && !isMasterAdmin
-  const stage3Locked = ticket?.stage_3_locked && !isMasterAdmin
-  const stage4Locked = ticket?.stage_4_locked && !isMasterAdmin
-
   useEffect(() => {
     if (open && ticketId) {
       setLoading(true)
@@ -311,7 +307,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                   }}
                   style={{ width: 100 }}
                   placeholder="Select"
-                  disabled={saving || readOnly || stage1Locked}
+                  disabled={saving || readOnly}
                 >
                   <Select.Option value="yes">Yes</Select.Option>
                   <Select.Option value="no">No</Select.Option>
@@ -487,7 +483,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                     }}
                     style={{ width: 120 }}
                     placeholder="Select"
-                    disabled={saving || readOnly || stage3Locked}
+                    disabled={saving || readOnly}
                   >
                     <Select.Option value="completed">Completed</Select.Option>
                     <Select.Option value="pending">Pending</Select.Option>
@@ -531,7 +527,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                     }}
                     style={{ width: 120 }}
                     placeholder="Select"
-                    disabled={saving || readOnly || stage4Locked}
+                    disabled={saving || readOnly}
                   >
                     <Select.Option value="completed">Completed</Select.Option>
                     <Select.Option value="pending">Pending</Select.Option>
