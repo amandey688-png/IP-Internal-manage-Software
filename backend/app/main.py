@@ -830,6 +830,8 @@ def list_tickets(
     limit: int = 50,
     section: str | None = None,
     approval_filter: str | None = None,  # For section=approval-status: pending | unapproved | all
+    status_2_filter: str | None = None,  # For section=chores-bugs: pending | completed | staging | hold (Stage 2 status)
+    search_all_sections: bool = False,   # When True + search present: ignore section/type, search all tickets
     auth: dict = Depends(get_current_user),
 ):
     # Approval Status section: only admin, master_admin and approver
@@ -838,30 +840,41 @@ def list_tickets(
         if role not in ("admin", "master_admin", "approver"):
             raise HTTPException(status_code=403, detail="Approval Status is only available to Admin and Approver roles")
     q = supabase.table("tickets").select("*", count="exact")
-    if status:
+    # When global search: bypass section/type filters to search across all tickets
+    apply_section_filter = section and not (search_all_sections and search and search.strip())
+    # Status filter: use status for non–Chores & Bugs; for Chores & Bugs use status_2_filter (Stage 2) instead
+    use_status_2_for_chores = apply_section_filter and section == "chores-bugs" and status_2_filter
+    if status and not use_status_2_for_chores:
         q = q.eq("status", status)
-    if section == "completed-chores-bugs":
+    if apply_section_filter and section == "completed-chores-bugs":
         types_list = ["chore", "bug"]
         q = q.in_("type", types_list)
         q = q.or_("quality_solution.not.is.null,live_review_status.eq.completed")
-    elif section == "solutions":
+    elif apply_section_filter and section == "solutions":
         q = q.not_.is_("quality_solution", "null")
-    elif section == "completed-feature":
+    elif apply_section_filter and section == "completed-feature":
         # Feature: when Stage 2 (live) completed -> auto-move to Completed Feature
         q = q.eq("type", "feature")
         q = q.eq("live_status", "completed")
-    elif section == "staging":
+    elif apply_section_filter and section == "staging":
         # Tickets in Staging: (new workflow: staging_planned set OR old: status_2 = staging) AND not completed Stage 3
         q = q.or_("staging_planned.not.is.null,status_2.eq.staging")
         q = q.or_("live_review_status.is.null,live_review_status.neq.completed")
-    elif section == "chores-bugs":
+    elif apply_section_filter and section == "chores-bugs":
         types_list = ["chore", "bug"]
         q = q.in_("type", types_list)
         q = q.is_("quality_solution", "null")
-        # Exclude tickets in Staging (new workflow or old status_2 = staging)
-        q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
-        q = q.or_("status_2.is.null,status_2.neq.staging")
-    elif section == "approval-status":
+        if status_2_filter and status_2_filter.lower() in ("pending", "completed", "staging", "hold"):
+            q = q.eq("status_2", status_2_filter.lower())
+            # When filtering by staging: include chore/bug with status_2=staging (override staging exclusion)
+            if status_2_filter.lower() != "staging":
+                q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
+                q = q.or_("status_2.is.null,status_2.neq.staging")
+        else:
+            # Exclude tickets in Staging (new workflow or old status_2 = staging)
+            q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
+            q = q.or_("status_2.is.null,status_2.neq.staging")
+    elif apply_section_filter and section == "approval-status":
         # Feature requests: only Pending and Unapproved (exclude Approved)
         q = q.eq("type", "feature")
         q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
@@ -872,12 +885,12 @@ def list_tickets(
         else:
             # all (default): show both pending and unapproved
             q = q.or_("approval_status.is.null,approval_status.eq.unapproved")
-    elif types_in:
+    elif apply_section_filter and types_in:
         types_list = [t.strip() for t in types_in.split(",") if t.strip()]
         if types_list:
             q = q.in_("type", types_list)
             q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
-    elif type:
+    elif apply_section_filter and type:
         q = q.eq("type", type)
         if type == "feature":
             # Feature section: approved/unapproved, not yet in Completed Feature (live_status != completed)
@@ -892,8 +905,14 @@ def list_tickets(
         q = q.gte("created_at", date_from)
     if date_to:
         q = q.lte("created_at", date_to)
-    if search:
-        q = q.or_(f"title.ilike.%{search}%,description.ilike.%{search}%,user_name.ilike.%{search}%,submitted_by.ilike.%{search}%,customer_questions.ilike.%{search}%,reference_no.ilike.%{search}%")
+    if search and search.strip():
+        safe = search.strip().replace("%", "").replace("_", "")[:200]
+        if safe:
+            q = q.or_(
+                f"title.ilike.%{safe}%,description.ilike.%{safe}%,user_name.ilike.%{safe}%,"
+                f"submitted_by.ilike.%{safe}%,customer_questions.ilike.%{safe}%,reference_no.ilike.%{safe}%,"
+                f"company_name.ilike.%{safe}%,quality_of_response.ilike.%{safe}%,quality_solution.ilike.%{safe}%,why_feature.ilike.%{safe}%"
+            )
     if reference_filter and reference_filter.strip():
         safe_ref = reference_filter.strip().replace("%", "").replace("_", "")[:80]
         if safe_ref:
