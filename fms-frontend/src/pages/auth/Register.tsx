@@ -1,14 +1,22 @@
 import { useState, useEffect } from "react"
-import { Form, Input, Button, Card, Typography, message } from "antd"
-import { UserOutlined, MailOutlined } from "@ant-design/icons"
+import { Form, Input, Button, Typography, message } from "antd"
+import { UserOutlined, MailOutlined, LockOutlined } from "@ant-design/icons"
 import { useNavigate } from "react-router-dom"
 import { authApi } from "../../api/auth"
-import { PasswordInput } from "../../components/forms/PasswordInput"
 import { validateEmail } from "../../utils/validation"
+import { getPasswordStrength } from "../../utils/passwordStrength"
+import { AuthLayout } from "../../components/auth/AuthLayout"
 import { ROUTES } from "../../utils/constants"
 import type { RegisterRequest } from "../../types/auth"
 
-const { Title, Text } = Typography
+const { Text } = Typography
+
+const colors = {
+  darkBlue: '#1e3a5f',
+  lightBlue: '#7eb8da',
+  white: '#ffffff',
+  accent: '#f59e0b',
+}
 
 export const Register = () => {
   const [form] = Form.useForm()
@@ -18,62 +26,38 @@ export const Register = () => {
   const [resendLoading, setResendLoading] = useState(false)
   const navigate = useNavigate()
 
-  // Redirect after success
   useEffect(() => {
     if (success) {
-      const timer = setTimeout(() => {
-        navigate(ROUTES.LOGIN)
-      }, 5000)
+      const timer = setTimeout(() => navigate(ROUTES.LOGIN), 5000)
       return () => clearTimeout(timer)
     }
   }, [success, navigate])
 
-  // ✅ FORM SUBMIT
   const onFinish = async (values: RegisterRequest) => {
-    console.log("🔥 Register form submit triggered")
-    console.log("📝 Form values:", values)
-
-    // Validate form values are present
     if (!values.email || !values.password || !values.full_name) {
-      console.error("❌ Missing form values")
       message.error("Please fill in all fields")
       return
     }
-
     setLoading(true)
     try {
-      console.log("📤 Sending registration request to backend...")
       const response = await authApi.register(values)
-      console.log("📥 Received response:", response)
-
-      // Check for error response
       if (response?.error) {
-        const errorMsg = response.error.message || "Registration failed"
-        const code = response.error.code
-        console.error("❌ Registration error:", { message: errorMsg, code })
-        // Show error - include code for 500 to help debug
-        const displayMsg = code === '500' ? `${errorMsg} (Backend error - check backend terminal)` : errorMsg
+        const displayMsg = response.error.code === '500'
+          ? `${response.error.message} (Backend error)`
+          : response.error.message
         message.error(displayMsg, 10)
         setLoading(false)
         return
       }
-
-      // Check if we have data
       if (response?.data) {
-        console.log("✅ Registration successful:", response.data)
         setRegisteredEmail(response.data.email || values.email)
-        message.success(
-          response.data.message || "Registration successful! Please check your email."
-        )
+        message.success(response.data.message || "Registration successful! Please check your email.")
         setSuccess(true)
         form.resetFields()
       } else {
-        // Unexpected response format
-        console.warn("⚠️ Unexpected response format:", response)
         message.error("Unexpected response from server. Please try again.")
       }
     } catch (err: any) {
-      console.error("❌ Register exception:", err)
       const detail = err.response?.data?.detail
       const msg = typeof detail === 'string' ? detail : err.message || "Something went wrong"
       message.error(msg, 8)
@@ -82,31 +66,29 @@ export const Register = () => {
     }
   }
 
-  const onFinishFailed = (errorInfo: any) => {
-    console.error("❌ Form validation failed:", errorInfo)
+  const onFinishFailed = () => {
     message.error("Please fix the form errors before submitting")
   }
 
-  // ✅ SUCCESS SCREEN
   if (success) {
     return (
-      <div style={pageStyle}>
-        <Card className="auth-card" style={{ width: 420, maxWidth: 'calc(100% - 32px)', textAlign: "center" }}>
-          <Title level={3}>Registration Successful 🎉</Title>
-          <Text type="success" style={{ display: "block" }}>
+      <AuthLayout>
+        <div style={{ width: '100%', maxWidth: 360, textAlign: 'center' }}>
+          <h1 style={{ color: colors.white, fontSize: 28, marginBottom: 16 }}>Registration Successful</h1>
+          <Text style={{ color: colors.lightBlue, display: 'block', marginBottom: 8 }}>
             Check your email for a confirmation link.
           </Text>
-          <Text type="secondary" style={{ display: "block", marginTop: 8 }}>
+          <Text style={{ color: 'rgba(255,255,255,0.8)', display: 'block', marginBottom: 24 }}>
             Click the link to activate your account, then log in.
           </Text>
-          <Text type="secondary" style={{ display: "block", marginTop: 16 }}>
+          <Text style={{ color: 'rgba(255,255,255,0.7)', display: 'block', marginBottom: 24 }}>
             Redirecting to login in 5 seconds…
           </Text>
           {registeredEmail && (
             <Button
               type="link"
               loading={resendLoading}
-              style={{ marginTop: 16 }}
+              style={{ color: colors.lightBlue }}
               onClick={async () => {
                 setResendLoading(true)
                 try {
@@ -122,18 +104,17 @@ export const Register = () => {
               Didn't receive the email? Resend
             </Button>
           )}
-        </Card>
-      </div>
+        </div>
+      </AuthLayout>
     )
   }
 
-  // ✅ REGISTER FORM UI
   return (
-    <div style={pageStyle}>
-      <Card className="auth-card" style={{ width: 420, maxWidth: 'calc(100% - 32px)' }}>
-        <Title level={2} style={{ textAlign: "center", marginBottom: 32 }}>
-          Register
-        </Title>
+    <AuthLayout variant="register">
+      <div style={{ width: '100%', maxWidth: 360 }}>
+        <h1 style={{ color: colors.white, fontSize: 32, fontWeight: 700, marginBottom: 32, textAlign: 'center' }}>
+          Welcome!
+        </h1>
 
         <Form
           form={form}
@@ -141,25 +122,29 @@ export const Register = () => {
           onFinish={onFinish}
           onFinishFailed={onFinishFailed}
           autoComplete="off"
+          requiredMark={false}
         >
           <Form.Item
             name="full_name"
-            label="Full Name"
             rules={[
-              { required: true, message: "Please enter your full name" },
-              { min: 2, message: "Minimum 2 characters required" },
+              { required: true, message: "Please enter your name" },
+              { min: 2, message: "Minimum 2 characters" },
             ]}
           >
             <Input
-              prefix={<UserOutlined />}
-              placeholder="Your full name"
+              prefix={<UserOutlined style={{ color: colors.lightBlue, marginRight: 8 }} />}
+              placeholder="Your name"
               size="large"
+              style={{
+                borderRadius: 8,
+                padding: '12px 16px',
+                background: colors.white,
+              }}
             />
           </Form.Item>
 
           <Form.Item
             name="email"
-            label="Email"
             rules={[
               { required: true, message: "Please enter your email" },
               {
@@ -171,51 +156,115 @@ export const Register = () => {
             ]}
           >
             <Input
-              prefix={<MailOutlined />}
-              placeholder="Email address"
+              prefix={<MailOutlined style={{ color: colors.lightBlue, marginRight: 8 }} />}
+              placeholder="Your e-mail"
               size="large"
+              style={{
+                borderRadius: 8,
+                padding: '12px 16px',
+                background: colors.white,
+              }}
             />
           </Form.Item>
 
-          <PasswordInput
+          <Form.Item
             name="password"
-            label="Password"
-            showValidationRules
-          />
+            rules={[
+              { required: true, message: "Please create a password" },
+              {
+                validator: (_, value) => {
+                  if (!value) return Promise.reject(new Error("Please create a password"))
+                  if (value.length < 8) return Promise.reject(new Error("At least 8 characters"))
+                  if (!/[a-z]/.test(value)) return Promise.reject(new Error("One lowercase letter"))
+                  if (!/[A-Z]/.test(value)) return Promise.reject(new Error("One uppercase letter"))
+                  if (!/\d/.test(value)) return Promise.reject(new Error("One number"))
+                  if (!/[@$!%*?&]/.test(value)) return Promise.reject(new Error("One special char (@$!%*?&)"))
+                  return Promise.resolve()
+                },
+              },
+            ]}
+          >
+            <Input.Password
+              prefix={<LockOutlined style={{ color: colors.lightBlue, marginRight: 8 }} />}
+              placeholder="Create password"
+              size="large"
+              style={{
+                borderRadius: 8,
+                padding: '12px 16px',
+                background: colors.white,
+              }}
+            />
+          </Form.Item>
 
-          <Form.Item>
+          <Form.Item noStyle dependencies={['password']}>
+            {() => {
+              const pwd = form.getFieldValue('password') || ''
+              const s = getPasswordStrength(pwd)
+              return pwd ? (
+                <div style={{ marginBottom: 24 }}>
+                  <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, display: 'block', marginBottom: 8 }}>
+                    Password strength
+                  </Text>
+                  <div
+                    style={{
+                      height: 6,
+                      background: 'rgba(255,255,255,0.2)',
+                      borderRadius: 3,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <div
+                      style={{
+                        height: '100%',
+                        width: `${s * 33.33}%`,
+                        background: s <= 1 ? '#ef4444' : s <= 2 ? colors.accent : '#22c55e',
+                        borderRadius: 3,
+                        transition: 'width 0.2s',
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : null
+            }}
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 16 }}>
             <Button
               type="primary"
               htmlType="submit"
               block
               size="large"
               loading={loading}
+              style={{
+                background: colors.accent,
+                borderColor: colors.accent,
+                borderRadius: 8,
+                height: 48,
+                fontWeight: 600,
+              }}
             >
-              Register
+              Create account
+            </Button>
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Button
+              block
+              size="large"
+              onClick={() => navigate(ROUTES.LOGIN)}
+              style={{
+                borderRadius: 8,
+                height: 48,
+                border: `2px solid ${colors.white}`,
+                color: colors.white,
+                background: 'transparent',
+              }}
+            >
+              Sign in
             </Button>
           </Form.Item>
         </Form>
-
-        <div style={{ textAlign: "center", marginTop: 16 }}>
-          <Text>
-            Already have an account?{" "}
-            <span
-              style={{ color: "#1677ff", cursor: "pointer" }}
-              onClick={() => navigate(ROUTES.LOGIN)}
-            >
-              Log in
-            </span>
-          </Text>
-        </div>
-      </Card>
-    </div>
+      </div>
+    </AuthLayout>
   )
-}
-
-const pageStyle = {
-  display: "flex",
-  justifyContent: "center",
-  alignItems: "center",
-  minHeight: "100vh",
-  background: "#f0f2f5",
 }

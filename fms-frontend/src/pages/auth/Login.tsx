@@ -1,15 +1,21 @@
 import { useState } from 'react'
-import { Form, Input, Button, Card, Typography, message } from 'antd'
+import { Form, Input, Button, message } from 'antd'
 import { MailOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { authApi } from '../../api/auth'
 import { validateEmail } from '../../utils/validation'
 import { storage } from '../../utils/storage'
+import { AuthLayout } from '../../components/auth/AuthLayout'
 import { ROUTES } from '../../utils/constants'
 import { useAuth } from '../../hooks/useAuth'
 import type { LoginRequest } from '../../types/auth'
 
-const { Title, Text } = Typography
+const colors = {
+  darkBlue: '#1e3a5f',
+  lightBlue: '#7eb8da',
+  white: '#ffffff',
+  accent: '#f59e0b',
+}
 
 export const Login = () => {
   const [form] = Form.useForm()
@@ -31,11 +37,9 @@ export const Login = () => {
         const { access_token, user, requires_otp } = response.data
 
         if (requires_otp || !user) {
-          // First-time login, requires OTP
           storage.setOTPEmail(values.email)
           navigate(ROUTES.OTP)
         } else {
-          // Already verified, login directly
           login(access_token, user)
           navigate(ROUTES.DASHBOARD)
         }
@@ -51,19 +55,11 @@ export const Login = () => {
   }
 
   return (
-    <div
-      style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        background: '#f0f2f5',
-      }}
-    >
-      <Card className="auth-card" style={{ width: 400, maxWidth: 'calc(100% - 32px)' }}>
-        <Title level={2} style={{ textAlign: 'center', marginBottom: 32 }}>
-          Login
-        </Title>
+    <AuthLayout variant="login">
+      <div style={{ width: '100%', maxWidth: 360 }}>
+        <h1 style={{ color: colors.white, fontSize: 32, fontWeight: 700, marginBottom: 32, textAlign: 'center' }}>
+          Welcome back!
+        </h1>
 
         <Form
           form={form}
@@ -71,64 +67,86 @@ export const Login = () => {
           onFinish={onFinish}
           layout="vertical"
           autoComplete="off"
+          requiredMark={false}
         >
           <Form.Item
             name="email"
-            label="Email"
             rules={[
               { required: true, message: 'Please enter your email' },
               {
                 validator: (_, value) => {
-                  if (!value) {
-                    return Promise.reject(new Error('Please enter your email'))
-                  }
-                  if (!validateEmail(value)) {
-                    return Promise.reject(new Error('Please enter a valid email address'))
-                  }
+                  if (!value) return Promise.reject(new Error('Please enter your email'))
+                  if (!validateEmail(value)) return Promise.reject(new Error('Enter a valid email address'))
                   return Promise.resolve()
                 },
               },
             ]}
           >
             <Input
-              prefix={<MailOutlined />}
-              placeholder="Enter your email"
+              prefix={<MailOutlined style={{ color: colors.lightBlue, marginRight: 8 }} />}
+              placeholder="Your e-mail"
               size="large"
+              style={{
+                borderRadius: 8,
+                padding: '12px 16px',
+                background: colors.white,
+              }}
             />
           </Form.Item>
 
           <Form.Item
             name="password"
-            label="Password"
             rules={[{ required: true, message: 'Please enter your password' }]}
           >
             <Input.Password
-              prefix={<LockOutlined />}
-              placeholder="Enter your password"
+              prefix={<LockOutlined style={{ color: colors.lightBlue, marginRight: 8 }} />}
+              placeholder="Password"
               size="large"
+              style={{
+                borderRadius: 8,
+                padding: '12px 16px',
+                background: colors.white,
+              }}
             />
           </Form.Item>
 
-          <Form.Item>
+          <Form.Item style={{ marginBottom: 16 }}>
             <Button
               type="primary"
               htmlType="submit"
               block
               size="large"
               loading={loading}
+              style={{
+                background: colors.accent,
+                borderColor: colors.accent,
+                borderRadius: 8,
+                height: 48,
+                fontWeight: 600,
+              }}
             >
-              Login
+              Sign in
+            </Button>
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Button
+              block
+              size="large"
+              onClick={() => navigate(ROUTES.REGISTER)}
+              style={{
+                borderRadius: 8,
+                height: 48,
+                border: `2px solid ${colors.white}`,
+                color: colors.white,
+                background: 'transparent',
+              }}
+            >
+              Create account
             </Button>
           </Form.Item>
         </Form>
-
-        <div style={{ textAlign: 'center', marginTop: 16 }}>
-          <Text>
-            Don't have an account?{' '}
-            <a href={ROUTES.REGISTER}>Register</a>
-          </Text>
-        </div>
-      </Card>
-    </div>
+      </div>
+    </AuthLayout>
   )
 }
