@@ -1,0 +1,60 @@
+/* Auth split layout - stack on small screens */
+.auth-split-layout {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.auth-left-panel {
+  flex: 1.5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.auth-right-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+}
+
+/* Auth form inputs - ensure clean look on dark panel */
+.auth-right-panel .ant-input,
+.auth-right-panel .ant-input-password {
+  background: #ffffff !important;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+}
+.auth-right-panel .ant-input:hover,
+.auth-right-panel .ant-input-password:hover {
+  border-color: #7eb8da;
+}
+.auth-right-panel .ant-input:focus,
+.auth-right-panel .ant-input-password:focus {
+  border-color: #7eb8da;
+  box-shadow: 0 0 0 2px rgba(126, 184, 218, 0.2);
+}
+.auth-right-panel .ant-form-item-label > label {
+  color: rgba(255, 255, 255, 0.9) !important;
+}
+.auth-right-panel .ant-form-item-explain-error {
+  color: #fca5a5 !important;
+}
+
+@media (max-width: 768px) {
+  .auth-split-layout {
+    flex-direction: column;
+  }
+  .auth-left-panel {
+    min-height: 120px;
+    padding: 24px;
+  }
+  .auth-right-panel {
+    flex: 1;
+    padding: 32px 24px;
+  }
+}
