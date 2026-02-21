@@ -1,11 +1,10 @@
 import { useState } from 'react'
-import { Layout, Grid } from 'antd'
+import { Layout } from 'antd'
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
 import { SupportFormModal } from '../forms/SupportFormModal'
 
 const { Content } = Layout
-const { useBreakpoint } = Grid
 
 interface AppLayoutProps {
   children: React.ReactNode
@@ -14,8 +13,6 @@ interface AppLayoutProps {
 export const AppLayout = ({ children }: AppLayoutProps) => {
   const [supportModalOpen, setSupportModalOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
-  const screens = useBreakpoint()
-  const isDesktop = screens.lg ?? true
 
   return (
     <Layout style={{ minHeight: '100vh', background: '#f5f6f8' }}>
@@ -24,11 +21,11 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
       />
-      <Layout style={{ marginLeft: isDesktop ? 220 : 0 }}>
+      <Layout style={{ marginLeft: 0 }}>
         <Header
           onAddNew={() => setSupportModalOpen(true)}
           onMenuClick={() => setSidebarOpen(true)}
-          showMenuButton={!isDesktop}
+          showMenuButton
         />
         <Content
           className="printable-content app-content"

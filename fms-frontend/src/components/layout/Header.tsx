@@ -80,7 +80,7 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
         position: 'fixed',
         top: 0,
         right: 0,
-        left: 'var(--sidebar-width, 220px)',
+        left: 0,
         zIndex: 1000,
         height: 64,
       }}
@@ -137,12 +137,12 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
           )}
         >
           <Badge count={activityCount} size="small" offset={[-2, 2]}>
-            <Button
-              type="text"
-              icon={<BellOutlined />}
-              style={{ fontSize: 18 }}
-              aria-label="Activity"
-            />
+          <Button
+            type="text"
+            icon={<BellOutlined />}
+            style={{ fontSize: 18 }}
+            aria-label="Activity"
+          />
           </Badge>
         </Dropdown>
         <Space>
