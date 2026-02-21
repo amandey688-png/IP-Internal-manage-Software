@@ -1,4 +1,9 @@
-/* Responsive breakpoints: Mobile < 768, Tablet 768-1023, Desktop >= 1024 */
+/* Responsive breakpoints: Mobile < 576, Tablet 576-1023, PC >= 1024 */
+
+/* Sidebar always in drawer - header full width */
+.app-header {
+  left: 0 !important;
+}
 
 /* Mobile & Tablet: reduce content padding */
 @media (max-width: 1023px) {
@@ -12,20 +17,6 @@
   .app-content {
     margin: 56px 8px 12px !important;
     padding: 12px !important;
-  }
-}
-
-/* Hide sidebar on mobile/tablet - we use drawer instead */
-@media (max-width: 1023px) {
-  .sidebar-desktop {
-    display: none !important;
-  }
-}
-
-/* Tablet: header adjusts */
-@media (max-width: 1023px) {
-  .app-header {
-    left: 0 !important;
   }
 }
 

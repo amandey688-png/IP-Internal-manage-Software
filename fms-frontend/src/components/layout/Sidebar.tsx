@@ -1,4 +1,4 @@
-import { Layout, Menu, Space, Drawer, Grid } from 'antd'
+import { Menu, Drawer } from 'antd'
 import {
   DashboardOutlined,
   FileTextOutlined,
@@ -16,8 +16,6 @@ import { useRole } from '../../hooks/useRole'
 import { ROUTES, APP_NAME } from '../../utils/constants'
 import { useState, useEffect } from 'react'
 
-const { Sider } = Layout
-const { useBreakpoint } = Grid
 
 const isSupportPage = (pathname: string) =>
   pathname.startsWith(ROUTES.TICKETS) ||
@@ -34,8 +32,6 @@ interface SidebarProps {
 }
 
 export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
-  const screens = useBreakpoint()
-  const isDesktop = screens.lg ?? true
   const navigate = useNavigate()
   const location = useLocation()
   const { canAccessApproval, canAccessSettings, canAccessUsers, canViewSectionByKey } = useRole()
@@ -152,27 +148,6 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
       />
     </>
   )
-
-  if (isDesktop) {
-    return (
-      <Sider
-        className={`${className ?? ''} sidebar-desktop`}
-        width={220}
-        style={{
-          overflow: 'auto',
-          height: '100vh',
-          position: 'fixed',
-          left: 0,
-          top: 0,
-          bottom: 0,
-          background: '#fafafa',
-          borderRight: '1px solid #f0f0f0',
-        }}
-      >
-        {menuContent}
-      </Sider>
-    )
-  }
 
   return (
     <Drawer

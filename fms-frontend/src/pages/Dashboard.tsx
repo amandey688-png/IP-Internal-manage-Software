@@ -21,21 +21,26 @@ import type { DashboardMetrics } from '../api/dashboard'
 const { Title, Text } = Typography
 
 const statusColors: Record<string, string> = {
-  open: '#1890ff',
-  in_progress: '#faad14',
-  resolved: '#52c41a',
-  closed: '#8c8c8c',
-  overdue: '#ff4d4f',
-  pending: '#faad14',
-  completed: '#52c41a',
+  open: '#3b82f6',
+  in_progress: '#eab308',
+  resolved: '#22c55e',
+  closed: '#6b7280',
+  overdue: '#ef4444',
+  pending: '#eab308',
+  completed: '#22c55e',
 }
 
+const hudPanel = {
+  background: 'rgba(13, 27, 42, 0.9)',
+  border: '1px solid rgba(59, 130, 246, 0.3)',
+  boxShadow: '0 0 20px rgba(59, 130, 246, 0.08), inset 0 1px 0 rgba(255,255,255,0.03)',
+}
 const metricCardColors = [
-  { borderLeft: '4px solid #1890ff', iconColor: '#1890ff', bg: 'linear-gradient(135deg, #e6f4ff 0%, #ffffff 100%)' },
-  { borderLeft: '4px solid #fa8c16', iconColor: '#fa8c16', bg: 'linear-gradient(135deg, #fff7e6 0%, #ffffff 100%)' },
-  { borderLeft: '4px solid #eb2f96', iconColor: '#eb2f96', bg: 'linear-gradient(135deg, #fff0f6 0%, #ffffff 100%)' },
-  { borderLeft: '4px solid #52c41a', iconColor: '#52c41a', bg: 'linear-gradient(135deg, #f6ffed 0%, #ffffff 100%)' },
-  { borderLeft: '4px solid #722ed1', iconColor: '#722ed1', bg: 'linear-gradient(135deg, #f9f0ff 0%, #ffffff 100%)' },
+  { borderLeft: '3px solid #3b82f6', iconColor: '#3b82f6', ...hudPanel },
+  { borderLeft: '3px solid #06b6d4', iconColor: '#06b6d4', ...hudPanel },
+  { borderLeft: '3px solid #eab308', iconColor: '#eab308', ...hudPanel },
+  { borderLeft: '3px solid #22c55e', iconColor: '#22c55e', ...hudPanel },
+  { borderLeft: '3px solid #3b82f6', iconColor: '#3b82f6', ...hudPanel },
 ]
 
 export const Dashboard = () => {
@@ -98,8 +103,8 @@ export const Dashboard = () => {
   ]
 
   const stagingCards = [
-    { title: 'Feature Pending', value: Number(safeMetrics.staging_pending_feature) || 0, icon: <RocketOutlined />, color: '#1890ff' },
-    { title: 'Chores & Bug Pending', value: Number(safeMetrics.staging_pending_chores_bugs) || 0, icon: <FileTextOutlined />, color: '#52c41a' },
+    { title: 'Feature Pending', value: Number(safeMetrics.staging_pending_feature) || 0, icon: <RocketOutlined />, color: '#3b82f6' },
+    { title: 'Chores & Bug Pending', value: Number(safeMetrics.staging_pending_chores_bugs) || 0, icon: <FileTextOutlined />, color: '#22c55e' },
   ]
 
   const exportData = allFetchedTickets.length
@@ -116,7 +121,7 @@ export const Dashboard = () => {
         margin: '0 auto',
         minHeight: 400,
         padding: '8px 0',
-        background: 'linear-gradient(180deg, #f8fafc 0%, #ffffff 120px)',
+        background: 'transparent',
         borderRadius: 16,
         whiteSpace: 'normal',
         wordBreak: 'break-word',
@@ -132,7 +137,7 @@ export const Dashboard = () => {
           message={error}
           showIcon
           action={<Button size="small" onClick={fetchData}>Retry</Button>}
-          style={{ marginBottom: 24, borderRadius: 12 }}
+          style={{ marginBottom: 24, borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)' }}
         />
       )}
 
@@ -144,23 +149,23 @@ export const Dashboard = () => {
             <Col xs={24} sm={12} md={8} lg={6} key={i}>
               <Card
                 style={{
-                  borderRadius: 14,
-                  border: 'none',
-                  boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
+                  borderRadius: 8,
+                  border: cardStyle.border,
                   borderLeft: cardStyle.borderLeft,
-                  background: cardStyle.bg,
+                  background: cardStyle.background,
+                  boxShadow: cardStyle.boxShadow,
                   cursor: 'default',
                 }}
                 bodyStyle={{ padding: 22 }}
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minWidth: 0 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <Text type="secondary" style={{ fontSize: 12, fontWeight: 500, textTransform: 'uppercase', letterSpacing: 0.5, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block' }}>
+                    <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block', color: 'rgba(255,255,255,0.6)' }}>
                       {card.title}
                     </Text>
                     <Statistic
                       value={card.value}
-                      valueStyle={{ fontSize: 30, fontWeight: 700, color: '#1f2937', marginTop: 4 }}
+                      valueStyle={{ fontSize: 28, fontWeight: 700, color: '#fff', marginTop: 4 }}
                     />
                   </div>
                   <div style={{ fontSize: 28, color: cardStyle.iconColor, opacity: 0.9, flexShrink: 0 }}>{card.icon}</div>
@@ -172,7 +177,7 @@ export const Dashboard = () => {
       </Row>
 
       {/* In Staging */}
-      <Title level={4} style={{ marginBottom: 16, color: '#374151', fontWeight: 600 }}>
+      <Title level={4} style={{ marginBottom: 16, color: '#fff', fontWeight: 600, letterSpacing: 0.5 }}>
         In Staging
       </Title>
       <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
@@ -180,17 +185,17 @@ export const Dashboard = () => {
           <Col xs={24} sm={12} key={`staging-${i}`}>
             <Card
               style={{
-                borderRadius: 14,
-                border: 'none',
-                boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
-                background: i === 0 ? 'linear-gradient(135deg, #e6f7ff 0%, #ffffff 100%)' : 'linear-gradient(135deg, #f6ffed 0%, #ffffff 100%)',
-                borderTop: `4px solid ${card.color}`,
+                borderRadius: 8,
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)',
+                background: 'rgba(13, 27, 42, 0.9)',
+                borderTop: `3px solid ${card.color}`,
               }}
               bodyStyle={{ padding: 22 }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minWidth: 0 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <Text type="secondary" style={{ fontSize: 12, fontWeight: 500, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block' }}>
+                  <Text style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block', color: 'rgba(255,255,255,0.6)' }}>
                     {card.title}
                   </Text>
                   <Statistic value={card.value} valueStyle={{ fontSize: 28, fontWeight: 700, color: card.color }} style={{ marginTop: 4 }} />
@@ -206,25 +211,25 @@ export const Dashboard = () => {
       <Row gutter={[20, 20]}>
         <Col xs={24} lg={12}>
           <Card
-            title="Response Delay Trend"
-            style={{ borderRadius: 14, border: 'none', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+            title={<span style={{ color: '#fff', fontWeight: 600, letterSpacing: 0.5 }}>Response Delay Trend</span>}
+            style={{ borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.3)', boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)', background: 'rgba(13, 27, 42, 0.9)' }}
             bodyStyle={{ padding: 24, height: 200 }}
           >
-            <Text type="secondary" style={{ fontSize: 13 }}>Monthly trend (Chores & Bug)</Text>
-            <div style={{ marginTop: 16, padding: 24, background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)', borderRadius: 12 }}>
-              <Text>Chart placeholder — metrics loaded</Text>
+            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>Monthly trend (Chores & Bug)</Text>
+            <div style={{ marginTop: 16, padding: 24, background: 'rgba(10, 22, 40, 0.6)', borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.15)' }}>
+              <Text style={{ color: 'rgba(255,255,255,0.6)' }}>Chart placeholder — metrics loaded</Text>
             </div>
           </Card>
         </Col>
         <Col xs={24} lg={12}>
           <Card
-            title="Completion Delay Trend"
-            style={{ borderRadius: 14, border: 'none', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+            title={<span style={{ color: '#fff', fontWeight: 600, letterSpacing: 0.5 }}>Completion Delay Trend</span>}
+            style={{ borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.3)', boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)', background: 'rgba(13, 27, 42, 0.9)' }}
             bodyStyle={{ padding: 24, height: 200 }}
           >
-            <Text type="secondary" style={{ fontSize: 13 }}>Monthly trend (Chores & Bug)</Text>
-            <div style={{ marginTop: 16, padding: 24, background: 'linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%)', borderRadius: 12 }}>
-              <Text>Chart placeholder — metrics loaded</Text>
+            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>Monthly trend (Chores & Bug)</Text>
+            <div style={{ marginTop: 16, padding: 24, background: 'rgba(10, 22, 40, 0.6)', borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.15)' }}>
+              <Text style={{ color: 'rgba(255,255,255,0.6)' }}>Chart placeholder — metrics loaded</Text>
             </div>
           </Card>
         </Col>
@@ -233,22 +238,22 @@ export const Dashboard = () => {
       <Row gutter={[20, 20]} style={{ marginTop: 24 }}>
         <Col xs={24} lg={12}>
           <Card
-            title="Average tickets created"
-            style={{ borderRadius: 14, border: 'none', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+            title={<span style={{ color: '#fff', fontWeight: 600 }}>Average tickets created</span>}
+            style={{ borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.3)', boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)', background: 'rgba(13, 27, 42, 0.9)' }}
             bodyStyle={{ padding: 24, height: 200 }}
           >
-            <Text type="secondary">Based on recent Chores & Bug tickets</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.6)' }}>Based on recent Chores & Bug tickets</Text>
           </Card>
         </Col>
         <Col xs={24} lg={12}>
           <Card
-            title="Recent tickets (Chores & Bug)"
+            title={<span style={{ color: '#fff', fontWeight: 600 }}>Recent tickets (Chores & Bug)</span>}
             extra={
-              <Button type="link" size="small" onClick={goToChoresBugs} style={{ fontWeight: 500 }}>
+              <Button type="link" size="small" onClick={goToChoresBugs} style={{ fontWeight: 500, color: '#3b82f6' }}>
                 View all
               </Button>
             }
-            style={{ borderRadius: 14, border: 'none', boxShadow: '0 2px 12px rgba(0,0,0,0.06)' }}
+            style={{ borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.3)', boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)', background: 'rgba(13, 27, 42, 0.9)' }}
             bodyStyle={{ padding: 0, maxHeight: 320, overflow: 'auto' }}
           >
             <List
