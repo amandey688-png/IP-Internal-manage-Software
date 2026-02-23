@@ -84,6 +84,16 @@ export interface TicketResponse {
   created_at: string
 }
 
+export interface Stage2Remark {
+  id: string
+  ticket_id: string
+  remark_text: string
+  added_by: string
+  added_by_name?: string
+  added_at: string
+  updated_at?: string
+}
+
 export interface CreateTicketRequest {
   title: string
   description?: string
@@ -143,6 +153,7 @@ export const ticketsApi = {
     limit?: number
     status?: string
     status_2_filter?: string  // For Chores & Bugs: pending | completed | staging | hold
+    type_filter?: string  // For Chores & Bugs: chore | bug (Type of Request)
     type?: string
     types_in?: string
     section?: string
@@ -209,6 +220,25 @@ export const ticketsApi = {
 
   stagingBack: async (ticketId: string): Promise<ApiResponse<Ticket>> => {
     const response = await apiClient.post<ApiResponse<Ticket>>(`/tickets/${ticketId}/staging-back`)
+    return response.data
+  },
+
+  getStage2Remarks: async (ticketId: string): Promise<ApiResponse<{ data: Stage2Remark[] }>> => {
+    const response = await apiClient.get<ApiResponse<{ data: Stage2Remark[] }>>(`/tickets/${ticketId}/stage2-remarks`)
+    return response.data
+  },
+
+  addStage2Remark: async (ticketId: string, remarkText: string): Promise<ApiResponse<Stage2Remark>> => {
+    const response = await apiClient.post<ApiResponse<Stage2Remark>>(`/tickets/${ticketId}/stage2-remarks`, {
+      remark_text: remarkText,
+    })
+    return response.data
+  },
+
+  updateStage2Remark: async (ticketId: string, remarkId: string, remarkText: string): Promise<ApiResponse<Stage2Remark>> => {
+    const response = await apiClient.put<ApiResponse<Stage2Remark>>(`/tickets/${ticketId}/stage2-remarks/${remarkId}`, {
+      remark_text: remarkText,
+    })
     return response.data
   },
 }

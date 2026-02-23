@@ -34,6 +34,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
             padding: 24,
             background: 'transparent',
             minHeight: 280,
+            fontSize: 12,
           }}
         >
           {children}

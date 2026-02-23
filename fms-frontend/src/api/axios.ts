@@ -58,24 +58,73 @@ apiClient.interceptors.request.use(
   (error) => Promise.reject(error)
 )
 
+/** Track if we're in a refresh attempt to avoid retry loop */
+let isRefreshing = false
+let refreshSubscribers: Array<(token: string) => void> = []
+
+const onRefreshed = (token: string) => {
+  refreshSubscribers.forEach((cb) => cb(token))
+  refreshSubscribers = []
+}
+
+const addRefreshSubscriber = (cb: (token: string) => void) => {
+  refreshSubscribers.push(cb)
+}
+
 /**
- * Global response handling
+ * Global response handling - on 401 try token refresh, then retry or redirect
  */
 apiClient.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
-    if (error.response) {
-      if (error.response.status === 401) {
-        // Token expired or invalid
-        storage.clear()
+  async (error: AxiosError) => {
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
 
-        // Prevent redirect loop
-        if (
-          !window.location.pathname.includes("/login") &&
-          !window.location.pathname.includes("/register")
-        ) {
+    if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      const isRefreshRequest = originalRequest.url?.includes("/auth/refresh")
+      if (isRefreshRequest) {
+        storage.clear()
+        if (!window.location.pathname.includes("/login") && !window.location.pathname.includes("/register")) {
           window.location.href = ROUTES.LOGIN
         }
+        return Promise.reject(error)
+      }
+
+      const refreshToken = storage.getRefreshToken()
+      if (refreshToken) {
+        if (isRefreshing) {
+          return new Promise((resolve) => {
+            addRefreshSubscriber((token: string) => {
+              if (originalRequest.headers) originalRequest.headers.Authorization = `Bearer ${token}`
+              resolve(apiClient(originalRequest))
+            })
+          })
+        }
+        isRefreshing = true
+        let result: { access_token?: string; refresh_token?: string } | null = null
+        try {
+          const res = await axios.post<{ access_token: string; refresh_token?: string }>(
+            `${API_BASE_URL}/auth/refresh`,
+            { refresh_token: refreshToken },
+            { headers: { "Content-Type": "application/json" }, timeout: 10000 }
+          )
+          result = res.data
+        } catch {
+          result = null
+        }
+        isRefreshing = false
+        if (result?.access_token) {
+          storage.setToken(result.access_token)
+          if (result.refresh_token) storage.setRefreshToken(result.refresh_token)
+          if (originalRequest.headers) originalRequest.headers.Authorization = `Bearer ${result.access_token}`
+          originalRequest._retry = true
+          return apiClient(originalRequest)
+        }
+        onRefreshed("")
+      }
+
+      storage.clear()
+      if (!window.location.pathname.includes("/login") && !window.location.pathname.includes("/register")) {
+        window.location.href = ROUTES.LOGIN
       }
     } else if (error.request) {
       console.error("❌ Network error: backend not reachable at", API_BASE_URL)

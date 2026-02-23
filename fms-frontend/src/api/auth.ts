@@ -187,6 +187,23 @@ export const authApi = {
   },
 
   /**
+   * Refresh access token using refresh_token. Use when access_token expires (401).
+   * Keeps session alive without re-login (refresh tokens last ~7 days).
+   */
+  refresh: async (): Promise<{ access_token?: string; refresh_token?: string } | null> => {
+    try {
+      const refreshToken = storage.getRefreshToken()
+      if (!refreshToken) return null
+      const response = await apiClient.post<{ access_token: string; refresh_token: string }>('/auth/refresh', {
+        refresh_token: refreshToken,
+      })
+      return response.data
+    } catch {
+      return null
+    }
+  },
+
+  /**
    * Logout - clears session. Backend call optional.
    */
   logout: async (): Promise<void> => {

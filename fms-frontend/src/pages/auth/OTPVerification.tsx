@@ -47,8 +47,8 @@ export const OTPVerification = () => {
       }
 
       if (response.data) {
-        const { access_token, user } = response.data
-        verifyOTP(access_token, user)
+        const { access_token, refresh_token, user } = response.data
+        verifyOTP(access_token, user, refresh_token ?? undefined)
         message.success('OTP verified successfully!')
         
         // Redirect based on role

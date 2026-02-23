@@ -196,6 +196,10 @@ class LoginResponse(BaseModel):
     requires_otp: bool = False
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 # ---------- Routes ----------
 @app.get("/health")
 def health():
@@ -603,6 +607,28 @@ def logout():
     return {"message": "Logged out successfully"}
 
 
+@api_router.post("/auth/refresh")
+def refresh_token(payload: RefreshRequest):
+    """
+    Exchange refresh_token for new access_token. Use when access_token expires (e.g. after 1 hr).
+    Keeps session alive up to refresh token expiry (typically 7+ days) without re-login.
+    """
+    try:
+        result = supabase_auth.auth.refresh_session(payload.refresh_token)
+        if not result.session:
+            raise HTTPException(401, "Invalid or expired refresh token")
+        return {
+            "access_token": result.session.access_token,
+            "refresh_token": result.session.refresh_token,
+            "expires_in": result.session.expires_in,
+        }
+    except Exception as e:
+        err = str(e).lower()
+        if "invalid" in err or "expired" in err or "refresh" in err:
+            raise HTTPException(401, "Refresh token invalid or expired. Please log in again.")
+        raise HTTPException(401, str(e)[:150])
+
+
 @api_router.get("/auth/confirm")
 def confirm_email(token: str, type: str = "signup"):
     """Handle email confirmation callback from Supabase."""
@@ -906,6 +932,7 @@ def list_tickets(
     section: str | None = None,
     approval_filter: str | None = None,  # For section=approval-status: pending | unapproved | all
     status_2_filter: str | None = None,  # For section=chores-bugs: pending | completed | staging | hold (Stage 2 status)
+    type_filter: str | None = None,  # For section=chores-bugs: chore | bug (Type of Request filter)
     search_all_sections: bool = False,   # When True + search present: ignore section/type, search all tickets
     auth: dict = Depends(get_current_user),
 ):
@@ -936,7 +963,7 @@ def list_tickets(
         q = q.or_("staging_planned.not.is.null,status_2.eq.staging")
         q = q.or_("live_review_status.is.null,live_review_status.neq.completed")
     elif apply_section_filter and section == "chores-bugs":
-        types_list = ["chore", "bug"]
+        types_list = ["chore", "bug"] if type_filter not in ("chore", "bug") else [type_filter]
         q = q.in_("type", types_list)
         q = q.is_("quality_solution", "null")
         if status_2_filter and status_2_filter.lower() in ("pending", "completed", "staging", "hold"):
@@ -1316,6 +1343,89 @@ def submit_quality_solution(ticket_id: str, payload: SubmitQualitySolutionReques
     }
     up = supabase.table("tickets").update(data).eq("id", ticket_id).execute()
     return up.data[0] if up.data else {}
+
+
+# ---------- Stage 2 Remarks (Chores & Bugs) ----------
+@api_router.get("/tickets/{ticket_id}/stage2-remarks")
+def list_stage2_remarks(ticket_id: str, auth: dict = Depends(get_current_user)):
+    """List Stage 2 remarks. All users with ticket access can view."""
+    try:
+        r = supabase.table("ticket_stage2_remarks").select("*").eq("ticket_id", ticket_id).order("added_at", desc=False).execute()
+        rows = r.data or []
+    except Exception:
+        rows = []
+    user_ids = {row.get("added_by") for row in rows if row.get("added_by")}
+    names_map = {}
+    if user_ids:
+        try:
+            up_r = supabase.table("user_profiles").select("id, full_name").in_("id", list(user_ids)).execute()
+            names_map = {u["id"]: u.get("full_name", "") for u in (up_r.data or [])}
+        except Exception:
+            pass
+    for row in rows:
+        row["added_by_name"] = names_map.get(row.get("added_by"), "")
+    return {"data": rows}
+
+
+class Stage2RemarkRequest(BaseModel):
+    remark_text: str
+
+
+@api_router.post("/tickets/{ticket_id}/stage2-remarks")
+def create_stage2_remark(ticket_id: str, payload: Stage2RemarkRequest, auth: dict = Depends(get_current_user)):
+    """Add Stage 2 remark. All users can add (3-4 per ticket recommended)."""
+    r = supabase.table("tickets").select("id").eq("id", ticket_id).single().execute()
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    text = (payload.remark_text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Remark text is required")
+    try:
+        ins = supabase.table("ticket_stage2_remarks").insert({
+            "ticket_id": ticket_id,
+            "remark_text": text,
+            "added_by": auth["id"],
+        }).execute()
+        row = ins.data[0] if ins.data else {}
+        if row:
+            profile = supabase.table("user_profiles").select("full_name").eq("id", auth["id"]).single().execute()
+            row["added_by_name"] = profile.data.get("full_name", "") if profile.data else ""
+        return row
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e)[:100])
+
+
+@api_router.put("/tickets/{ticket_id}/stage2-remarks/{remark_id}")
+def update_stage2_remark(
+    ticket_id: str, remark_id: str, payload: Stage2RemarkRequest,
+    auth: dict = Depends(get_current_user), current: dict = Depends(get_current_user_with_role),
+):
+    """Update Stage 2 remark. Only Master Admin or the remark author can edit."""
+    try:
+        r = supabase.table("ticket_stage2_remarks").select("id, added_by").eq("id", remark_id).eq("ticket_id", ticket_id).single().execute()
+    except Exception:
+        r = type("R", (), {"data": None})()
+        r.data = None
+    if not r.data:
+        raise HTTPException(status_code=404, detail="Remark not found")
+    role = current.get("role", "user")
+    added_by = r.data.get("added_by")
+    if role != "master_admin" and str(added_by) != str(auth["id"]):
+        raise HTTPException(status_code=403, detail="Only Master Admin or the remark author can edit")
+    text = (payload.remark_text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="Remark text is required")
+    now = datetime.utcnow().isoformat()
+    supabase.table("ticket_stage2_remarks").update({"remark_text": text, "updated_at": now}).eq("id", remark_id).execute()
+    up = supabase.table("ticket_stage2_remarks").select("*").eq("id", remark_id).single().execute()
+    row = up.data or {}
+    if row.get("added_by"):
+        try:
+            pr = supabase.table("user_profiles").select("full_name").eq("id", row["added_by"]).single().execute()
+            row["added_by_name"] = pr.data.get("full_name", "") if pr.data else ""
+        except Exception:
+            row["added_by_name"] = ""
+    return row
 
 
 @api_router.post("/tickets/{ticket_id}/responses")

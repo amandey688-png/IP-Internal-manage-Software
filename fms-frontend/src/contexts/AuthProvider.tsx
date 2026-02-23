@@ -54,11 +54,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     initAuth()
   }, [])
 
-  const login = (newToken: string, newUser: User) => {
+  const login = (newToken: string, newUser: User, refreshToken?: string) => {
     setToken(newToken)
     setUser(newUser)
     storage.setToken(newToken)
     storage.setUser(newUser)
+    if (refreshToken) storage.setRefreshToken(refreshToken)
   }
 
   const logout = async () => {
@@ -73,18 +74,20 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     }
   }
 
-  const register = (newToken: string, newUser: User) => {
+  const register = (newToken: string, newUser: User, refreshToken?: string) => {
     setToken(newToken)
     setUser(newUser)
     storage.setToken(newToken)
     storage.setUser(newUser)
+    if (refreshToken) storage.setRefreshToken(refreshToken)
   }
 
-  const verifyOTP = (newToken: string, newUser: User) => {
+  const verifyOTP = (newToken: string, newUser: User, refreshToken?: string) => {
     setToken(newToken)
     setUser(newUser)
     storage.setToken(newToken)
     storage.setUser(newUser)
+    if (refreshToken) storage.setRefreshToken(refreshToken)
     storage.removeOTPEmail() // Clear OTP email after successful verification
   }
 
