@@ -25,6 +25,19 @@ export const AuthLayout = ({ children, variant = 'register' }: AuthLayoutProps) 
           overflow: 'hidden',
         }}
       >
+        <img
+          src="/logo.png"
+          alt="Logo"
+          style={{
+            position: 'absolute',
+            top: 24,
+            left: 24,
+            height: 40,
+            width: 'auto',
+            objectFit: 'contain',
+            zIndex: 1,
+          }}
+        />
         <div
           style={{
             display: 'flex',

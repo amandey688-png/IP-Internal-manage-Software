@@ -30,17 +30,17 @@ const statusColors: Record<string, string> = {
   completed: '#22c55e',
 }
 
-const hudPanel = {
-  background: 'rgba(13, 27, 42, 0.9)',
-  border: '1px solid rgba(59, 130, 246, 0.3)',
-  boxShadow: '0 0 20px rgba(59, 130, 246, 0.08), inset 0 1px 0 rgba(255,255,255,0.03)',
+const lightPanel = {
+  background: '#ffffff',
+  border: '1px solid rgba(0, 0, 0, 0.06)',
+  boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)',
 }
 const metricCardColors = [
-  { borderLeft: '3px solid #3b82f6', iconColor: '#3b82f6', ...hudPanel },
-  { borderLeft: '3px solid #06b6d4', iconColor: '#06b6d4', ...hudPanel },
-  { borderLeft: '3px solid #eab308', iconColor: '#eab308', ...hudPanel },
-  { borderLeft: '3px solid #22c55e', iconColor: '#22c55e', ...hudPanel },
-  { borderLeft: '3px solid #3b82f6', iconColor: '#3b82f6', ...hudPanel },
+  { borderLeft: '3px solid #3b82f6', iconColor: '#3b82f6', ...lightPanel },
+  { borderLeft: '3px solid #06b6d4', iconColor: '#06b6d4', ...lightPanel },
+  { borderLeft: '3px solid #eab308', iconColor: '#eab308', ...lightPanel },
+  { borderLeft: '3px solid #22c55e', iconColor: '#22c55e', ...lightPanel },
+  { borderLeft: '3px solid #3b82f6', iconColor: '#3b82f6', ...lightPanel },
 ]
 
 export const Dashboard = () => {
@@ -160,12 +160,12 @@ export const Dashboard = () => {
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minWidth: 0 }}>
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block', color: 'rgba(255,255,255,0.6)' }}>
+                    <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block', color: '#64748b' }}>
                       {card.title}
                     </Text>
                     <Statistic
                       value={card.value}
-                      valueStyle={{ fontSize: 28, fontWeight: 700, color: '#fff', marginTop: 4 }}
+                      valueStyle={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginTop: 4 }}
                     />
                   </div>
                   <div style={{ fontSize: 28, color: cardStyle.iconColor, opacity: 0.9, flexShrink: 0 }}>{card.icon}</div>
@@ -177,7 +177,7 @@ export const Dashboard = () => {
       </Row>
 
       {/* In Staging */}
-      <Title level={4} style={{ marginBottom: 16, color: '#fff', fontWeight: 600, letterSpacing: 0.5 }}>
+      <Title level={4} style={{ marginBottom: 16, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>
         In Staging
       </Title>
       <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
@@ -186,16 +186,16 @@ export const Dashboard = () => {
             <Card
               style={{
                 borderRadius: 8,
-                border: '1px solid rgba(59, 130, 246, 0.3)',
-                boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)',
-                background: 'rgba(13, 27, 42, 0.9)',
+                border: '1px solid rgba(0, 0, 0, 0.06)',
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)',
+                background: '#ffffff',
                 borderTop: `3px solid ${card.color}`,
               }}
               bodyStyle={{ padding: 22 }}
             >
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minWidth: 0 }}>
                 <div style={{ minWidth: 0, flex: 1 }}>
-                  <Text style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block', color: 'rgba(255,255,255,0.6)' }}>
+                  <Text style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block', color: '#64748b' }}>
                     {card.title}
                   </Text>
                   <Statistic value={card.value} valueStyle={{ fontSize: 28, fontWeight: 700, color: card.color }} style={{ marginTop: 4 }} />
@@ -211,25 +211,25 @@ export const Dashboard = () => {
       <Row gutter={[20, 20]}>
         <Col xs={24} lg={12}>
           <Card
-            title={<span style={{ color: '#fff', fontWeight: 600, letterSpacing: 0.5 }}>Response Delay Trend</span>}
-            style={{ borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.3)', boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)', background: 'rgba(13, 27, 42, 0.9)' }}
+            title={<span style={{ color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>Response Delay Trend</span>}
+            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
             bodyStyle={{ padding: 24, height: 200 }}
           >
-            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>Monthly trend (Chores & Bug)</Text>
-            <div style={{ marginTop: 16, padding: 24, background: 'rgba(10, 22, 40, 0.6)', borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.15)' }}>
-              <Text style={{ color: 'rgba(255,255,255,0.6)' }}>Chart placeholder — metrics loaded</Text>
+            <Text style={{ fontSize: 12, color: '#64748b' }}>Monthly trend (Chores & Bug)</Text>
+            <div style={{ marginTop: 16, padding: 24, background: '#f8fafc', borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)' }}>
+              <Text style={{ color: '#64748b' }}>Chart placeholder — metrics loaded</Text>
             </div>
           </Card>
         </Col>
         <Col xs={24} lg={12}>
           <Card
-            title={<span style={{ color: '#fff', fontWeight: 600, letterSpacing: 0.5 }}>Completion Delay Trend</span>}
-            style={{ borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.3)', boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)', background: 'rgba(13, 27, 42, 0.9)' }}
+            title={<span style={{ color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>Completion Delay Trend</span>}
+            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
             bodyStyle={{ padding: 24, height: 200 }}
           >
-            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.6)' }}>Monthly trend (Chores & Bug)</Text>
-            <div style={{ marginTop: 16, padding: 24, background: 'rgba(10, 22, 40, 0.6)', borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.15)' }}>
-              <Text style={{ color: 'rgba(255,255,255,0.6)' }}>Chart placeholder — metrics loaded</Text>
+            <Text style={{ fontSize: 12, color: '#64748b' }}>Monthly trend (Chores & Bug)</Text>
+            <div style={{ marginTop: 16, padding: 24, background: '#f8fafc', borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)' }}>
+              <Text style={{ color: '#64748b' }}>Chart placeholder — metrics loaded</Text>
             </div>
           </Card>
         </Col>
@@ -238,22 +238,22 @@ export const Dashboard = () => {
       <Row gutter={[20, 20]} style={{ marginTop: 24 }}>
         <Col xs={24} lg={12}>
           <Card
-            title={<span style={{ color: '#fff', fontWeight: 600 }}>Average tickets created</span>}
-            style={{ borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.3)', boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)', background: 'rgba(13, 27, 42, 0.9)' }}
+            title={<span style={{ color: '#1e293b', fontWeight: 600 }}>Average tickets created</span>}
+            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
             bodyStyle={{ padding: 24, height: 200 }}
           >
-            <Text style={{ color: 'rgba(255,255,255,0.6)' }}>Based on recent Chores & Bug tickets</Text>
+            <Text style={{ color: '#64748b' }}>Based on recent Chores & Bug tickets</Text>
           </Card>
         </Col>
         <Col xs={24} lg={12}>
           <Card
-            title={<span style={{ color: '#fff', fontWeight: 600 }}>Recent tickets (Chores & Bug)</span>}
+            title={<span style={{ color: '#1e293b', fontWeight: 600 }}>Recent tickets (Chores & Bug)</span>}
             extra={
               <Button type="link" size="small" onClick={goToChoresBugs} style={{ fontWeight: 500, color: '#3b82f6' }}>
                 View all
               </Button>
             }
-            style={{ borderRadius: 8, border: '1px solid rgba(59, 130, 246, 0.3)', boxShadow: '0 0 20px rgba(59, 130, 246, 0.08)', background: 'rgba(13, 27, 42, 0.9)' }}
+            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
             bodyStyle={{ padding: 0, maxHeight: 320, overflow: 'auto' }}
           >
             <List

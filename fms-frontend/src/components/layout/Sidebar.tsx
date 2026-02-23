@@ -13,7 +13,7 @@ import {
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useRole } from '../../hooks/useRole'
-import { ROUTES, APP_NAME } from '../../utils/constants'
+import { ROUTES } from '../../utils/constants'
 import { useState, useEffect } from 'react'
 
 
@@ -117,22 +117,6 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const menuContent = (
     <>
-      <div
-        style={{
-          height: 64,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 12,
-          paddingLeft: 24,
-          borderBottom: '1px solid #f0f0f0',
-          fontWeight: 600,
-          fontSize: 18,
-          color: '#2c3e50',
-        }}
-      >
-        <img src="/logo.png" alt="Logo" style={{ height: 36, width: 'auto', objectFit: 'contain' }} />
-        {APP_NAME}
-      </div>
       <Menu
         mode="inline"
         selectedKeys={selectedKeys}
@@ -151,12 +135,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   return (
     <Drawer
-      title={
-        <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <img src="/logo.png" alt="Logo" style={{ height: 28, width: 'auto', objectFit: 'contain' }} />
-          {APP_NAME}
-        </span>
-      }
+      title={null}
       placement="left"
       open={open}
       onClose={onClose}
