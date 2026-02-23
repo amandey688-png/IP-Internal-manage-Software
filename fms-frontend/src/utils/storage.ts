@@ -26,6 +26,30 @@ export const storage = {
     }
   },
 
+  getRefreshToken: (): string | null => {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN)
+    } catch {
+      return null
+    }
+  },
+
+  setRefreshToken: (token: string): void => {
+    try {
+      localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, token)
+    } catch (error) {
+      console.error('Failed to save refresh token:', error)
+    }
+  },
+
+  removeRefreshToken: (): void => {
+    try {
+      localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
+    } catch (error) {
+      console.error('Failed to remove refresh token:', error)
+    }
+  },
+
   getUser: (): User | null => {
     try {
       const userStr = localStorage.getItem(STORAGE_KEYS.USER)
@@ -77,6 +101,7 @@ export const storage = {
 
   clear: (): void => {
     storage.removeToken()
+    storage.removeRefreshToken()
     storage.removeUser()
     storage.removeOTPEmail()
   },

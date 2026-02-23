@@ -97,9 +97,14 @@ export const TicketList = () => {
   const [approvalFilter, setApprovalFilter] = useState<string>('pending')
   /** Chores & Bugs only: filter by Stage 2 status (pending | completed | staging | hold) */
   const [status2Filter, setStatus2Filter] = useState<string>('')
+  /** Chores & Bugs only: filter by Type of Request (chore | bug) */
+  const [typeOfRequestFilter, setTypeOfRequestFilter] = useState<string>('')
 
   useEffect(() => {
     if (sectionFromUrl !== 'chores-bugs') setStatus2Filter('')
+  }, [sectionFromUrl])
+  useEffect(() => {
+    if (sectionFromUrl !== 'chores-bugs') setTypeOfRequestFilter('')
   }, [sectionFromUrl])
 
   useEffect(() => {
@@ -178,7 +183,7 @@ export const TicketList = () => {
       }
       fetchTickets()
     }
-  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, status2Filter, showStageFilter, showStageFilterForFeature])
+  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, status2Filter, typeOfRequestFilter, showStageFilter, showStageFilterForFeature])
 
   const fetchTickets = async () => {
     setLoading(true)
@@ -189,6 +194,7 @@ export const TicketList = () => {
         ...(filters.search && { search: filters.search, search_all_sections: true }),
         ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
         ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
+        ...(isChoresBugsSection && typeOfRequestFilter && { type_filter: typeOfRequestFilter }),
         ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
@@ -198,7 +204,7 @@ export const TicketList = () => {
         ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
         ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
         ...(filters.company_id && { company_id: filters.company_id }),
-        ...(filters.priority && { priority: filters.priority }),
+        ...(!isChoresBugsSection && filters.priority && { priority: filters.priority }),
         ...(filters.date_from && { date_from: filters.date_from }),
         ...(filters.date_to && { date_to: filters.date_to }),
         sort_by: filters.sort_by,
@@ -227,6 +233,7 @@ export const TicketList = () => {
         ...(filters.search && { search: filters.search, search_all_sections: true }),
         ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
         ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
+        ...(isChoresBugsSection && typeOfRequestFilter && { type_filter: typeOfRequestFilter }),
         ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
         ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
@@ -236,7 +243,7 @@ export const TicketList = () => {
         ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
         ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
         ...(filters.company_id && { company_id: filters.company_id }),
-        ...(filters.priority && { priority: filters.priority }),
+        ...(!isChoresBugsSection && filters.priority && { priority: filters.priority }),
         ...(filters.date_from && { date_from: filters.date_from }),
         ...(filters.date_to && { date_to: filters.date_to }),
         sort_by: filters.sort_by,
@@ -683,7 +690,21 @@ export const TicketList = () => {
           ellipsis: false,
           render: (_: unknown, r: Ticket) => {
             const stage = getChoresBugsCurrentStage(r)
-            return <span style={{ whiteSpace: 'normal', wordBreak: 'break-word' }}>{stage.status}</span>
+            const status = (stage.status || '').toLowerCase()
+            const statusColors: Record<string, string> = {
+              pending: 'orange',
+              completed: 'green',
+              staging: 'blue',
+              hold: 'default',
+              na: 'default',
+              rejected: 'red',
+            }
+            const color = statusColors[status] ?? 'default'
+            return (
+              <Tag color={color} style={{ margin: 0 }}>
+                {stage.status || '-'}
+              </Tag>
+            )
           },
         },
         {
@@ -914,6 +935,8 @@ export const TicketList = () => {
               <Option value="completed">Completed</Option>
               <Option value="staging">Staging</Option>
               <Option value="hold">Hold</Option>
+              <Option value="na">NA</Option>
+              <Option value="rejected">Rejected</Option>
             </Select>
           ) : (
             <Select
@@ -932,18 +955,35 @@ export const TicketList = () => {
               <Option value="on_hold">On Hold</Option>
             </Select>
           )}
-          <Select
-            placeholder="Priority"
-            style={{ width: 110 }}
-            value={filters.priority || undefined}
-            onChange={(v) => setFilters((f) => ({ ...f, priority: v || '' }))}
-            allowClear
-            getPopupContainer={() => document.body}
-          >
-            <Option value="high">High</Option>
-            <Option value="medium">Medium</Option>
-            <Option value="low">Low</Option>
-          </Select>
+          {isChoresBugsSection ? (
+            <Select
+              placeholder="Type of Request"
+              style={{ width: 150 }}
+              value={typeOfRequestFilter || undefined}
+              onChange={(v) => {
+                setTypeOfRequestFilter(v ?? '')
+                setPage(1)
+              }}
+              allowClear
+              getPopupContainer={() => document.body}
+            >
+              <Option value="chore">Chore</Option>
+              <Option value="bug">Bug</Option>
+            </Select>
+          ) : (
+            <Select
+              placeholder="Priority"
+              style={{ width: 110 }}
+              value={filters.priority || undefined}
+              onChange={(v) => setFilters((f) => ({ ...f, priority: v || '' }))}
+              allowClear
+              getPopupContainer={() => document.body}
+            >
+              <Option value="high">High</Option>
+              <Option value="medium">Medium</Option>
+              <Option value="low">Low</Option>
+            </Select>
+          )}
           {showStageFilter && (
             <Select
               placeholder="Stage"

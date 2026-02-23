@@ -12,8 +12,8 @@ import {
   Modal,
   Divider,
 } from 'antd'
-import { RocketOutlined } from '@ant-design/icons'
-import { ticketsApi } from '../../api/tickets'
+import { RocketOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons'
+import { ticketsApi, type Stage2Remark } from '../../api/tickets'
 import { formatDateTable, formatReplySla, formatDelay, stagingDelaySeconds } from '../../utils/helpers'
 import type { Ticket } from '../../api/tickets'
 import { useAuth } from '../../hooks/useAuth'
@@ -48,6 +48,12 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
   const [solutionModalOpen, setSolutionModalOpen] = useState(false)
   const [solutionText, setSolutionText] = useState('')
   const [markingStaging, setMarkingStaging] = useState(false)
+  const [stage2Remarks, setStage2Remarks] = useState<Stage2Remark[]>([])
+  const [newRemarkText, setNewRemarkText] = useState('')
+  const [addingRemark, setAddingRemark] = useState(false)
+  const [editingRemarkId, setEditingRemarkId] = useState<string | null>(null)
+  const [editingRemarkText, setEditingRemarkText] = useState('')
+  const [updatingRemark, setUpdatingRemark] = useState(false)
 
   const isLevel3 = user?.role === 'user'
   const level3Restricted = isLevel3 && !isMasterAdmin && ticket?.level3_used_by_current_user === true
@@ -64,8 +70,11 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
         })
         .catch(() => message.error('Failed to load ticket'))
         .finally(() => setLoading(false))
+      ticketsApi.getStage2Remarks(ticketId).then((r) => setStage2Remarks((r?.data ?? []) as Stage2Remark[])).catch(() => setStage2Remarks([]))
     } else {
       setTicket(null)
+      setStage2Remarks([])
+      setEditingRemarkId(null)
     }
   }, [open, ticketId])
 
@@ -89,6 +98,49 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
       setSaving(false)
     }
   }
+
+  const loadRemarks = () => {
+    if (ticketId) {
+      ticketsApi.getStage2Remarks(ticketId).then((r) => setStage2Remarks((r?.data ?? []) as Stage2Remark[])).catch(() => {})
+    }
+  }
+
+  const handleAddRemark = async () => {
+    if (!ticketId || !newRemarkText.trim()) return
+    setAddingRemark(true)
+    try {
+      await ticketsApi.addStage2Remark(ticketId, newRemarkText.trim())
+      setNewRemarkText('')
+      loadRemarks()
+      onUpdate?.()
+      message.success('Remark added')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      message.error(err?.response?.data?.detail || 'Failed to add remark')
+    } finally {
+      setAddingRemark(false)
+    }
+  }
+
+  const handleUpdateRemark = async (remarkId: string) => {
+    if (!ticketId || !editingRemarkText.trim()) return
+    setUpdatingRemark(true)
+    try {
+      await ticketsApi.updateStage2Remark(ticketId, remarkId, editingRemarkText.trim())
+      setEditingRemarkId(null)
+      setEditingRemarkText('')
+      loadRemarks()
+      onUpdate?.()
+      message.success('Remark updated')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string } } }
+      message.error(err?.response?.data?.detail || 'Failed to update remark')
+    } finally {
+      setUpdatingRemark(false)
+    }
+  }
+
+  const canEditRemark = (r: Stage2Remark) => isMasterAdmin || r.added_by === user?.id
 
   const handleSubmitSolution = async () => {
     if (!ticketId || !solutionText.trim()) {
@@ -378,6 +430,80 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                     </Tag>
                   </div>
                 )}
+                {/* Remarks section - all users add/view; edit: Master Admin or author */}
+                <div style={{ marginTop: 16 }}>
+                  <Text strong>Remarks</Text>
+                  <div style={{ marginTop: 8, maxHeight: 200, overflowY: 'auto' }}>
+                    {stage2Remarks.length === 0 && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>No remarks yet</Text>
+                    )}
+                    {stage2Remarks.map((r) => (
+                      <div
+                        key={r.id}
+                        style={{
+                          marginBottom: 8,
+                          padding: 8,
+                          background: '#fafafa',
+                          borderRadius: 6,
+                          borderLeft: '3px solid #fa8c16',
+                        }}
+                      >
+                        {editingRemarkId === r.id ? (
+                          <div>
+                            <TextArea
+                              value={editingRemarkText}
+                              onChange={(e) => setEditingRemarkText(e.target.value)}
+                              rows={2}
+                              style={{ marginBottom: 8 }}
+                              disabled={updatingRemark}
+                            />
+                            <Space>
+                              <Button type="primary" size="small" icon={<CheckOutlined />} onClick={() => handleUpdateRemark(r.id)} loading={updatingRemark}>
+                                Save
+                              </Button>
+                              <Button size="small" icon={<CloseOutlined />} onClick={() => { setEditingRemarkId(null); setEditingRemarkText('') }}>
+                                Cancel
+                              </Button>
+                            </Space>
+                          </div>
+                        ) : (
+                          <div>
+                            <Text style={{ fontSize: 13, whiteSpace: 'pre-wrap' }}>{r.remark_text}</Text>
+                            <div style={{ marginTop: 4, fontSize: 11, color: '#8c8c8c' }}>
+                              {r.added_by_name || 'Unknown'} · {formatDateTable(r.added_at)}
+                              {canEditRemark(r) && !readOnly && (
+                                <Button
+                                  type="link"
+                                  size="small"
+                                  icon={<EditOutlined />}
+                                  onClick={() => { setEditingRemarkId(r.id); setEditingRemarkText(r.remark_text) }}
+                                  style={{ padding: '0 4px', height: 'auto', fontSize: 11 }}
+                                >
+                                  Edit
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                  {!readOnly && (
+                    <div style={{ marginTop: 8 }}>
+                      <TextArea
+                        placeholder="Add a remark..."
+                        value={newRemarkText}
+                        onChange={(e) => setNewRemarkText(e.target.value)}
+                        rows={2}
+                        style={{ marginBottom: 6 }}
+                        disabled={addingRemark || updatingRemark}
+                      />
+                      <Button type="primary" size="small" onClick={handleAddRemark} loading={addingRemark} disabled={!newRemarkText.trim()}>
+                        Add Remark
+                      </Button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

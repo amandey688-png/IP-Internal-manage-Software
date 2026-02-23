@@ -34,13 +34,13 @@ export const Login = () => {
       }
 
       if (response.data) {
-        const { access_token, user, requires_otp } = response.data
+        const { access_token, refresh_token, user, requires_otp } = response.data
 
         if (requires_otp || !user) {
           storage.setOTPEmail(values.email)
           navigate(ROUTES.OTP)
         } else {
-          login(access_token, user)
+          login(access_token, user, refresh_token ?? undefined)
           navigate(ROUTES.DASHBOARD)
         }
       }
