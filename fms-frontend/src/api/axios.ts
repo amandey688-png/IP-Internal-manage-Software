@@ -22,8 +22,9 @@ export const API_BASE_URL = typeof _raw === "string" ? _raw.replace(/\/+$/, "") 
 export const isLocalBackend =
   API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost")
 
-// Log API base URL for debugging
-console.log("🔗 API Base URL:", API_BASE_URL)
+if (import.meta.env.DEV) {
+  console.log("🔗 API Base URL:", API_BASE_URL)
+}
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -46,13 +47,10 @@ apiClient.interceptors.request.use(
     if (config.data instanceof FormData && config.headers) {
       delete config.headers["Content-Type"]
     }
-    // Log outgoing requests for debugging
-    console.log("📤 API Request:", {
-      method: config.method?.toUpperCase(),
-      url: config.url,
-      baseURL: config.baseURL,
-      fullURL: `${config.baseURL}${config.url}`,
-    })
+    // Log in dev only to reduce overhead
+    if (import.meta.env.DEV) {
+      console.log("📤 API:", config.method?.toUpperCase(), config.url)
+    }
     return config
   },
   (error) => Promise.reject(error)

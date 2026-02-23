@@ -2625,11 +2625,15 @@ def complete_checklist_task(task_id: str, payload: CompleteChecklistRequest, aut
 
 @api_router.get("/checklist/users")
 def list_checklist_users(auth: dict = Depends(get_current_user), current: dict = Depends(get_current_user_with_role)):
-    """List users for admin name filter (Master Admin & Admin only)."""
-    if current.get("role") not in ("admin", "master_admin"):
+    """List users for Filter by User. Master Admin only; returns only master_admin users."""
+    if current.get("role") != "master_admin":
         return {"users": []}
     try:
-        r = supabase.table("user_profiles").select("id, full_name").eq("is_active", True).order("full_name").execute()
+        role_row = supabase.table("roles").select("id").eq("name", "master_admin").limit(1).execute()
+        if not role_row.data:
+            return {"users": []}
+        role_id = role_row.data[0]["id"]
+        r = supabase.table("user_profiles").select("id, full_name").eq("role_id", role_id).eq("is_active", True).order("full_name").execute()
         return {"users": r.data or []}
     except Exception:
         return {"users": []}

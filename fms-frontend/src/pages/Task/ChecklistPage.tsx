@@ -36,7 +36,7 @@ const isToday = (d: string) => dayjs(d).isSame(dayjs(), 'day')
 
 export const ChecklistPage = () => {
   const { user } = useAuth()
-  const { isAdmin } = useRole()
+  const { isAdmin, isMasterAdmin } = useRole()
   const [form] = Form.useForm()
   const [tasks, setTasks] = useState<ChecklistTask[]>([])
   const [occurrences, setOccurrences] = useState<ChecklistOccurrence[]>([])
@@ -58,8 +58,18 @@ export const ChecklistPage = () => {
   }, [selectedUserId])
 
   useEffect(() => {
-    loadTasks()
-    loadOccurrences()
+    setLoading(true)
+    const refNoParam = referenceNoFilter && referenceNoFilter !== '__all__' ? referenceNoFilter : undefined
+    Promise.all([
+      checklistApi.getTasks(selectedUserId, refNoParam).then((r) => r.tasks || []),
+      checklistApi.getOccurrences(filter, selectedUserId, refNoParam).then((r) => r.occurrences || []),
+    ])
+      .then(([tasksRes, occRes]) => {
+        setTasks(tasksRes)
+        setOccurrences(occRes)
+      })
+      .catch(() => message.error('Failed to load checklist'))
+      .finally(() => setLoading(false))
   }, [selectedUserId, referenceNoFilter, filter])
 
   useEffect(() => {
@@ -67,28 +77,26 @@ export const ChecklistPage = () => {
   }, [])
 
   useEffect(() => {
-    if (isAdmin) {
+    if (isMasterAdmin) {
       checklistApi.getUsers().then((r) => setUsers(r.users || [])).catch(() => setUsers([]))
+    } else {
+      setUsers([])
     }
-  }, [isAdmin])
+  }, [isMasterAdmin])
 
   const refNoParam = referenceNoFilter && referenceNoFilter !== '__all__' ? referenceNoFilter : undefined
 
-  const loadTasks = () => {
+  const loadTasksAndOccurrences = () => {
     setLoading(true)
-    checklistApi
-      .getTasks(selectedUserId, refNoParam)
-      .then((r) => setTasks(r.tasks || []))
-      .catch(() => message.error('Failed to load tasks'))
-      .finally(() => setLoading(false))
-  }
-
-  const loadOccurrences = () => {
-    setLoading(true)
-    checklistApi
-      .getOccurrences(filter, selectedUserId, refNoParam)
-      .then((r) => setOccurrences(r.occurrences || []))
-      .catch(() => message.error('Failed to load occurrences'))
+    Promise.all([
+      checklistApi.getTasks(selectedUserId, refNoParam).then((r) => r.tasks || []),
+      checklistApi.getOccurrences(filter, selectedUserId, refNoParam).then((r) => r.occurrences || []),
+    ])
+      .then(([tasksRes, occRes]) => {
+        setTasks(tasksRes)
+        setOccurrences(occRes)
+      })
+      .catch(() => message.error('Failed to load checklist'))
       .finally(() => setLoading(false))
   }
 
@@ -116,8 +124,7 @@ export const ChecklistPage = () => {
         message.success('Task created')
         form.resetFields()
         setAddTaskModalOpen(false)
-        loadTasks()
-        loadOccurrences()
+        loadTasksAndOccurrences()
       })
       .catch((e: any) => message.error(e.response?.data?.detail || 'Failed to create task'))
       .finally(() => setLoading(false))
@@ -129,7 +136,7 @@ export const ChecklistPage = () => {
       .completeTask(taskId, occurrenceDate)
       .then(() => {
         message.success('Marked as Completed')
-        loadOccurrences()
+        loadTasksAndOccurrences()
       })
       .catch((e: any) => message.error(e.response?.data?.detail || 'Failed to complete'))
       .finally(() => setSubmitLoading(null))
@@ -238,8 +245,8 @@ export const ChecklistPage = () => {
         </Card>
       )}
 
-      {/* User filter for Admin / Master Admin */}
-      {isAdmin && users.length > 0 && (
+      {/* User filter for Master Admin only - shows only master_admin users */}
+      {isMasterAdmin && users.length > 0 && (
         <Card style={{ marginBottom: 24 }}>
           <Space>
             <Text>Filter by User:</Text>

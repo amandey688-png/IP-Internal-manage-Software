@@ -113,50 +113,57 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
   const attachmentUrlRef = useRef<string | null>(null)
   attachmentUrlRef.current = attachmentUrl
 
-  /** Load draft into form when modal opens */
+  /** Load companies, pages, draft in parallel when modal opens */
   useEffect(() => {
     if (open) {
       setAttachmentUrl(null)
-      supportApi.getCompanies().then(setCompanies).catch(() => setCompanies([]))
-      supportApi.getPages().then(setPages).catch(() => setPages([]))
       form.setFieldsValue({ submitted_by: user?.full_name ?? '' })
       skipDraftSaveRef.current = true
       isLoadingDraftRef.current = true
-      draftsApi
-        .getSupportTicketDraft()
-        .then(async (res) => {
-          const raw = res as { draft_data?: Record<string, unknown>; data?: { draft_data?: Record<string, unknown> } }
-          const data = raw?.draft_data ?? raw?.data?.draft_data
-          if (!data || typeof data !== 'object') return
-          const fields: Record<string, unknown> = { ...data }
-          if (typeof data.query_arrival_at === 'string') {
-            fields.query_arrival_at = dayjs(data.query_arrival_at)
-          }
-          if (typeof data.query_response_at === 'string') {
-            fields.query_response_at = dayjs(data.query_response_at)
-          }
-          if (data.type_of_request === 'feature') setTypeFeature(true)
-          if (data.company_id) {
-            const d = await supportApi.getDivisions(data.company_id as string)
+      // Fetch companies, pages, draft in parallel
+      Promise.all([
+        supportApi.getCompanies().catch(() => []),
+        supportApi.getPages().catch(() => []),
+        draftsApi.getSupportTicketDraft().catch(() => ({ draft_data: null })),
+      ]).then(([companiesRes, pagesRes, draftRes]) => {
+        setCompanies(Array.isArray(companiesRes) ? companiesRes : [])
+        setPages(Array.isArray(pagesRes) ? pagesRes : [])
+        const raw = draftRes as { draft_data?: Record<string, unknown>; data?: { draft_data?: Record<string, unknown> } }
+        const data = raw?.draft_data ?? raw?.data?.draft_data
+        if (!data || typeof data !== 'object') {
+          isLoadingDraftRef.current = false
+          skipDraftSaveRef.current = false
+          return
+        }
+        const fields: Record<string, unknown> = { ...data }
+        if (typeof data.query_arrival_at === 'string') {
+          fields.query_arrival_at = dayjs(data.query_arrival_at)
+        }
+        if (typeof data.query_response_at === 'string') {
+          fields.query_response_at = dayjs(data.query_response_at)
+        }
+        if (data.type_of_request === 'feature') setTypeFeature(true)
+        if (data.company_id) {
+          supportApi.getDivisions(data.company_id as string).then((d) => {
             setDivisions(d)
-            const hasOther = d.some((x) => x.name === 'Other')
-            setDivisionOther(hasOther)
-          }
-          const attUrl = typeof data.attachment_url === 'string' ? data.attachment_url : null
-          if (attUrl) {
-            setAttachmentUrl(attUrl)
-            setAttachmentFileList([{ uid: attUrl, name: 'Draft attachment', url: attUrl }])
-            form.setFieldValue('attachment_url', attUrl)
-          }
-          form.setFieldsValue(fields)
-        })
-        .catch(() => {})
-        .finally(() => {
-          setTimeout(() => {
-            skipDraftSaveRef.current = false
-            isLoadingDraftRef.current = false
-          }, 500)
-        })
+            setDivisionOther(d.some((x) => x.name === 'Other'))
+          })
+        }
+        const attUrl = typeof data.attachment_url === 'string' ? data.attachment_url : null
+        if (attUrl) {
+          setAttachmentUrl(attUrl)
+          setAttachmentFileList([{ uid: attUrl, name: 'Draft attachment', url: attUrl }])
+          form.setFieldValue('attachment_url', attUrl)
+        }
+        form.setFieldsValue(fields)
+        setTimeout(() => {
+          skipDraftSaveRef.current = false
+          isLoadingDraftRef.current = false
+        }, 300)
+      }).catch(() => {
+        skipDraftSaveRef.current = false
+        isLoadingDraftRef.current = false
+      })
     }
   }, [open, user?.full_name])
 

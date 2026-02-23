@@ -13,19 +13,20 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   const [token, setToken] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
-  // Initialize auth state from storage
+  // Initialize auth: show app immediately with stored user, verify in background
   useEffect(() => {
-    const initAuth = async () => {
-      const storedToken = storage.getToken()
-      const storedUser = storage.getUser()
+    const storedToken = storage.getToken()
+    const storedUser = storage.getUser()
 
-      if (storedToken && storedUser) {
-        setToken(storedToken)
-        setUser(storedUser)
+    if (storedToken && storedUser) {
+      setToken(storedToken)
+      setUser(storedUser)
+      setIsLoading(false) // Render app immediately
 
-        // Verify token is still valid by fetching current user
-        try {
-          const response = await authApi.getCurrentUser()
+      // Verify token in background (non-blocking)
+      authApi
+        .getCurrentUser()
+        .then((response) => {
           if (response.data) {
             if (response.data.is_active === false) {
               storage.clear()
@@ -40,18 +41,15 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             setToken(null)
             setUser(null)
           }
-        } catch (error) {
-          // Token invalid, clear storage
+        })
+        .catch(() => {
           storage.clear()
           setToken(null)
           setUser(null)
-        }
-      }
-
+        })
+    } else {
       setIsLoading(false)
     }
-
-    initAuth()
   }, [])
 
   const login = (newToken: string, newUser: User) => {
