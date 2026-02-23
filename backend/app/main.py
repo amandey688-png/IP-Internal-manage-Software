@@ -127,11 +127,34 @@ async def global_exception_handler(request: Request, exc: Exception):
         content={"detail": f"Error: {str(exc)[:200]}"},
     )
 
-# CORS configuration - allow frontend origin (dev defaults; for production set CORS_ORIGINS to your frontend URL, e.g. https://your-app.vercel.app)
-_cors_origins = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002,http://127.0.0.1:3003,http://127.0.0.1:3004").split(",")
+# CORS configuration - allow frontend origin
+# Reads: CORS_ORIGINS (comma-separated), CORS_ORIGIN, CORS_ORIGIN_1, CORS_ORIGIN_2, ... CORS_ORIGIN_10
+_dev_defaults = "http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004,http://127.0.0.1:3000,http://127.0.0.1:3001,http://127.0.0.1:3002,http://127.0.0.1:3003,http://127.0.0.1:3004"
+_prod_defaults = "https://industryprime.vercel.app,https://ip-internal-manage-software.vercel.app,https://ip-internal-manage-software.onrender.com"
+_default = f"{_dev_defaults},{_prod_defaults}"
+
+def _collect_cors_origins() -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    # 1) CORS_ORIGINS (comma-separated)
+    raw = os.getenv("CORS_ORIGINS", _default)
+    for o in raw.split(","):
+        o = o.strip()
+        if o and o not in seen:
+            seen.add(o)
+            out.append(o)
+    # 2) CORS_ORIGIN, CORS_ORIGIN_1, ... CORS_ORIGIN_10 (Render-style individual vars)
+    for key in ["CORS_ORIGIN"] + [f"CORS_ORIGIN_{i}" for i in range(1, 11)]:
+        val = (os.getenv(key) or "").strip()
+        if val and val not in seen:
+            seen.add(val)
+            out.append(val)
+    return out
+
+_cors_origins_list = _collect_cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[o.strip() for o in _cors_origins if o.strip()],
+    allow_origins=_cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
