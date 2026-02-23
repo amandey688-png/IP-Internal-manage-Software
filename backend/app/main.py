@@ -1381,14 +1381,31 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     except Exception:
         all_tickets = 0
 
-    # Pending till date: all Chores & Bug tickets currently open/in_progress/on_hold (no date filter)
-    pending_statuses = ["open", "in_progress", "on_hold"]
+    # Pending till date: Chores & Bug where "Upto Stage 4" NOT done. Exclude Stage 4 completed.
     try:
-        q = supabase.table("tickets").select("id", count="exact").in_("type", types_chores_bugs).in_("status", pending_statuses)
+        q = supabase.table("tickets").select(
+            "id, status_4, quality_solution, staging_planned, live_review_status"
+        ).in_("type", types_chores_bugs)
         r = q.execute()
-        pending_till_date = r.count or 0
+        all_cb = r.data or []
     except Exception:
-        pending_till_date = 0
+        all_cb = []
+    pending_statuses = ["open", "in_progress", "on_hold"]
+    def _stage4_completed(t: dict) -> bool:
+        return str(t.get("status_4") or "").lower() == "completed"
+    def _in_staging(t: dict) -> bool:
+        if t.get("staging_planned"):
+            return str(t.get("live_review_status") or "").lower() != "completed"
+        return False
+    def _has_quality_solution(t: dict) -> bool:
+        qs = t.get("quality_solution")
+        return qs is not None and qs != "" and str(qs).lower() not in ("null", "none")
+    pending_till_date = sum(
+        1 for t in all_cb
+        if not _in_staging(t)
+        and not _stage4_completed(t)
+        and not _has_quality_solution(t)
+    )
 
     # Last week Chores & Bug tickets (for response_delay / completion_delay)
     try:
@@ -1404,8 +1421,26 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     # Response delay: Chores & Bug from last week with no assignee (proxy for SLA breach)
     response_delay = sum(1 for t in week_tickets if not t.get("assignee_id"))
 
-    # Completion delay: Chores & Bug from last week not resolved
-    completion_delay = sum(1 for t in week_tickets if not t.get("resolved_at"))
+    # Completion delay: only when ticket timestamp + 1 day crossed AND Stage 4 completed (took >1 day to complete)
+    def _completion_delay_ticket(t: dict) -> bool:
+        if not _stage4_completed(t):
+            return False
+        created = t.get("created_at") or ""
+        actual4 = t.get("actual_4") or ""
+        if not created or not actual4:
+            return False
+        try:
+            c = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+            a = datetime.fromisoformat(str(actual4).replace("Z", "+00:00"))
+            if c.tzinfo is None:
+                c = c.replace(tzinfo=timezone.utc)
+            if a.tzinfo is None:
+                a = a.replace(tzinfo=timezone.utc)
+            delta_days = (a - c).total_seconds() / 86400
+            return delta_days > 1
+        except Exception:
+            return False
+    completion_delay = sum(1 for t in week_tickets if _completion_delay_ticket(t))
 
     # In Staging: pending counts by type (Feature vs Chores & Bug)
     staging_pending_feature = 0
@@ -1570,6 +1605,33 @@ def _has_completion_delay(
         return False, ""
 
 
+def _has_completion_delay_stage4(ticket: dict) -> tuple[bool, str]:
+    """Returns (has_delay, delay_time_text).
+    Completion delay = ticket creation timestamp + 1 day crossed, AND Stage 4 completed."""
+    if ticket.get("type") not in ("chore", "bug"):
+        return False, ""
+    status4 = str(ticket.get("status_4") or "").lower()
+    if status4 != "completed":
+        return False, ""
+    created = ticket.get("created_at") or ""
+    actual4 = ticket.get("actual_4") or ""
+    if not created or not actual4:
+        return False, ""
+    try:
+        c = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+        a = datetime.fromisoformat(str(actual4).replace("Z", "+00:00"))
+        if c.tzinfo is None:
+            c = c.replace(tzinfo=timezone.utc)
+        if a.tzinfo is None:
+            a = a.replace(tzinfo=timezone.utc)
+        delta_days = (a - c).total_seconds() / 86400
+        if delta_days > 1:
+            return True, f"TAT crossed: {int(delta_days)}d"
+        return False, ""
+    except Exception:
+        return False, ""
+
+
 @api_router.get("/support-dashboard/stats")
 def support_dashboard_stats(auth: dict = Depends(get_current_user)):
     """Support Dashboard: weekly stats, pending grouped by 1-2/2-7/7+/hold, top companies, feature metrics."""
@@ -1583,7 +1645,7 @@ def support_dashboard_stats(auth: dict = Depends(get_current_user)):
     # For pending items we filter by quality_solution=null in Python
     try:
         q = supabase.table("tickets").select(
-            "id, type, status, company_name, created_at, resolved_at, assignee_id, query_arrival_at, query_response_at, quality_solution, planned_2, actual_2, actual_1, status_2"
+            "id, type, status, company_name, created_at, resolved_at, assignee_id, query_arrival_at, query_response_at, quality_solution, planned_2, actual_2, actual_1, status_2, status_4, actual_4"
         ).in_("type", ["chore", "bug"])
         q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
         q = q.or_("status_2.is.null,status_2.neq.staging")
@@ -1623,14 +1685,11 @@ def support_dashboard_stats(auth: dict = Depends(get_current_user)):
         total = len(week_tickets)
         chores = sum(1 for t in week_tickets if t.get("type") == "chore")
         bugs = sum(1 for t in week_tickets if t.get("type") == "bug")
-        completed = sum(1 for t in week_tickets if _is_resolved(t.get("status"), None) or t.get("resolved_at"))
+        def _stage4_done(t: dict) -> bool:
+            return str(t.get("status_4") or "").lower() == "completed"
+        completed = sum(1 for t in week_tickets if _stage4_done(t))
         response_delay = sum(1 for t in week_tickets if _has_response_delay(t.get("query_arrival_at") or t.get("created_at"), t.get("query_response_at"))[0])
-        completion_delay = sum(1 for t in week_tickets if _has_completion_delay(
-            t.get("resolved_at"), t.get("created_at"),
-            ticket_type=t.get("type"),
-            planned_2=t.get("planned_2"), actual_2=t.get("actual_2"),
-            status_2=t.get("status_2"), actual_1=t.get("actual_1"),
-        )[0])
+        completion_delay = sum(1 for t in week_tickets if _has_completion_delay_stage4(t)[0])
         weeks_data.append({
             "weekNumber": w,
             "months": [month_names[month - 1]],
@@ -1642,8 +1701,8 @@ def support_dashboard_stats(auth: dict = Depends(get_current_user)):
                 "totalChores": chores,
                 "totalBugs": bugs,
                 "completed": completed,
-                "pendingBugs": bugs - sum(1 for t in week_tickets if t.get("type") == "bug" and (_is_resolved(t.get("status"), None) or t.get("resolved_at"))),
-                "pendingChores": chores - sum(1 for t in week_tickets if t.get("type") == "chore" and (_is_resolved(t.get("status"), None) or t.get("resolved_at"))),
+                "pendingBugs": sum(1 for t in week_tickets if t.get("type") == "bug" and not _stage4_done(t)),
+                "pendingChores": sum(1 for t in week_tickets if t.get("type") == "chore" and not _stage4_done(t)),
                 "responseDelay": response_delay,
                 "completionDelay": completion_delay,
             },
@@ -1656,6 +1715,8 @@ def support_dashboard_stats(auth: dict = Depends(get_current_user)):
     prev_month_bugs = {}
 
     for t in tickets_for_pending:
+        if str(t.get("status_4") or "").lower() == "completed":
+            continue
         status = t.get("status") or ""
         if _is_resolved(status, None) or t.get("resolved_at"):
             continue
@@ -1838,10 +1899,10 @@ def support_dashboard_weekly_details(
 ):
     """Weekly ticket details for Support Dashboard modal.
     ticket_type: total, pending, completed, response_delay, completion_delay.
-    Uses ALL chores+bugs (no quality_solution filter) to match weekly stats."""
+    Pending = Upto Stage 4 not done. Completed = Stage 4 completed. Completion delay = 1d crossed + Stage 4 done."""
     try:
         q = supabase.table("tickets").select(
-            "id, reference_no, title, description, type, status, company_name, company_id, user_name, assignee_id, created_at, query_arrival_at, query_response_at, resolved_at, planned_2, actual_2, actual_1, status_2"
+            "id, reference_no, title, description, type, status, company_name, company_id, user_name, assignee_id, created_at, query_arrival_at, query_response_at, resolved_at, planned_2, actual_2, actual_1, status_2, status_4, actual_4, quality_solution"
         ).in_("type", ["chore", "bug"])
         q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
         q = q.or_("status_2.is.null,status_2.neq.staging")
@@ -1863,20 +1924,16 @@ def support_dashboard_weekly_details(
             continue
         if year_list and str(y) not in year_list:
             continue
-        resolved = _is_resolved(t.get("status"), None) or bool(t.get("resolved_at"))
-        if ticket_type == "pending" and resolved:
+        stage4_done = str(t.get("status_4") or "").lower() == "completed"
+        has_quality = t.get("quality_solution") is not None and str(t.get("quality_solution")).strip().lower() not in ("", "null", "none")
+        if ticket_type == "pending" and (stage4_done or has_quality):
             continue
-        if ticket_type == "completed" and not resolved:
+        if ticket_type == "completed" and not stage4_done:
             continue
         q_arrival = t.get("query_arrival_at") or t.get("created_at")
         q_response = t.get("query_response_at")
         has_resp_delay, resp_delay_text = _has_response_delay(q_arrival, q_response)
-        has_comp_delay, comp_delay_text = _has_completion_delay(
-            t.get("resolved_at"), t.get("created_at"),
-            ticket_type=t.get("type"),
-            planned_2=t.get("planned_2"), actual_2=t.get("actual_2"),
-            status_2=t.get("status_2"), actual_1=t.get("actual_1"),
-        )
+        has_comp_delay, comp_delay_text = _has_completion_delay_stage4(t)
         if ticket_type == "response_delay" and not has_resp_delay:
             continue
         if ticket_type == "completion_delay" and not has_comp_delay:
@@ -1893,7 +1950,7 @@ def support_dashboard_weekly_details(
             "month": month_name,
             "year": str(y),
             "status": t.get("status") or "",
-            "completed": "completed" if resolved else "",
+            "completed": "completed" if stage4_done else "",
             "queryArrival": q_arrival or "",
             "responseDelayTime": resp_delay_text if has_resp_delay else "",
             "completionDelayTime": comp_delay_text if has_comp_delay else "",
@@ -1947,11 +2004,11 @@ def dashboard_trends(auth: dict = Depends(get_current_user)):
         month_end = month_start + timedelta(days=32)
         month_end = month_end.replace(day=1) - timedelta(seconds=1)
         try:
-            q = supabase.table("tickets").select("id, assignee_id, resolved_at").in_("type", ["chore", "bug"]).gte("created_at", month_start.isoformat()).lte("created_at", month_end.isoformat())
+            q = supabase.table("tickets").select("id, assignee_id, created_at, status_4, actual_4").in_("type", ["chore", "bug"]).gte("created_at", month_start.isoformat()).lte("created_at", month_end.isoformat())
             r = q.execute()
             tickets = r.data or []
             response_delay = sum(1 for t in tickets if not t.get("assignee_id"))
-            completion_delay = sum(1 for t in tickets if not t.get("resolved_at"))
+            completion_delay = sum(1 for t in tickets if _has_completion_delay_stage4(t)[0])
             data.append({
                 "month": month_start.strftime("%b %Y"),
                 "response_delay": response_delay,

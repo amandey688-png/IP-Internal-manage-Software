@@ -5,7 +5,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { getInitials } from '../../utils/helpers'
-import { ROUTES, APP_NAME } from '../../utils/constants'
+import { ROUTES } from '../../utils/constants'
 import { dashboardApi } from '../../api/dashboard'
 
 const { Header: AntHeader } = Layout
@@ -97,8 +97,7 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
         )}
         <Space size="small">
           <img src="/logo.png" alt="Logo" style={{ height: 32, width: 'auto', objectFit: 'contain' }} />
-          <Text strong style={{ fontSize: 16 }}>{APP_NAME}</Text>
-          <Text type="secondary" className="breadcrumb-text" style={{ marginLeft: 16 }}>{breadcrumb}</Text>
+          <Text type="secondary" className="breadcrumb-text" style={{ marginLeft: 12 }}>{breadcrumb}</Text>
         </Space>
       </Space>
       <Space size="middle">
