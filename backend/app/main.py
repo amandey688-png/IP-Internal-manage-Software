@@ -3070,6 +3070,135 @@ async def send_checklist_daily_reminders(
     return {"status": "started", "message": "Checklist reminder job started. Check server logs for result."}
 
 
+# ---------- Delegation Daily Reminder (same pattern as Checklist) ----------
+async def _send_delegation_reminder_email(to_email: str, task_titles: list[str], assignee_name: str) -> bool:
+    """Send delegation reminder email via utils/email.py. Returns True if sent."""
+    to_email = (to_email or "").strip()
+    if not to_email:
+        _log("Delegation reminder: no recipient email, skip send")
+        return False
+
+    from app.utils.email import send_email
+
+    task_items = "".join(f"<li>{t}</li>" for t in task_titles)
+    html_content = f"""
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body>
+  <h3>You have pending delegation tasks</h3>
+  <p>Hi {assignee_name or "User"},</p>
+  <p>You have <strong>{len(task_titles)}</strong> delegation task(s) due or overdue:</p>
+  <ul>
+    {task_items}
+  </ul>
+  <p>Please log in to complete them.</p>
+</body>
+</html>
+"""
+    plain_fallback = f"You have {len(task_titles)} delegation task(s) due or overdue:\n\n" + "\n".join(f"  - {t}" for t in task_titles) + "\n\nPlease log in to complete them."
+
+    ok = await send_email(to_email=to_email, subject="Delegation: Pending tasks due", html_content=html_content.strip(), plain_fallback=plain_fallback)
+    if ok:
+        _log(f"Delegation reminder sent to {to_email}")
+    return ok
+
+
+async def _run_delegation_reminders_background():
+    """Run delegation daily reminders. One email per assignee with pending/overdue tasks."""
+    try:
+        today = date.today()
+        del_r = supabase.table("delegation_tasks").select("id, title, assignee_id, due_date").in_("status", ["pending", "in_progress"]).lte("due_date", today.isoformat()).execute()
+        tasks = del_r.data or []
+        assignee_ids = list({str(t.get("assignee_id", "")) for t in tasks if t.get("assignee_id")})
+        user_map = {}
+        if assignee_ids:
+            try:
+                profiles_r = supabase.table("user_profiles").select("id, email, full_name").in_("id", assignee_ids).execute()
+                for p in (profiles_r.data or []):
+                    uid = str(p.get("id", ""))
+                    email_val = (p.get("email") or "").strip()
+                    user_map[uid] = {"email": email_val, "name": p.get("full_name") or "User"}
+            except Exception as e:
+                _log(f"Delegation reminder: user_profiles failed: {e}")
+            need_auth = any(uid not in user_map or not (user_map.get(uid) or {}).get("email") for uid in assignee_ids)
+            if need_auth:
+                try:
+                    auth_r = supabase.auth.admin.list_users(per_page=1000)
+                    auth_users = getattr(auth_r, "users", []) or []
+                    prof_r = supabase.table("user_profiles").select("id, full_name").in_("id", assignee_ids).execute()
+                    profs = {str(x["id"]): x.get("full_name") or "User" for x in (prof_r.data or [])}
+                    for u in auth_users:
+                        uid = str(getattr(u, "id", "") or (u.get("id") if isinstance(u, dict) else ""))
+                        em = (getattr(u, "email", None) or (u.get("email") if isinstance(u, dict) else None) or "").strip()
+                        if uid in assignee_ids and (uid not in user_map or not (user_map.get(uid) or {}).get("email")):
+                            user_map[uid] = {"email": em, "name": profs.get(uid, "User")}
+                except Exception as e2:
+                    _log(f"Delegation reminder: auth fallback failed: {e2}")
+        try:
+            sent_r = supabase.table("delegation_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
+            already_sent = {str(row["user_id"]) for row in (sent_r.data or [])}
+        except Exception:
+            already_sent = set()
+        by_user: dict[str, list[str]] = {}
+        for task in tasks:
+            assignee_id = str(task.get("assignee_id", ""))
+            if not assignee_id or assignee_id in already_sent:
+                continue
+            by_user.setdefault(assignee_id, []).append(task.get("title") or "Untitled")
+        sent_count = 0
+        for uid, titles in by_user.items():
+            if not titles or uid in already_sent:
+                continue
+            u = user_map.get(uid, {})
+            email = (u.get("email") or "").strip()
+            name = u.get("name") or "User"
+            if not email:
+                continue
+            if await _send_delegation_reminder_email(email, titles, name):
+                try:
+                    supabase.table("delegation_reminder_sent").insert({
+                        "user_id": uid,
+                        "reminder_date": today.isoformat(),
+                    }).execute()
+                    sent_count += 1
+                except Exception as e:
+                    _log(f"Delegation reminder: failed recording send for user_id={uid} date={today.isoformat()}: {e}")
+        _log(f"Delegation reminder background: sent {sent_count} for {today.isoformat()}")
+    except Exception as e:
+        _log(f"Delegation reminder background error: {e}")
+
+
+@api_router.api_route("/delegation/send-daily-reminders", methods=["GET", "POST"])
+async def send_delegation_daily_reminders(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    auth: dict | None = Depends(get_current_user_optional),
+):
+    """
+    Start delegation daily reminders in background. Same pattern as checklist.
+    POST or GET. Auth: X-Cron-Secret header, ?secret= query, or admin login.
+    Sends one email per assignee with pending/overdue delegation tasks.
+    """
+    cron_secret = (os.getenv("DELEGATION_CRON_SECRET") or os.getenv("CHECKLIST_CRON_SECRET") or "").strip()
+    x_cron = (
+        request.headers.get("X-Cron-Secret") or
+        request.headers.get("x-cron-secret") or
+        request.query_params.get("secret") or
+        ""
+    ).strip()
+    if cron_secret and x_cron and x_cron == cron_secret:
+        pass
+    elif auth:
+        role = _get_role_from_profile(auth["id"])
+        if role not in ("admin", "master_admin"):
+            raise HTTPException(403, "Admin only")
+    else:
+        raise HTTPException(401, "Set DELEGATION_CRON_SECRET or CHECKLIST_CRON_SECRET header/query, or log in as admin")
+    background_tasks.add_task(_run_delegation_reminders_background)
+    return {"status": "started", "message": "Delegation reminder job started. Check server logs for result."}
+
+
 # ---------------------------------------------------------------------------
 # Pending Reminder Digest (Checklist & Delegation + Support Chores&Bug & Feature by stage)
 # Sent to admin, master_admin, approver roles only
