@@ -131,10 +131,10 @@ const stagingTicketColumns = [
     ),
   },
   {
-    title: 'Communicated Through',
+    title: 'CT',
     dataIndex: 'communicated_through',
     key: 'communicated_through',
-    width: 100,
+    width: 70,
     render: (v: string) => getCommIcon(v),
   },
   {

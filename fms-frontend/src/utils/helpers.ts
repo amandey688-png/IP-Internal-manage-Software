@@ -422,7 +422,7 @@ export const TICKET_EXPORT_COLUMNS = [
   { key: 'company_name', label: 'Company Name' },
   { key: 'user_name', label: 'User Name' },
   { key: 'division_name', label: 'Division' },
-  { key: 'communicated_through', label: 'Communicated Through' },
+  { key: 'communicated_through', label: 'CT' },
   { key: 'stage', label: 'Stage' },
   { key: 'stage_status', label: 'Stage Status' },
 ] as const

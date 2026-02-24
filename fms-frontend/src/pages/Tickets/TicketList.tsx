@@ -540,10 +540,10 @@ export const TicketList = () => {
       render: (v: string) => <Tag color={getTypeColor(v)}>{v === 'chore' ? 'Chores' : v === 'bug' ? 'Bug' : 'Feature'}</Tag>,
     },
     {
-      title: 'Communicated Through',
+      title: 'CT',
       dataIndex: 'communicated_through',
       key: 'communicated_through',
-      width: 100,
+      width: 70,
       render: (v: string) => getCommIcon(v),
     },
     {

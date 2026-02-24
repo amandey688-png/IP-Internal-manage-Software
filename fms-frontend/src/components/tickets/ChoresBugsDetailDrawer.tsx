@@ -285,7 +285,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
               {ticket.division_name === 'Other' && (
                 <Descriptions.Item label="Other Division">{ticket.division_other || '-'}</Descriptions.Item>
               )}
-              <Descriptions.Item label="Communicated Through">{ticket.communicated_through || '-'}</Descriptions.Item>
+              <Descriptions.Item label="CT">{ticket.communicated_through || '-'}</Descriptions.Item>
               <Descriptions.Item label="Submitted By">{ticket.submitted_by || '-'}</Descriptions.Item>
               <Descriptions.Item label="Query Arrival Date & Time">
                 {formatDateTable(ticket.query_arrival_at)}
