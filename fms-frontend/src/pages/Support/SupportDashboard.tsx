@@ -8,8 +8,11 @@ import {
   FileTextOutlined,
 } from '@ant-design/icons'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supportDashboardApi, type SupportDashboardStats, type WeekData } from '../../api/supportDashboard'
 import { LoadingSpinner } from '../../components/common/LoadingSpinner'
+import { formatDateWeekly } from '../../utils/helpers'
+import { ROUTES } from '../../utils/constants'
 
 const { Title, Text } = Typography
 
@@ -21,6 +24,7 @@ const weekBoxColors = [
 ]
 
 export const SupportDashboard = () => {
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<SupportDashboardStats | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -410,7 +414,7 @@ export const SupportDashboard = () => {
         open={filteredModalOpen}
         onCancel={() => setFilteredModalOpen(false)}
         footer={null}
-        width={900}
+        width={1000}
       >
         {filteredLoading ? (
           <div style={{ textAlign: 'center', padding: 40 }}>
@@ -420,16 +424,81 @@ export const SupportDashboard = () => {
           <Table
             dataSource={filteredData.data as Record<string, unknown>[]}
             columns={[
-              { title: 'Company', dataIndex: 'company', key: 'company', width: 140 },
-              { title: 'Requested Person', dataIndex: 'requestedPerson', key: 'requestedPerson' },
-              { title: 'Status', dataIndex: 'status', key: 'status', width: 100 },
-              { title: 'Pending Days', dataIndex: 'pendingDays', key: 'pendingDays', width: 100 },
-              { title: 'Reference', dataIndex: 'referenceNo', key: 'referenceNo', width: 100 },
-              { title: 'Title', dataIndex: 'title', key: 'title', ellipsis: true },
+              {
+                title: 'Company',
+                dataIndex: 'company',
+                key: 'company',
+                width: 140,
+                ellipsis: false,
+                render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{v || '-'}</span>,
+              },
+              {
+                title: 'Title & Description',
+                key: 'titleDescription',
+                ellipsis: false,
+                render: (_: unknown, r: Record<string, unknown>) => {
+                  const t = String(r.title ?? '').trim()
+                  const d = String(r.description ?? '').trim()
+                  return (
+                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: 180 }}>
+                      {t ? <strong>{t}</strong> : null}
+                      {t && d ? '\n' : null}
+                      {d ? <span style={{ fontWeight: 'normal' }}>{d}</span> : null}
+                      {!t && !d ? '-' : null}
+                    </div>
+                  )
+                },
+              },
+              {
+                title: 'Req Per',
+                dataIndex: 'requestedPerson',
+                key: 'requestedPerson',
+                width: 100,
+                ellipsis: false,
+                render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{v || '-'}</span>,
+              },
+              {
+                title: 'Pending Days',
+                dataIndex: 'pendingDays',
+                key: 'pendingDays',
+                width: 100,
+                ellipsis: false,
+                render: (v: unknown) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{v != null ? String(v) : '-'}</span>,
+              },
+              {
+                title: 'Reference',
+                dataIndex: 'referenceNo',
+                key: 'referenceNo',
+                width: 100,
+                ellipsis: false,
+                render: (ref: string, r: Record<string, unknown>) => {
+                  const id = r.id as string | undefined
+                  if (!id) return <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{ref || '-'}</span>
+                  const typeStr = String(r.type ?? '').toLowerCase()
+                  const openTicketType = typeStr === 'bug' ? 'bug' : 'chore'
+                  return (
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ padding: 0, height: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                      onClick={() => {
+                        setFilteredModalOpen(false)
+                        setFilteredData(null)
+                        navigate(ROUTES.TICKETS + '?section=chores-bugs', {
+                          state: { openTicketId: id, openTicketType },
+                        })
+                      }}
+                    >
+                      {ref || '-'}
+                    </Button>
+                  )
+                },
+              },
             ]}
             pagination={{ pageSize: 10 }}
-            rowKey={(r) => String((r as { referenceNo?: string }).referenceNo || Math.random())}
+            rowKey={(r) => String((r as { id?: string; referenceNo?: string }).id || (r as { referenceNo?: string }).referenceNo || Math.random())}
             size="small"
+            scroll={{ x: 800 }}
           />
         ) : null}
       </Modal>
@@ -542,8 +611,41 @@ export const SupportDashboard = () => {
                       )
                     },
                   },
-                  { title: 'Reference', dataIndex: 'referenceNo', key: 'referenceNo', width: 100 },
-                  { title: 'Query Arrival', dataIndex: 'queryArrival', key: 'queryArrival', width: 140 },
+                  {
+                    title: 'Reference',
+                    dataIndex: 'referenceNo',
+                    key: 'referenceNo',
+                    width: 100,
+                    render: (ref: string, r: Record<string, unknown>) => {
+                      const id = r.id as string | undefined
+                      if (!id) return <span>{ref || '-'}</span>
+                      const typeStr = String(r.type ?? '').toLowerCase()
+                      const openTicketType = typeStr === 'bug' ? 'bug' : 'chore'
+                      return (
+                        <Button
+                          type="link"
+                          size="small"
+                          style={{ padding: 0, height: 'auto' }}
+                          onClick={() => {
+                            setWeeklyModalOpen(false)
+                            setWeeklyData(null)
+                            navigate(ROUTES.TICKETS + '?section=chores-bugs', {
+                              state: { openTicketId: id, openTicketType },
+                            })
+                          }}
+                        >
+                          {ref || '-'}
+                        </Button>
+                      )
+                    },
+                  },
+                  {
+                    title: 'Query Arrival',
+                    dataIndex: 'queryArrival',
+                    key: 'queryArrival',
+                    width: 140,
+                    render: (v: string) => formatDateWeekly(v),
+                  },
                   ...(weeklyData.ticketType === 'response_delay'
                     ? [{ title: 'Response Delay Time', dataIndex: 'responseDelayTime', key: 'responseDelayTime', width: 150, render: (v: string) => v || '-' }]
                     : weeklyData.ticketType === 'completion_delay'
@@ -563,7 +665,7 @@ export const SupportDashboard = () => {
         )}
       </Modal>
 
-      {/* Feature Tickets Modal */}
+      {/* Feature Tickets Modal — sorted by priority (red → yellow → green → no color) */}
       <Modal
         title={`Feature Tickets — ${featureData?.filterType === 'pending' ? 'Pending' : 'All'}`}
         open={featureModalOpen}
@@ -578,16 +680,76 @@ export const SupportDashboard = () => {
         ) : featureData ? (
           <Table
             dataSource={featureData.data as Record<string, unknown>[]}
+            onRow={(record) => {
+              const p = (record.priority as string)?.toLowerCase() || ''
+              const bg =
+                p === 'high' || p === 'critical' || p === 'urgent'
+                  ? 'rgba(255, 77, 79, 0.28)'
+                  : p === 'medium'
+                    ? 'rgba(250, 173, 20, 0.28)'
+                    : p === 'low'
+                      ? 'rgba(82, 196, 26, 0.25)'
+                      : undefined
+              return { style: bg ? { backgroundColor: bg } : undefined }
+            }}
             columns={[
-              { title: 'Company', dataIndex: 'company', key: 'company', width: 140 },
-              { title: 'Requested Person', dataIndex: 'requestedPerson', key: 'requestedPerson' },
-              { title: 'Status', dataIndex: 'status', key: 'status', width: 100 },
-              { title: 'Reference', dataIndex: 'referenceNo', key: 'referenceNo', width: 100 },
-              { title: 'Title', dataIndex: 'title', key: 'title', ellipsis: true },
+              {
+                title: 'Company',
+                dataIndex: 'company',
+                key: 'company',
+                width: 140,
+                ellipsis: false,
+                render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{v || '-'}</span>,
+              },
+              {
+                title: 'Title & Description',
+                key: 'titleDescription',
+                ellipsis: false,
+                render: (_: unknown, r: Record<string, unknown>) => {
+                  const t = String(r.title ?? '').trim()
+                  const d = String(r.description ?? '').trim()
+                  return (
+                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: 200 }}>
+                      {t ? <strong>{t}</strong> : null}
+                      {t && d ? '\n' : null}
+                      {d ? <span style={{ fontWeight: 'normal' }}>{d}</span> : null}
+                      {!t && !d ? '-' : null}
+                    </div>
+                  )
+                },
+              },
+              {
+                title: 'Reference',
+                dataIndex: 'referenceNo',
+                key: 'referenceNo',
+                width: 100,
+                ellipsis: false,
+                render: (ref: string, r: Record<string, unknown>) => {
+                  const id = r.id as string | undefined
+                  if (!id) return <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{ref || '-'}</span>
+                  return (
+                    <Button
+                      type="link"
+                      size="small"
+                      style={{ padding: 0, height: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+                      onClick={() => {
+                        setFeatureModalOpen(false)
+                        setFeatureData(null)
+                        navigate(ROUTES.TICKETS + '?type=feature', {
+                          state: { openTicketId: id, openTicketType: 'feature' },
+                        })
+                      }}
+                    >
+                      {ref || '-'}
+                    </Button>
+                  )
+                },
+              },
             ]}
             pagination={{ pageSize: 10 }}
-            rowKey={(r) => String((r as { referenceNo?: string }).referenceNo || Math.random())}
+            rowKey={(r) => String((r as { id?: string; referenceNo?: string }).id || (r as { referenceNo?: string }).referenceNo || Math.random())}
             size="small"
+            scroll={{ x: 600 }}
           />
         ) : null}
       </Modal>

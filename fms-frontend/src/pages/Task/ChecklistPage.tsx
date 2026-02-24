@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import {
   Card,
   Typography,
@@ -53,44 +53,40 @@ export const ChecklistPage = () => {
   const today = new Date()
   const canUploadHolidays = today.getMonth() === 11 && today.getDate() >= 15
 
+  const refNoParam = referenceNoFilter && referenceNoFilter !== '__all__' ? referenceNoFilter : undefined
+
+  const loadChecklistData = useCallback(() => {
+    setLoading(true)
+    Promise.all([
+      checklistApi.getTasks(selectedUserId, refNoParam),
+      checklistApi.getOccurrences(filter, selectedUserId, refNoParam),
+    ])
+      .then(([tasksRes, occRes]) => {
+        setTasks(tasksRes.tasks || [])
+        setOccurrences(occRes.occurrences || [])
+      })
+      .catch(() => message.error('Failed to load checklist'))
+      .finally(() => setLoading(false))
+  }, [selectedUserId, refNoParam, filter])
+
   useEffect(() => {
     setReferenceNoFilter('__all__')
   }, [selectedUserId])
 
   useEffect(() => {
-    loadTasks()
-    loadOccurrences()
-  }, [selectedUserId, referenceNoFilter, filter])
+    loadChecklistData()
+  }, [loadChecklistData])
 
+  // Load departments and users in parallel on mount (non-blocking for table)
   useEffect(() => {
-    checklistApi.getDepartments().then((r) => setDepartments(r.departments || [])).catch(() => setDepartments([]))
-  }, [])
-
-  useEffect(() => {
+    const promises: Promise<void>[] = [
+      checklistApi.getDepartments().then((r) => setDepartments(r.departments || [])).catch(() => setDepartments([])),
+    ]
     if (isAdmin) {
-      checklistApi.getUsers().then((r) => setUsers(r.users || [])).catch(() => setUsers([]))
+      promises.push(checklistApi.getUsers().then((r) => setUsers(r.users || [])).catch(() => setUsers([])))
     }
+    promises.forEach((p) => p.catch(() => {}))
   }, [isAdmin])
-
-  const refNoParam = referenceNoFilter && referenceNoFilter !== '__all__' ? referenceNoFilter : undefined
-
-  const loadTasks = () => {
-    setLoading(true)
-    checklistApi
-      .getTasks(selectedUserId, refNoParam)
-      .then((r) => setTasks(r.tasks || []))
-      .catch(() => message.error('Failed to load tasks'))
-      .finally(() => setLoading(false))
-  }
-
-  const loadOccurrences = () => {
-    setLoading(true)
-    checklistApi
-      .getOccurrences(filter, selectedUserId, refNoParam)
-      .then((r) => setOccurrences(r.occurrences || []))
-      .catch(() => message.error('Failed to load occurrences'))
-      .finally(() => setLoading(false))
-  }
 
   const referenceNoOptions = [
     { label: 'All', value: '__all__' },
@@ -116,8 +112,7 @@ export const ChecklistPage = () => {
         message.success('Task created')
         form.resetFields()
         setAddTaskModalOpen(false)
-        loadTasks()
-        loadOccurrences()
+        loadChecklistData()
       })
       .catch((e: any) => message.error(e.response?.data?.detail || 'Failed to create task'))
       .finally(() => setLoading(false))
@@ -129,7 +124,7 @@ export const ChecklistPage = () => {
       .completeTask(taskId, occurrenceDate)
       .then(() => {
         message.success('Marked as Completed')
-        loadOccurrences()
+        loadChecklistData()
       })
       .catch((e: any) => message.error(e.response?.data?.detail || 'Failed to complete'))
       .finally(() => setSubmitLoading(null))
@@ -330,7 +325,7 @@ export const ChecklistPage = () => {
             rules={[{ required: true }]}
           >
             <Select
-              placeholder="Select frequency (D=Daily, W=Weekly, M=Monthly, Q=Quarterly, F=Half-yearly, Y=Yearly)"
+              placeholder="Select frequency (D, 2D, W, 2W, M, Q, F, Y)"
               options={FREQUENCY_OPTIONS.map((o) => ({ label: o.label, value: o.value }))}
             />
           </Form.Item>

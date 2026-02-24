@@ -9,7 +9,9 @@ export const DEPARTMENTS = [
 
 export const FREQUENCY_OPTIONS = [
   { value: 'D', label: 'D - Daily' },
+  { value: '2D', label: '2D - Every 2 days' },
   { value: 'W', label: 'W - Weekly' },
+  { value: '2W', label: '2W - Every 2 weeks' },
   { value: 'M', label: 'M - Monthly' },
   { value: 'Q', label: 'Q - Quarterly' },
   { value: 'F', label: 'F - Half-yearly' },
