@@ -25,6 +25,19 @@ export const formatDateTable = (date: string | Date | null | undefined): string 
   }).format(d)
 }
 
+/** Format for Weekly Details: dd/mm/yy hr/min (e.g. 23/02/26 09:46) */
+export const formatDateWeekly = (date: string | Date | null | undefined): string => {
+  if (!date) return '-'
+  const d = typeof date === 'string' ? new Date(date) : date
+  if (Number.isNaN(d.getTime())) return '-'
+  const day = String(d.getDate()).padStart(2, '0')
+  const month = String(d.getMonth() + 1).padStart(2, '0')
+  const year = String(d.getFullYear()).slice(-2)
+  const hr = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${day}/${month}/${year} ${hr}:${min}`
+}
+
 /** Format actual_time_seconds to human readable (e.g. 2h 30m) */
 export const formatDuration = (seconds: number | null | undefined): string => {
   if (seconds == null || seconds < 0) return '-'

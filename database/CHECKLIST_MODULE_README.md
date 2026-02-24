@@ -23,7 +23,9 @@ CHECKLIST_MODULE.sql creates:
 ## 3. Frequency
 
 - **D** – Daily (Mon–Sat, excluding holidays)
+- **2D** – Every 2 days (from start date, excluding Sundays and holidays)
 - **W** – Weekly (same weekday)
+- **2W** – Every 2 weeks (same weekday, 14-day step)
 - **M** – Monthly (same date)
 - **Q** – Quarterly
 - **F** – Half-yearly

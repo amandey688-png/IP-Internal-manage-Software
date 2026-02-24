@@ -48,6 +48,14 @@ const truncate = (text: string | undefined, len = 40) => {
   return text.length > len ? `${text.slice(0, len)}...` : text
 }
 
+/** Truncate to max words (for Description column: show 25 words in table; full details on ticket click). */
+const truncateWords = (text: string | undefined, maxWords = 25) => {
+  if (!text || !String(text).trim()) return '-'
+  const words = String(text).trim().split(/\s+/)
+  if (words.length <= maxWords) return text
+  return words.slice(0, maxWords).join(' ') + '...'
+}
+
 export const TicketList = () => {
   const navigate = useNavigate()
   const { canAccessApproval, isUser, isMasterAdmin } = useRole()
@@ -106,6 +114,23 @@ export const TicketList = () => {
   useEffect(() => {
     if (sectionFromUrl !== 'chores-bugs') setTypeOfRequestFilter('')
   }, [sectionFromUrl])
+
+  /** Open drawer when navigated from Support Dashboard (Reference click in Weekly Details, Pending Chores/Bugs, or Pending Feature) */
+  useEffect(() => {
+    const state = location.state as { openTicketId?: string; openTicketType?: string } | undefined
+    const openId = state?.openTicketId
+    const openType = state?.openTicketType
+    if (!openId) return
+    if (sectionFromUrl === 'chores-bugs' && (openType === 'chore' || openType === 'bug')) {
+      setDrawerTicketId(openId)
+      setDrawerTicketType(openType === 'bug' ? 'bug' : 'chore')
+      navigate(location.pathname + location.search, { replace: true, state: {} })
+    } else if (openType === 'feature') {
+      setDrawerTicketId(openId)
+      setDrawerTicketType('feature')
+      navigate(location.pathname + location.search, { replace: true, state: {} })
+    }
+  }, [sectionFromUrl, location.state, location.pathname, location.search, navigate])
 
   useEffect(() => {
     const t = searchParams.get('type') || ''
@@ -505,7 +530,7 @@ export const TicketList = () => {
       key: 'description',
       width: 220,
       ellipsis: false,
-      render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
+      render: (v: string) => <span style={wrapStyle} title={v || undefined}>{truncateWords(v, 25)}</span>,
     },
     {
       title: 'Type of Request',

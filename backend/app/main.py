@@ -1494,7 +1494,7 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     # Pending till date: Chores & Bug where "Upto Stage 4" NOT done. Exclude Stage 4 completed.
     try:
         q = supabase.table("tickets").select(
-            "id, status_4, quality_solution, staging_planned, live_review_status"
+            "id, type, status_4, quality_solution, staging_planned, live_review_status, company_name"
         ).in_("type", types_chores_bugs)
         r = q.execute()
         all_cb = r.data or []
@@ -1510,12 +1510,15 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     def _has_quality_solution(t: dict) -> bool:
         qs = t.get("quality_solution")
         return qs is not None and qs != "" and str(qs).lower() not in ("null", "none")
-    pending_till_date = sum(
-        1 for t in all_cb
-        if not _in_staging(t)
-        and not _stage4_completed(t)
-        and not _has_quality_solution(t)
-    )
+    def _is_pending(t: dict) -> bool:
+        return not _in_staging(t) and not _stage4_completed(t) and not _has_quality_solution(t)
+    def _company_demo_c(t: dict) -> bool:
+        cn = (t.get("company_name") or "").strip().lower()
+        return cn == "demo_c" or cn == "demo c"
+    pending_till_date = sum(1 for t in all_cb if _is_pending(t))
+    total_pending_bug_till_date = sum(1 for t in all_cb if _is_pending(t) and t.get("type") == "bug")
+    pending_till_date_exclude_demo_c = sum(1 for t in all_cb if _is_pending(t) and not _company_demo_c(t))
+    pending_chores_include_demo_c = sum(1 for t in all_cb if _is_pending(t) and t.get("type") == "chore" and _company_demo_c(t))
 
     # Last week Chores & Bug tickets (for response_delay / completion_delay)
     try:
@@ -1574,6 +1577,9 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     return {
         "all_tickets": all_tickets,
         "pending_till_date": pending_till_date,
+        "total_pending_bug_till_date": total_pending_bug_till_date,
+        "pending_till_date_exclude_demo_c": pending_till_date_exclude_demo_c,
+        "pending_chores_include_demo_c": pending_chores_include_demo_c,
         "response_delay": response_delay,
         "completion_delay": completion_delay,
         "total_last_week": total_last_week,
@@ -1581,6 +1587,104 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
         "staging_pending_feature": staging_pending_feature,
         "staging_pending_chores_bugs": staging_pending_chores_bugs,
     }
+
+
+@api_router.get("/dashboard/detail")
+def dashboard_detail(
+    metric: str = Query(..., description="total_pending_bug, response_delay, completion_delay, total_last_week, pending_exclude_demo_c, pending_chores_demo_c, staging_feature, staging_chores_bugs"),
+    auth: dict = Depends(get_current_user),
+):
+    """Return ticket list for a dashboard metric (clickable card). Same logic as dashboard metrics."""
+    from datetime import timedelta
+    now = datetime.utcnow()
+    week_ago = now - timedelta(days=7)
+    week_start = week_ago.replace(hour=0, minute=0, second=0, microsecond=0)
+    types_cb = ["chore", "bug"]
+    cols = "id, reference_no, title, description, type, status, company_name, assignee_id, created_at, query_arrival_at, query_response_at, status_4, quality_solution, staging_planned, live_review_status, actual_4"
+    result = []
+    try:
+        q = supabase.table("tickets").select(cols).in_("type", types_cb)
+        r = q.execute()
+        all_cb = r.data or []
+    except Exception:
+        all_cb = []
+    try:
+        qw = supabase.table("tickets").select(cols).in_("type", types_cb).gte("created_at", week_start.isoformat())
+        rw = qw.execute()
+        week_tickets = rw.data or []
+    except Exception:
+        week_tickets = []
+
+    def _stage4_done(t):
+        return str(t.get("status_4") or "").lower() == "completed"
+    def _in_staging(t):
+        if t.get("staging_planned"):
+            return str(t.get("live_review_status") or "").lower() != "completed"
+        return False
+    def _has_quality(t):
+        qs = t.get("quality_solution")
+        return qs is not None and qs != "" and str(qs).lower() not in ("null", "none")
+    def _is_pending_ticket(t):
+        return not _in_staging(t) and not _stage4_done(t) and not _has_quality(t)
+    def _company_demo_c_t(t):
+        cn = (t.get("company_name") or "").strip().lower()
+        return cn == "demo_c" or cn == "demo c"
+    def _completion_delay_ticket(t):
+        if not _stage4_done(t):
+            return False
+        created = t.get("created_at") or ""
+        actual4 = t.get("actual_4") or ""
+        if not created or not actual4:
+            return False
+        try:
+            c = datetime.fromisoformat(str(created).replace("Z", "+00:00"))
+            a = datetime.fromisoformat(str(actual4).replace("Z", "+00:00"))
+            if c.tzinfo is None:
+                c = c.replace(tzinfo=timezone.utc)
+            if a.tzinfo is None:
+                a = a.replace(tzinfo=timezone.utc)
+            return (a - c).total_seconds() / 86400 > 1
+        except Exception:
+            return False
+
+    def row(t):
+        return {
+            "id": t.get("id"),
+            "referenceNo": (t.get("reference_no") or "").strip() or "N/A",
+            "title": (t.get("title") or "").strip(),
+            "description": (t.get("description") or "").strip(),
+            "type": t.get("type"),
+            "company": (t.get("company_name") or "").strip() or "Unknown",
+            "status": t.get("status") or "",
+        }
+
+    if metric == "total_pending_bug":
+        result = [row(t) for t in all_cb if _is_pending_ticket(t) and t.get("type") == "bug"]
+    elif metric == "response_delay":
+        result = [row(t) for t in week_tickets if not t.get("assignee_id")]
+    elif metric == "completion_delay":
+        result = [row(t) for t in week_tickets if _completion_delay_ticket(t)]
+    elif metric == "total_last_week":
+        result = [row(t) for t in week_tickets]
+    elif metric == "pending_exclude_demo_c":
+        result = [row(t) for t in all_cb if _is_pending_ticket(t) and not _company_demo_c_t(t)]
+    elif metric == "pending_chores_demo_c":
+        result = [row(t) for t in all_cb if _is_pending_ticket(t) and t.get("type") == "chore" and _company_demo_c_t(t)]
+    elif metric in ("staging_feature", "staging_chores_bugs"):
+        try:
+            r = supabase.table("staging_deployments").select("ticket_id").eq("status", "pending").execute()
+            pending = r.data or []
+            ticket_ids = [d["ticket_id"] for d in pending if d.get("ticket_id")]
+            if ticket_ids:
+                r2 = supabase.table("tickets").select(cols).in_("id", ticket_ids).execute()
+                staging_tickets = r2.data or []
+                if metric == "staging_feature":
+                    result = [row(t) for t in staging_tickets if t.get("type") == "feature"]
+                else:
+                    result = [row(t) for t in staging_tickets if t.get("type") in ("chore", "bug")]
+        except Exception:
+            pass
+    return {"success": True, "metric": metric, "tickets": result, "total": len(result)}
 
 
 # ---------- Support Dashboard Stats (FMS-style: weekly, pending grouped, top companies, features) ----------
@@ -1635,6 +1739,12 @@ def _is_on_hold(status: str | None) -> bool:
     h = ("on hold", "on-hold", "hold", "paused", "waiting", "pending more info")
     s = (status or "").lower()
     return any(x in s for x in h)
+
+
+def _company_demo_c(t: dict) -> bool:
+    """True if ticket company is Demo C (exclude from PENDING CHORES)."""
+    cn = (t.get("company_name") or "").strip().lower()
+    return cn == "demo_c" or cn == "demo c"
 
 
 def _is_pending(status: str | None) -> bool:
@@ -1839,7 +1949,8 @@ def support_dashboard_stats(auth: dict = Depends(get_current_user)):
         company = (t.get("company_name") or "").strip() or "Unknown"
         item = {"company": company, "daysPending": days, "status": status, "isOnHold": _is_on_hold(status), "type": t.get("type")}
         if t.get("type") == "chore":
-            pending_chores.append(item)
+            if not _company_demo_c(t):
+                pending_chores.append(item)
         elif t.get("type") == "bug":
             pending_bugs.append(item)
     for t in all_tickets:
@@ -1969,6 +2080,8 @@ def support_dashboard_filtered(
         ttype = t.get("type")
         if category == "chores" and ttype != "chore":
             continue
+        if category == "chores" and _company_demo_c(t):
+            continue
         if category == "bugs" and ttype != "bug":
             continue
         days = _days_pending(t.get("query_arrival_at") or t.get("created_at"), t.get("resolved_at"))
@@ -1986,6 +2099,8 @@ def support_dashboard_filtered(
             match = True
         if match:
             result.append({
+                "id": t.get("id"),
+                "type": ttype,
                 "company": (t.get("company_name") or "").strip() or "Unknown",
                 "requestedPerson": (t.get("user_name") or "").strip() or "Not specified",
                 "status": status,
@@ -2049,6 +2164,7 @@ def support_dashboard_weekly_details(
         if ticket_type == "completion_delay" and not has_comp_delay:
             continue
         result.append({
+            "id": t.get("id"),
             "type": "Bug" if t.get("type") == "bug" else "Chore",
             "company": (t.get("company_name") or "").strip() or "Unknown",
             "requestedPerson": (t.get("user_name") or "").strip() or "Not specified",
@@ -2073,10 +2189,10 @@ def support_dashboard_feature_tickets(
     filter_type: str = Query("all", description="all or pending"),
     auth: dict = Depends(get_current_user),
 ):
-    """Feature tickets for Support Dashboard modal (all or pending only)."""
+    """Feature tickets for Support Dashboard modal (all or pending only). Sorted by priority: red (high/critical/urgent) first, then yellow (medium), then green (low), then no priority."""
     try:
         q = supabase.table("tickets").select(
-            "id, reference_no, title, description, type, status, company_name, user_name, created_at, query_arrival_at, resolved_at"
+            "id, reference_no, title, description, type, status, priority, company_name, user_name, created_at, query_arrival_at, resolved_at"
         ).eq("type", "feature")
         r = q.execute()
         tickets = r.data or []
@@ -2092,14 +2208,19 @@ def support_dashboard_feature_tickets(
         if filter_type == "pending" and status not in pending_statuses and not _is_pending(status):
             continue
         result.append({
+            "id": t.get("id"),
             "company": (t.get("company_name") or "").strip() or "Unknown",
             "requestedPerson": (t.get("user_name") or "").strip() or "Not specified",
             "status": status,
+            "priority": (t.get("priority") or "").strip().lower() or None,
             "referenceNo": (t.get("reference_no") or "").strip() or "N/A",
             "title": (t.get("title") or "").strip(),
             "description": (t.get("description") or "").strip() or "",
             "queryArrival": t.get("query_arrival_at") or t.get("created_at") or "",
         })
+    # Sort by priority: red (critical, urgent, high) first, then yellow (medium), then green (low), then no priority
+    _priority_order = {"critical": 0, "urgent": 0, "high": 0, "medium": 1, "low": 2}
+    result.sort(key=lambda x: _priority_order.get(x.get("priority") or "", 3))
     return {"success": True, "data": result, "totalRecords": len(result), "filterType": filter_type}
 
 
@@ -2458,7 +2579,7 @@ FREQUENCY_LABELS = {"D": "Daily", "W": "Weekly", "M": "Monthly", "Q": "Quarterly
 class CreateChecklistTaskRequest(BaseModel):
     task_name: str
     department: str
-    frequency: str  # D, W, M, Q, F, Y
+    frequency: str  # D, 2D, W, 2W, M, Q, F, Y
     start_date: str  # YYYY-MM-DD
 
 
@@ -2543,8 +2664,8 @@ def create_checklist_task(payload: CreateChecklistTaskRequest, auth: dict = Depe
     allowed = _get_checklist_departments()
     if payload.department not in allowed:
         raise HTTPException(400, f"Invalid department. Use one of: {allowed}")
-    if payload.frequency not in ("D", "W", "M", "Q", "F", "Y"):
-        raise HTTPException(400, "Frequency must be D, W, M, Q, F or Y")
+    if payload.frequency not in ("D", "2D", "W", "2W", "M", "Q", "F", "Y"):
+        raise HTTPException(400, "Frequency must be D, 2D, W, 2W, M, Q, F or Y")
     try:
         start_d = date.fromisoformat(payload.start_date)
     except ValueError:
@@ -2665,6 +2786,12 @@ def list_checklist_occurrences(
         except Exception:
             pass
         today = date.today()
+        # Fetch holidays once per year (avoid N*tasks DB calls)
+        holidays_by_year = {
+            today.year - 1: _get_holidays_for_year(today.year - 1),
+            today.year: _get_holidays_for_year(today.year),
+            today.year + 1: _get_holidays_for_year(today.year + 1),
+        }
         occurrences = []
         for task in tasks:
             t_id = task["id"]
@@ -2673,7 +2800,7 @@ def list_checklist_occurrences(
                 start = date.fromisoformat(start)
             freq = task.get("frequency", "D")
             for yr in [today.year - 1, today.year, today.year + 1]:
-                holidays = _get_holidays_for_year(yr)
+                holidays = holidays_by_year[yr]
                 is_holiday = lambda d, h=holidays: d in h
                 dates = get_occurrence_dates(start, freq, yr, is_holiday)
                 for d in dates:

@@ -1,34 +1,23 @@
-import { Typography, Row, Col, Card, Statistic, List, Tag, Button, Alert } from 'antd'
+import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Spin } from 'antd'
 import {
   FileTextOutlined,
   ClockCircleOutlined,
   WarningOutlined,
   CheckCircleOutlined,
-  ArrowRightOutlined,
   RocketOutlined,
 } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
-import { dashboardApi } from '../api/dashboard'
-import { ticketsApi } from '../api/tickets'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { dashboardApi, type DashboardDetailTicket } from '../api/dashboard'
+import { ticketsApi } from '../api/tickets'
 import { LoadingSpinner } from '../components/common/LoadingSpinner'
 import { PrintExport } from '../components/common/PrintExport'
-import { formatDateShort, TICKET_EXPORT_COLUMNS, buildTicketExportRow, getChoresBugsCurrentStage } from '../utils/helpers'
+import { TICKET_EXPORT_COLUMNS, buildTicketExportRow, getChoresBugsCurrentStage } from '../utils/helpers'
 import { ROUTES } from '../utils/constants'
 import type { Ticket } from '../api/tickets'
 import type { DashboardMetrics } from '../api/dashboard'
 
 const { Title, Text } = Typography
-
-const statusColors: Record<string, string> = {
-  open: '#3b82f6',
-  in_progress: '#eab308',
-  resolved: '#22c55e',
-  closed: '#6b7280',
-  overdue: '#ef4444',
-  pending: '#eab308',
-  completed: '#22c55e',
-}
 
 const lightPanel = {
   background: '#ffffff',
@@ -41,15 +30,20 @@ const metricCardColors = [
   { borderLeft: '3px solid #eab308', iconColor: '#eab308', ...lightPanel },
   { borderLeft: '3px solid #22c55e', iconColor: '#22c55e', ...lightPanel },
   { borderLeft: '3px solid #3b82f6', iconColor: '#3b82f6', ...lightPanel },
+  { borderLeft: '3px solid #8b5cf6', iconColor: '#8b5cf6', ...lightPanel },
 ]
 
 export const Dashboard = () => {
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
-  const [recentTickets, setRecentTickets] = useState<Ticket[]>([])
   const [allFetchedTickets, setAllFetchedTickets] = useState<Ticket[]>([])
   const [error, setError] = useState<string | null>(null)
-  const navigate = useNavigate()
+  const [detailModalOpen, setDetailModalOpen] = useState(false)
+  const [detailMetric, setDetailMetric] = useState<string | null>(null)
+  const [detailTitle, setDetailTitle] = useState('')
+  const [detailData, setDetailData] = useState<DashboardDetailTicket[]>([])
+  const [detailLoading, setDetailLoading] = useState(false)
 
   useEffect(() => {
     fetchData()
@@ -68,7 +62,6 @@ export const Dashboard = () => {
       const raw = ticketsResVal && typeof ticketsResVal === 'object' ? (ticketsResVal as { data?: unknown }).data : undefined
       const tickets: Ticket[] = Array.isArray(raw) ? raw as Ticket[] : []
       setAllFetchedTickets(tickets)
-      setRecentTickets(tickets.slice(0, 8))
     } catch (err) {
       console.error('Dashboard fetch error:', err)
       setError('Failed to load dashboard. Check backend connection.')
@@ -77,8 +70,6 @@ export const Dashboard = () => {
     }
   }
 
-  const goToChoresBugs = () => navigate(`${ROUTES.TICKETS}?section=chores-bugs`)
-
   if (loading) {
     return <LoadingSpinner fullPage />
   }
@@ -86,6 +77,9 @@ export const Dashboard = () => {
   const safeMetrics: DashboardMetrics = metrics ?? {
     all_tickets: 0,
     pending_till_date: 0,
+    total_pending_bug_till_date: 0,
+    pending_till_date_exclude_demo_c: 0,
+    pending_chores_include_demo_c: 0,
     response_delay: 0,
     completion_delay: 0,
     total_last_week: 0,
@@ -95,17 +89,44 @@ export const Dashboard = () => {
   }
 
   const metricCards = [
-    { title: 'Total Ticket (Current Month)', value: Number(safeMetrics.all_tickets) || 0, icon: <FileTextOutlined /> },
-    { title: 'Response Delay', value: Number(safeMetrics.response_delay) || 0, icon: <ClockCircleOutlined /> },
-    { title: 'Completion Delay', value: Number(safeMetrics.completion_delay) || 0, icon: <WarningOutlined /> },
-    { title: 'Total (Last Week)', value: Number(safeMetrics.total_last_week) || 0, icon: <FileTextOutlined /> },
-    { title: 'Pending (till date)', value: Number(safeMetrics.pending_till_date) || 0, icon: <CheckCircleOutlined /> },
+    { title: 'Total Pending Bug (till date)', metricKey: 'total_pending_bug', value: Number(safeMetrics.total_pending_bug_till_date) ?? 0, icon: <FileTextOutlined /> },
+    { title: 'Response Delay', metricKey: 'response_delay', value: Number(safeMetrics.response_delay) || 0, icon: <ClockCircleOutlined /> },
+    { title: 'Completion Delay', metricKey: 'completion_delay', value: Number(safeMetrics.completion_delay) || 0, icon: <WarningOutlined /> },
+    { title: 'Total (Last Week)', metricKey: 'total_last_week', value: Number(safeMetrics.total_last_week) || 0, icon: <FileTextOutlined /> },
+    { title: 'Pending (till date) Excl. Demo C', metricKey: 'pending_exclude_demo_c', value: Number(safeMetrics.pending_till_date_exclude_demo_c) ?? 0, icon: <CheckCircleOutlined /> },
+    { title: 'Pending Chores (Demo C)', metricKey: 'pending_chores_demo_c', value: Number(safeMetrics.pending_chores_include_demo_c) ?? 0, icon: <CheckCircleOutlined /> },
   ]
 
   const stagingCards = [
-    { title: 'Feature Pending', value: Number(safeMetrics.staging_pending_feature) || 0, icon: <RocketOutlined />, color: '#3b82f6' },
-    { title: 'Chores & Bug Pending', value: Number(safeMetrics.staging_pending_chores_bugs) || 0, icon: <FileTextOutlined />, color: '#22c55e' },
+    { title: 'Feature Pending', metricKey: 'staging_feature', value: Number(safeMetrics.staging_pending_feature) || 0, icon: <RocketOutlined />, color: '#3b82f6' },
+    { title: 'Chores & Bug Pending', metricKey: 'staging_chores_bugs', value: Number(safeMetrics.staging_pending_chores_bugs) || 0, icon: <FileTextOutlined />, color: '#22c55e' },
   ]
+
+  const loadDetail = async (metricKey: string, title: string) => {
+    setDetailMetric(metricKey)
+    setDetailTitle(title)
+    setDetailModalOpen(true)
+    setDetailLoading(true)
+    setDetailData([])
+    try {
+      const res = await dashboardApi.getDetail(metricKey)
+      setDetailData(res.tickets || [])
+    } catch {
+      setDetailData([])
+    } finally {
+      setDetailLoading(false)
+    }
+  }
+
+  const openTicket = (t: DashboardDetailTicket) => {
+    setDetailModalOpen(false)
+    const type = (t.type || '').toLowerCase()
+    if (type === 'feature') {
+      navigate(ROUTES.TICKETS + '?type=feature', { state: { openTicketId: t.id, openTicketType: 'feature' } })
+    } else {
+      navigate(ROUTES.TICKETS + '?section=chores-bugs', { state: { openTicketId: t.id, openTicketType: type === 'bug' ? 'bug' : 'chore' } })
+    }
+  }
 
   const exportData = allFetchedTickets.length
     ? {
@@ -141,20 +162,21 @@ export const Dashboard = () => {
         />
       )}
 
-      {/* Metric cards - static, informational only (non-clickable) */}
+      {/* Metric cards - clickable, open detail modal */}
       <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
         {metricCards.map((card, i) => {
           const cardStyle = metricCardColors[i] || metricCardColors[0]
           return (
             <Col xs={24} sm={12} md={8} lg={6} key={i}>
               <Card
+                onClick={() => loadDetail(card.metricKey, card.title)}
                 style={{
                   borderRadius: 8,
                   border: cardStyle.border,
                   borderLeft: cardStyle.borderLeft,
                   background: cardStyle.background,
                   boxShadow: cardStyle.boxShadow,
-                  cursor: 'default',
+                  cursor: 'pointer',
                 }}
                 bodyStyle={{ padding: 22 }}
               >
@@ -184,12 +206,14 @@ export const Dashboard = () => {
         {stagingCards.map((card, i) => (
           <Col xs={24} sm={12} key={`staging-${i}`}>
             <Card
+              onClick={() => loadDetail(card.metricKey, card.title)}
               style={{
                 borderRadius: 8,
                 border: '1px solid rgba(0, 0, 0, 0.06)',
                 boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)',
                 background: '#ffffff',
                 borderTop: `3px solid ${card.color}`,
+                cursor: 'pointer',
               }}
               bodyStyle={{ padding: 22 }}
             >
@@ -235,60 +259,82 @@ export const Dashboard = () => {
         </Col>
       </Row>
 
-      <Row gutter={[20, 20]} style={{ marginTop: 24 }}>
-        <Col xs={24} lg={12}>
-          <Card
-            title={<span style={{ color: '#1e293b', fontWeight: 600 }}>Average tickets created</span>}
-            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
-            bodyStyle={{ padding: 24, height: 200 }}
-          >
-            <Text style={{ color: '#64748b' }}>Based on recent Chores & Bug tickets</Text>
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
-          <Card
-            title={<span style={{ color: '#1e293b', fontWeight: 600 }}>Recent tickets (Chores & Bug)</span>}
-            extra={
-              <Button type="link" size="small" onClick={goToChoresBugs} style={{ fontWeight: 500, color: '#3b82f6' }}>
-                View all
-              </Button>
-            }
-            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
-            bodyStyle={{ padding: 0, maxHeight: 320, overflow: 'auto' }}
-          >
-            <List
-              dataSource={recentTickets}
-              locale={{ emptyText: 'No tickets yet' }}
-              renderItem={(item) => (
-                <List.Item
-                  style={{
-                    padding: '14px 24px',
-                    cursor: 'pointer',
-                    borderBottom: '1px solid #f0f0f0',
-                    transition: 'background 0.2s',
-                  }}
-                  onClick={() => navigate(`${ROUTES.TICKETS}/${item.id}`)}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#fafafa' }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent' }}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <Text strong style={{ display: 'block', fontSize: 14, whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                      {item.title}
-                    </Text>
-                    <Text type="secondary" style={{ fontSize: 12, whiteSpace: 'normal', wordBreak: 'break-word' }}>
-                      {formatDateShort(item.created_at)}
-                    </Text>
-                  </div>
-                  <Tag color={statusColors[item.status] || '#default'} style={{ marginRight: 8 }}>
-                    {item.status.replace('_', ' ')}
-                  </Tag>
-                  <ArrowRightOutlined style={{ color: '#bfbfbf', fontSize: 12 }} />
-                </List.Item>
-              )}
-            />
-          </Card>
-        </Col>
-      </Row>
+      <Modal
+        title={detailTitle}
+        open={detailModalOpen}
+        onCancel={() => { setDetailModalOpen(false); setDetailData([]) }}
+        footer={null}
+        width={800}
+      >
+        {detailLoading ? (
+          <div style={{ padding: 48, textAlign: 'center' }}>
+            <Spin size="large" />
+          </div>
+        ) : (
+          <Table
+            dataSource={detailData}
+            rowKey="id"
+            size="small"
+            pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `Total ${t} tickets` }}
+            scroll={{ x: 'max-content' }}
+            columns={[
+              {
+                title: 'Company',
+                dataIndex: 'company',
+                key: 'company',
+                width: 140,
+                onCell: () => ({ style: { whiteSpace: 'normal', wordBreak: 'break-word' } }),
+              },
+              {
+                title: <span style={{ fontWeight: 600 }}>Title & Description</span>,
+                key: 'title_description',
+                onCell: () => ({ style: { whiteSpace: 'pre-line', wordBreak: 'break-word' } }),
+                render: (_: unknown, record: DashboardDetailTicket) => {
+                  const wrapAfterWords = (text: string, n: number) =>
+                    text.trim().split(/\s+/).filter(Boolean).reduce<string[]>((lines, word, i) => {
+                      if (i % n === 0) lines.push(word)
+                      else lines[lines.length - 1] += ' ' + word
+                      return lines
+                    }, []).join('\n')
+                  return (
+                    <div style={{ whiteSpace: 'pre-line', wordBreak: 'break-word' }}>
+                      {record.title && <div style={{ fontWeight: 600 }}>{wrapAfterWords(record.title, 10)}</div>}
+                      {record.description && <div style={{ marginTop: 4, color: '#64748b', fontSize: 13 }}>{wrapAfterWords(record.description, 10)}</div>}
+                    </div>
+                  )
+                },
+              },
+              {
+                title: 'Reference',
+                dataIndex: 'referenceNo',
+                key: 'referenceNo',
+                width: 120,
+                onCell: () => ({ style: { whiteSpace: 'normal', wordBreak: 'break-word' } }),
+                render: (_: unknown, record: DashboardDetailTicket) => (
+                  <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openTicket(record)}>
+                    {record.referenceNo}
+                  </Button>
+                ),
+              },
+              {
+                title: 'Type',
+                dataIndex: 'type',
+                key: 'type',
+                width: 90,
+                onCell: () => ({ style: { whiteSpace: 'normal', wordBreak: 'break-word' } }),
+              },
+              {
+                title: 'Status',
+                dataIndex: 'status',
+                key: 'status',
+                width: 100,
+                onCell: () => ({ style: { whiteSpace: 'normal', wordBreak: 'break-word' } }),
+              },
+            ]}
+          />
+        )}
+      </Modal>
+
     </div>
   )
 }
