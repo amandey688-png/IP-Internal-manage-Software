@@ -992,7 +992,7 @@ export const TicketList = () => {
               allowClear
               getPopupContainer={() => document.body}
             >
-              <Option value="chore">Chore</Option>
+              <Option value="chore">Chores</Option>
               <Option value="bug">Bug</Option>
             </Select>
           ) : (

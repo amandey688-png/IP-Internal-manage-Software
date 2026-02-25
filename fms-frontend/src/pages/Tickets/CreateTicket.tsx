@@ -58,7 +58,7 @@ export const CreateTicket = () => {
             <Select>
               <Select.Option value="bug">Bug</Select.Option>
               <Select.Option value="feature">Feature</Select.Option>
-              <Select.Option value="chore">Chore</Select.Option>
+              <Select.Option value="chore">Chores</Select.Option>
             </Select>
           </Form.Item>
           <Form.Item name="priority" label="Priority">
