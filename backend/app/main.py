@@ -455,6 +455,21 @@ def login(payload: LoginRequest):
     password = payload.password
     result = None
 
+    def _is_connection_error(e: Exception) -> bool:
+        err = str(e).lower()
+        return (
+            "10060" in err or "timeout" in err or "timed out" in err
+            or "connection" in err and ("refused" in err or "failed" in err or "reset" in err)
+            or "cannot connect" in err or "failed to respond" in err
+        )
+
+    def _connection_error_detail(e: Exception) -> str:
+        return (
+            "Cannot reach Supabase. Check: (1) Supabase project is not paused, "
+            "(2) SUPABASE_URL and keys in backend/.env are correct, "
+            "(3) Firewall/antivirus allows outbound HTTPS. See SUPABASE_SETUP_GUIDE.md."
+        )
+
     try:
         # Try ANON_KEY client first (recommended for sign_in)
         result = supabase_auth.auth.sign_in_with_password({
@@ -463,6 +478,8 @@ def login(payload: LoginRequest):
         })
     except Exception as e1:
         print(f"Login (anon) error: {e1}")
+        if _is_connection_error(e1):
+            raise HTTPException(status_code=503, detail=_connection_error_detail(e1))
         try:
             # Fallback: try SERVICE_ROLE client
             result = supabase.auth.sign_in_with_password({
@@ -471,6 +488,8 @@ def login(payload: LoginRequest):
             })
         except Exception as e2:
             print(f"Login (service_role) error: {e2}")
+            if _is_connection_error(e2):
+                raise HTTPException(status_code=503, detail=_connection_error_detail(e2))
             err = str(e2).lower()
             if "invalid" in err or "login" in err or "credentials" in err:
                 raise HTTPException(
@@ -549,6 +568,8 @@ def login(payload: LoginRequest):
     except Exception as e:
         err = str(e).lower()
         print(f"Login (profile) error: {e}")
+        if _is_connection_error(e):
+            raise HTTPException(status_code=503, detail=_connection_error_detail(e))
         if "invalid" in err or "login" in err or "credentials" in err:
             raise HTTPException(status_code=401, detail="Invalid email or password")
         if "profile" in err or "404" in err:
@@ -973,14 +994,18 @@ def list_tickets(
         types_list = ["chore", "bug"] if type_filter not in ("chore", "bug") else [type_filter]
         q = q.in_("type", types_list)
         q = q.is_("quality_solution", "null")
-        if status_2_filter and status_2_filter.lower() in ("pending", "completed", "staging", "hold"):
-            q = q.eq("status_2", status_2_filter.lower())
-            # When filtering by staging: include chore/bug with status_2=staging (override staging exclusion)
-            if status_2_filter.lower() != "staging":
-                q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
-                q = q.or_("status_2.is.null,status_2.neq.staging")
+        if status_2_filter and status_2_filter.strip():
+            status_2_val = status_2_filter.lower().strip()
+            # Filter by Stage 2 status: only show tickets matching selected status; no match = blank list
+            if status_2_val in ("pending", "completed", "staging", "hold", "na", "rejected"):
+                q = q.eq("status_2", status_2_val)
+                if status_2_val != "staging":
+                    q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
+                    q = q.or_("status_2.is.null,status_2.neq.staging")
+            else:
+                q = q.eq("status_2", status_2_val)
         else:
-            # Exclude tickets in Staging (new workflow or old status_2 = staging)
+            # No status filter: exclude tickets in Staging (new workflow or old status_2 = staging)
             q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
             q = q.or_("status_2.is.null,status_2.neq.staging")
     elif apply_section_filter and section == "approval-status":
