@@ -89,7 +89,7 @@ export const authApi = {
       const response = await apiClient.post<LoginResponse>(
         '/auth/login',
         data,
-        { timeout: 60000 }
+        { timeout: 90000 }
       )
 
       return {
@@ -111,7 +111,7 @@ export const authApi = {
           err.code === 'ECONNABORTED'
             ? (isLocalBackend
                 ? `Login timed out. Is the backend running on port 8000? Run: cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000`
-                : `Login timed out (60s). ${hint}`)
+                : `Login timed out (90s). ${hint}`)
             : err.message?.includes('Network Error') || err.code === 'ERR_NETWORK'
               ? `Cannot reach server. ${hint}`
               : `Connection failed: ${err.message || 'Backend not reachable'}. ${hint}`
