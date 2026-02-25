@@ -17,6 +17,7 @@ except (ImportError, ModuleNotFoundError):
     sys.modules['storage3'] = storage3_mock
     sys.modules['storage3.utils'] = storage3_mock.utils
 
+import httpx
 from supabase import create_client, Client, ClientOptions
 
 # 🔐 Supabase credentials (from .env)
@@ -24,8 +25,17 @@ SUPABASE_URL = os.getenv("SUPABASE_URL", "https://geqcgxassdkrymzsjpoj.supabase.
 SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
 
+# Longer timeout (60s) to avoid login timeout on slow networks or local dev
+_supabase_timeout = 60.0
+_http_client = httpx.Client(timeout=_supabase_timeout)
+
 # Backend options - no session persistence for server-side
-_backend_opts = ClientOptions(auto_refresh_token=False, persist_session=False)
+_backend_opts = ClientOptions(
+    auto_refresh_token=False,
+    persist_session=False,
+    postgrest_client_timeout=_supabase_timeout,
+    httpx_client=_http_client,
+)
 
 # Main client: SERVICE_ROLE for admin ops (create_user, list_users, etc)
 SUPABASE_KEY = SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY

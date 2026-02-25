@@ -112,11 +112,18 @@ async def log_requests(request: Request, call_next):
                 detail = "Registration failed"
         return JSONResponse(status_code=400, content={"detail": detail})
 
-# Global exception handler - convert ALL errors to 400 with message (never 500)
+# Global exception handler - convert ALL errors to 4xx with message (never 500)
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     from fastapi import HTTPException
     if isinstance(exc, HTTPException):
+        # Never expose 500 to users - convert 5xx to 400 with detail
+        if exc.status_code >= 500:
+            _log(f"!!! 5xx converted to 400: {exc.detail}")
+            return JSONResponse(
+                status_code=400,
+                content={"detail": exc.detail if isinstance(exc.detail, str) else str(exc.detail)[:200]},
+            )
         raise exc
     _log(f"!!! UNHANDLED: {type(exc).__name__}: {exc}")
     import traceback

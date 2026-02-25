@@ -379,7 +379,7 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
             onChange={handleTypeChange}
           />
         </Form.Item>
-        <Form.Item name="communicated_through" label="Communicated Through" rules={[{ required: true, message: 'Required' }]}>
+        <Form.Item name="communicated_through" label="CT" rules={[{ required: true, message: 'Required' }]}>
           <Select
             placeholder="Select"
             options={[
