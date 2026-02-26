@@ -948,6 +948,7 @@ def list_tickets(
     type: str | None = None,
     types_in: str | None = None,
     company_id: str | None = None,
+    company_ids: list[str] | None = Query(None, description="Filter by multiple company IDs"),
     priority: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
@@ -1031,7 +1032,11 @@ def list_tickets(
             q = q.not_.is_("approval_status", "null")
             q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
             q = q.or_("live_status.is.null,live_status.neq.completed")
-    if company_id:
+    if company_ids:
+        ids = [x.strip() for x in company_ids if x and x.strip()]
+        if ids:
+            q = q.in_("company_id", ids)
+    elif company_id:
         q = q.eq("company_id", company_id)
     if priority:
         q = q.eq("priority", priority)

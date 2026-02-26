@@ -159,6 +159,7 @@ export const ticketsApi = {
     section?: string
     approval_filter?: string
     company_id?: string
+    company_ids?: string[]
     priority?: string
     date_from?: string
     date_to?: string
