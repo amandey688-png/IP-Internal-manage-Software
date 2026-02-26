@@ -92,7 +92,7 @@ export const TicketList = () => {
     status: '',
     type: typeFromUrl,
     types_in: sectionFromUrl === 'chores-bugs' ? 'chore,bug' : sectionFromUrl === 'completed-chores-bugs' ? 'chore,bug' : '',
-    company_id: '',
+    company_ids: [] as string[],
     priority: '',
     date_from: '',
     date_to: '',
@@ -228,7 +228,7 @@ export const TicketList = () => {
         ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
         ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
         ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
-        ...(filters.company_id && { company_id: filters.company_id }),
+        ...(filters.company_ids?.length ? { company_ids: filters.company_ids } : {}),
         ...(!isChoresBugsSection && filters.priority && { priority: filters.priority }),
         ...(filters.date_from && { date_from: filters.date_from }),
         ...(filters.date_to && { date_to: filters.date_to }),
@@ -267,7 +267,7 @@ export const TicketList = () => {
         ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
         ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
         ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
-        ...(filters.company_id && { company_id: filters.company_id }),
+        ...(filters.company_ids?.length ? { company_ids: filters.company_ids } : {}),
         ...(!isChoresBugsSection && filters.priority && { priority: filters.priority }),
         ...(filters.date_from && { date_from: filters.date_from }),
         ...(filters.date_to && { date_to: filters.date_to }),
@@ -931,19 +931,18 @@ export const TicketList = () => {
             />
           )}
           <Select
+            mode="multiple"
             placeholder="Company"
-            style={{ width: 150 }}
-            value={filters.company_id || undefined}
-            onChange={(v) => setFilters((f) => ({ ...f, company_id: v || '' }))}
+            style={{ width: 220 }}
+            value={filters.company_ids?.length ? filters.company_ids : undefined}
+            onChange={(v) => setFilters((f) => ({ ...f, company_ids: Array.isArray(v) ? v : [] }))}
             allowClear
+            showSearch
+            optionFilterProp="label"
+            filterOption={(input, opt) => (opt?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())}
             getPopupContainer={() => document.body}
-          >
-            {companies.map((c) => (
-              <Option key={c.id} value={c.id}>
-                {c.name}
-              </Option>
-            ))}
-          </Select>
+            options={companies.map((c) => ({ value: c.id, label: c.name }))}
+          />
           {isChoresBugsSection ? (
             <Select
               placeholder="Status"

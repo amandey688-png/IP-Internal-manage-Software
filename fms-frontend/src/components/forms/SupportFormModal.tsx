@@ -279,6 +279,7 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
             placeholder="Select company"
             showSearch
             optionFilterProp="label"
+            filterOption={(input, opt) => (opt?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())}
             options={companies.map((c) => ({ value: c.id, label: c.name }))}
           />
         </Form.Item>
