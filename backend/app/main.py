@@ -255,7 +255,7 @@ def health_supabase():
         return out
     try:
         # Quick HTTPS reachability (no auth)
-        r = httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=10.0)
+        r = httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=25.0)
         out["reachable"] = "ok" if r.status_code in (200, 301, 302, 404, 401) else f"status_{r.status_code}"
     except Exception as e:
         err_str = str(e).lower()
@@ -509,9 +509,11 @@ def _connection_error_detail(e: Exception) -> str:
     return base + _supabase_unpause_link() + " Tip: Open GET /health/supabase in browser to see the exact error."
 
 
-def _retry_supabase_call(fn, max_attempts: int = 3, delay_sec: float = 2.0):
-    """Retry a call that may fail due to transient connection issues."""
+def _retry_supabase_call(fn, max_attempts: int = 5, delay_secs: list[float] | None = None):
+    """Retry a call that may fail due to transient connection issues (e.g. Supabase waking from pause)."""
     import time
+    if delay_secs is None:
+        delay_secs = [5, 10, 20, 30]  # Waits after attempts 0..3; total ~65s for project wake-up
     last_exc = None
     for attempt in range(max_attempts):
         try:
@@ -519,8 +521,10 @@ def _retry_supabase_call(fn, max_attempts: int = 3, delay_sec: float = 2.0):
         except Exception as e:
             last_exc = e
             _log(f"Supabase attempt {attempt + 1}/{max_attempts} failed: {type(e).__name__}: {e}")
-            if attempt < max_attempts - 1:
-                time.sleep(delay_sec)
+            if attempt < max_attempts - 1 and attempt < len(delay_secs):
+                d = delay_secs[attempt]
+                if d > 0:
+                    time.sleep(d)
     raise last_exc
 
 
@@ -533,21 +537,23 @@ def login(payload: LoginRequest):
     password = payload.password
     result = None
 
-    # Pre-check: if Supabase is unreachable, return 503. One retry after 3s (handles project waking from pause).
+    # Pre-check: if Supabase is unreachable, return 503. Retry up to 4 times with longer waits (handles project waking from pause).
     url = (os.getenv("SUPABASE_URL") or "").strip()
     if url and url.startswith("https://"):
         import time
-        pre_ok = False
-        for pre_attempt in range(2):
+        pre_delays = [0, 8, 20, 45]  # Waits between attempts; total ~73s for project wake-up
+        last_pre_e = None
+        for pre_attempt in range(4):
             try:
-                httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=10.0)
-                pre_ok = True
+                httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=25.0)
                 break
             except Exception as pre_e:
+                last_pre_e = pre_e
                 if not _is_connection_error(pre_e):
-                    break
-                if pre_attempt == 0:
-                    time.sleep(3)
+                    raise HTTPException(status_code=503, detail=_connection_error_detail(pre_e))
+                if pre_attempt < 3:
+                    _log(f"Supabase pre-check attempt {pre_attempt + 1}/4 failed, retrying in {pre_delays[pre_attempt + 1]}s...")
+                    time.sleep(pre_delays[pre_attempt + 1])
                 else:
                     raise HTTPException(status_code=503, detail=_connection_error_detail(pre_e))
 

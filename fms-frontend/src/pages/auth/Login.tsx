@@ -25,9 +25,11 @@ export const Login = () => {
   const navigate = useNavigate()
   const { login } = useAuth()
 
-  const attemptLogin = async (values: LoginRequest, isRetry = false) => {
+  const RETRY_DELAYS_MS = [8000, 25000] // First retry after 8s, second after 25s (handles Supabase wake-up)
+
+  const attemptLogin = async (values: LoginRequest, retryCount = 0) => {
     setLoading(true)
-    if (!isRetry) setConnectionError(null)
+    if (retryCount === 0) setConnectionError(null)
     try {
       const response = await authApi.login(values)
 
@@ -37,15 +39,15 @@ export const Login = () => {
         const isConnectionError =
           response.error.code === '503' ||
           (msg.includes('Cannot reach') && !msg.toLowerCase().includes('invalid login'))
-        if (isConnectionError) {
+        if (isConnectionError && retryCount < RETRY_DELAYS_MS.length) {
           setConnectionError(msg)
-          if (!isRetry) {
-            setLoading(false)
-            message.info('Retrying in 8 seconds in case Supabase is waking up...', 8)
-            setTimeout(() => attemptLogin(values, true), 8000)
-            return
-          }
+          setLoading(false)
+          const delay = RETRY_DELAYS_MS[retryCount]
+          message.info(`Retrying in ${delay / 1000}s (attempt ${retryCount + 2}/${RETRY_DELAYS_MS.length + 1})...`, delay / 1000)
+          setTimeout(() => attemptLogin(values, retryCount + 1), delay)
+          return
         }
+        if (isConnectionError) setConnectionError(msg)
         return
       }
 
@@ -69,21 +71,21 @@ export const Login = () => {
       const isConnectionError =
         error.response?.status === 503 ||
         (errorMessage.includes('Cannot reach') && !errorMessage.toLowerCase().includes('invalid login'))
-      if (isConnectionError) {
+      if (isConnectionError && retryCount < RETRY_DELAYS_MS.length) {
         setConnectionError(errorMessage)
-        if (!isRetry) {
-          setLoading(false)
-          message.info('Retrying in 8 seconds in case Supabase is waking up...', 8)
-          setTimeout(() => attemptLogin(values, true), 8000)
-          return
-        }
+        setLoading(false)
+        const delay = RETRY_DELAYS_MS[retryCount]
+        message.info(`Retrying in ${delay / 1000}s (attempt ${retryCount + 2}/${RETRY_DELAYS_MS.length + 1})...`, delay / 1000)
+        setTimeout(() => attemptLogin(values, retryCount + 1), delay)
+        return
       }
+      if (isConnectionError) setConnectionError(errorMessage)
     } finally {
       setLoading(false)
     }
   }
 
-  const onFinish = (values: LoginRequest) => attemptLogin(values, false)
+  const onFinish = (values: LoginRequest) => attemptLogin(values, 0)
 
   return (
     <AuthLayout variant="login">
