@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Form, Input, Button, message } from 'antd'
+import { Form, Input, Button, message, Alert } from 'antd'
 import { MailOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { authApi } from '../../api/auth'
@@ -8,6 +8,7 @@ import { storage } from '../../utils/storage'
 import { AuthLayout } from '../../components/auth/AuthLayout'
 import { ROUTES } from '../../utils/constants'
 import { useAuth } from '../../hooks/useAuth'
+import { API_BASE_URL } from '../../api/axios'
 import type { LoginRequest } from '../../types/auth'
 
 const colors = {
@@ -20,16 +21,31 @@ const colors = {
 export const Login = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
+  const [connectionError, setConnectionError] = useState<string | null>(null)
   const navigate = useNavigate()
   const { login } = useAuth()
 
-  const onFinish = async (values: LoginRequest) => {
+  const attemptLogin = async (values: LoginRequest, isRetry = false) => {
     setLoading(true)
+    if (!isRetry) setConnectionError(null)
     try {
       const response = await authApi.login(values)
 
       if (response.error) {
-        message.error(response.error.message || 'Invalid email or password')
+        const msg = response.error.message || 'Invalid email or password'
+        message.error(msg)
+        const isConnectionError =
+          response.error.code === '503' ||
+          (msg.includes('Cannot reach') && !msg.toLowerCase().includes('invalid login'))
+        if (isConnectionError) {
+          setConnectionError(msg)
+          if (!isRetry) {
+            setLoading(false)
+            message.info('Retrying in 8 seconds in case Supabase is waking up...', 8)
+            setTimeout(() => attemptLogin(values, true), 8000)
+            return
+          }
+        }
         return
       }
 
@@ -46,13 +62,28 @@ export const Login = () => {
       }
     } catch (error: any) {
       const errorMessage =
+        error.response?.data?.detail ||
         error.response?.data?.error?.message ||
         'Login failed. Please check your credentials.'
       message.error(errorMessage)
+      const isConnectionError =
+        error.response?.status === 503 ||
+        (errorMessage.includes('Cannot reach') && !errorMessage.toLowerCase().includes('invalid login'))
+      if (isConnectionError) {
+        setConnectionError(errorMessage)
+        if (!isRetry) {
+          setLoading(false)
+          message.info('Retrying in 8 seconds in case Supabase is waking up...', 8)
+          setTimeout(() => attemptLogin(values, true), 8000)
+          return
+        }
+      }
     } finally {
       setLoading(false)
     }
   }
+
+  const onFinish = (values: LoginRequest) => attemptLogin(values, false)
 
   return (
     <AuthLayout variant="login">
@@ -61,6 +92,41 @@ export const Login = () => {
           Welcome back!
         </h1>
 
+        {connectionError && (
+          <Alert
+            type="error"
+            showIcon
+            message="Connection problem"
+            description={
+              <>
+                <div style={{ marginBottom: 8 }}>{connectionError}</div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+                  <Button
+                    type="primary"
+                    size="small"
+                    onClick={() => {
+                      const values = form.getFieldsValue()
+                      if (values?.email && values?.password) {
+                        setConnectionError(null)
+                        attemptLogin(values as LoginRequest, false)
+                      } else {
+                        message.warning('Enter email and password first')
+                      }
+                    }}
+                  >
+                    Retry login
+                  </Button>
+                  <a href={`${API_BASE_URL}/health/supabase`} target="_blank" rel="noopener noreferrer">
+                    Open connection diagnostic (new tab)
+                  </a>
+                </div>
+              </>
+            }
+            closable
+            onClose={() => setConnectionError(null)}
+            style={{ marginBottom: 24 }}
+          />
+        )}
         <Form
           form={form}
           name="login"

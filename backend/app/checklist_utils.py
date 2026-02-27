@@ -170,3 +170,25 @@ def _yearly(start: date, year: int, is_holiday: Callable[[date], bool]) -> list[
     if d >= start:
         return [_ensure_working(d, is_holiday)]
     return []
+
+
+def get_occurrence_dates_in_range(
+    task_start: date,
+    frequency: str,
+    range_start: date,
+    range_end: date,
+    is_holiday: Callable[[date], bool],
+) -> list[date]:
+    """
+    Generate occurrence dates only within [range_start, range_end].
+    Use this for fast checklist loading: e.g. for 'today' pass (today, today).
+    """
+    if range_start > range_end:
+        return []
+    out = []
+    for year in range(range_start.year, range_end.year + 1):
+        dates = get_occurrence_dates(task_start, frequency, year, is_holiday)
+        for d in dates:
+            if range_start <= d <= range_end:
+                out.append(d)
+    return sorted(set(out))

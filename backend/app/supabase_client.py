@@ -20,10 +20,21 @@ except (ImportError, ModuleNotFoundError):
 import httpx
 from supabase import create_client, Client, ClientOptions
 
-# 🔐 Supabase credentials (from .env)
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://geqcgxassdkrymzsjpoj.supabase.co")
-SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+# 🔐 Supabase credentials (from .env) - ensure backend/.env is loaded even when run from project root
+_backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_env_file = os.path.join(_backend_dir, ".env")
+if os.path.exists(_env_file):
+    load_dotenv(_env_file)
+
+SUPABASE_URL = (os.getenv("SUPABASE_URL") or "").strip() or "https://geqcgxassdkrymzsjpoj.supabase.co"
+SUPABASE_SERVICE_ROLE_KEY = (os.getenv("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+SUPABASE_ANON_KEY = (os.getenv("SUPABASE_ANON_KEY") or "").strip()
+
+# Keys must be JWTs (eyJ...) for auth to work; sb_secret_... will not work for login
+def _key_ok(key: str) -> bool:
+    if not key or len(key) < 50:
+        return False
+    return key.strip().startswith("eyJ")
 
 # Longer timeout (60s) to avoid login timeout on slow networks or local dev
 _supabase_timeout = 60.0
@@ -45,7 +56,54 @@ supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY, options=_backend_op
 _auth_key = SUPABASE_ANON_KEY or SUPABASE_KEY
 supabase_auth: Client = create_client(SUPABASE_URL, _auth_key, options=_backend_opts)
 
+# Startup check: warn if keys are missing or wrong format (so login doesn't fail silently)
 if not SUPABASE_SERVICE_ROLE_KEY:
-    print("⚠️  Set SUPABASE_SERVICE_ROLE_KEY in .env (Supabase → Settings → API → service_role)")
+    print("⚠️  SUPABASE_SERVICE_ROLE_KEY is missing in backend/.env — add the service_role JWT (starts with eyJ)")
+elif not _key_ok(SUPABASE_SERVICE_ROLE_KEY):
+    print("⚠️  SUPABASE_SERVICE_ROLE_KEY should be a JWT starting with eyJ — not sb_secret_... (copy from Supabase → API)")
 if not SUPABASE_ANON_KEY:
-    print("⚠️  Set SUPABASE_ANON_KEY in .env (Supabase → Settings → API → anon public)")
+    print("⚠️  SUPABASE_ANON_KEY is missing in backend/.env — add the anon public JWT (starts with eyJ)")
+elif not _key_ok(SUPABASE_ANON_KEY):
+    print("⚠️  SUPABASE_ANON_KEY should be a full JWT starting with eyJ — re-copy from Supabase → API")
+
+# Optional: connectivity check on startup with retries (paused projects often wake up after 10–60s).
+# Run in a background thread so the server starts immediately and can accept requests; check runs without blocking.
+def _startup_supabase_check():
+    import time
+    url = SUPABASE_URL.rstrip("/")
+    project_ref = ""
+    if ".supabase.co" in url:
+        try:
+            project_ref = url.replace("https://", "").replace("http://", "").split(".supabase.co")[0].strip()
+        except Exception:
+            pass
+    unpause_msg = f" Unpause: https://supabase.com/dashboard/project/{project_ref}/settings/general" if project_ref else ""
+    delays = [0, 5, 15, 30]
+    last_e = None
+    for attempt, delay in enumerate(delays):
+        if delay > 0:
+            time.sleep(delay)
+        try:
+            r = httpx.get(f"{url}/rest/v1/", timeout=20.0)
+            if r.status_code in (200, 301, 302, 401, 404):
+                print("✓ Supabase reachable — login should work if keys are correct.")
+                return
+            last_e = f"HTTP {r.status_code}"
+        except Exception as e:
+            last_e = e
+            if attempt < len(delays) - 1:
+                print(f"⚠️  Supabase not reachable (attempt {attempt + 1}/{len(delays)}). Retrying in {delays[attempt + 1]}s...")
+            else:
+                print(f"⚠️  Supabase not reachable after {len(delays)} attempts: {type(e).__name__}.{unpause_msg}")
+                print("   Fix .env or network, then restart. Or open GET /health/supabase in browser for details.")
+    if last_e:
+        print(f"⚠️  Supabase returned {last_e}.{unpause_msg}")
+
+
+def _run_startup_check_in_background():
+    import threading
+    t = threading.Thread(target=_startup_supabase_check, daemon=True)
+    t.start()
+
+
+_run_startup_check_in_background()

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   Card,
   Typography,
@@ -43,6 +43,7 @@ export const DelegationPage = () => {
   const [modalOpen, setModalOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string>('pending')
   const [userFilter, setUserFilter] = useState<string | undefined>(undefined)
+  const initialUserFilterSet = useRef(false)
   const [referenceNoFilter, setReferenceNoFilter] = useState<string>('__all__')
   const [completeModalTask, setCompleteModalTask] = useState<DelegationTask | null>(null)
   const [completeDocumentUrl, setCompleteDocumentUrl] = useState<string | null>(null)
@@ -61,11 +62,23 @@ export const DelegationPage = () => {
     }
   }, [canManage, user?.id, user?.full_name, user?.email])
 
+  // Default task filter to logged-in user (so first load shows "my tasks"); admins can change to another user or All
+  useEffect(() => {
+    if (canManage && user?.id && !initialUserFilterSet.current) {
+      setUserFilter(user.id)
+      initialUserFilterSet.current = true
+    }
+  }, [canManage, user?.id])
+
   const loadTasks = () => {
     setLoading(true)
     const params: { status?: string; assignee_id?: string } = {}
     params.status = statusFilter
-    if (canManage && userFilter && userFilter !== '__all__') params.assignee_id = userFilter
+    if (canManage) {
+      if (userFilter === '__all__') params.assignee_id = '__all__'
+      else if (userFilter) params.assignee_id = userFilter
+      // else no assignee_id: backend defaults to logged-in user's tasks
+    }
     delegationApi
       .getTasks(params)
       .then((r) => setTasks(r.tasks || []))
