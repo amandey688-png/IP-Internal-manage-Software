@@ -238,19 +238,50 @@ def register_test():
 
 @app.get("/health/supabase")
 def health_supabase():
-    """Test Supabase connection - auth + database"""
-    out = {"supabase_url": os.getenv("SUPABASE_URL", "")[:50] + "...", "auth": "unknown", "db": "unknown"}
+    """Test Supabase connection. Open in browser to see why login fails."""
+    url = os.getenv("SUPABASE_URL", "")
+    out = {
+        "supabase_url_set": bool(url and url.startswith("https://")),
+        "anon_key_set": bool(os.getenv("SUPABASE_ANON_KEY", "").strip()),
+        "service_role_key_set": bool(os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()),
+        "reachable": "unknown",
+        "auth": "unknown",
+        "db": "unknown",
+        "hint": None,
+    }
+    err_str = ""
+    if not url or not url.strip().startswith("https://"):
+        out["hint"] = "Set SUPABASE_URL in backend/.env (e.g. https://xxxx.supabase.co)"
+        return out
     try:
-        # Test auth - list users (requires service_role)
+        # Quick HTTPS reachability (no auth)
+        r = httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=10.0)
+        out["reachable"] = "ok" if r.status_code in (200, 301, 302, 404, 401) else f"status_{r.status_code}"
+    except Exception as e:
+        err_str = str(e).lower()
+        out["reachable"] = "error"
+        if "10060" in str(e) or "timeout" in err_str or "timed out" in err_str:
+            out["hint"] = "Connection timeout. Unpause Supabase project or check firewall/network."
+        elif "refused" in err_str or "connection" in err_str:
+            out["hint"] = "Connection refused or failed. Check SUPABASE_URL and network."
+        elif "name or service not known" in err_str or "nodename" in err_str:
+            out["hint"] = "DNS failed. Check SUPABASE_URL (e.g. https://xxxx.supabase.co)."
+        else:
+            out["hint"] = str(e)[:200]
+        out["unpause_link"] = _supabase_unpause_link().strip() or None
+        return out
+    try:
         supabase.auth.admin.list_users(per_page=1)
         out["auth"] = "ok"
     except Exception as e:
-        out["auth"] = f"error: {str(e)[:150]}"
+        out["auth"] = "error"
+        out["hint"] = out["hint"] or str(e)[:200]
     try:
         supabase.table("roles").select("id").limit(1).execute()
         out["db"] = "ok"
     except Exception as e:
-        out["db"] = f"error: {str(e)[:150]}"
+        out["db"] = "error"
+        out["hint"] = out["hint"] or str(e)[:200]
     return out
 
 
@@ -446,6 +477,53 @@ def _do_register(payload: RegisterRequest):
         return JSONResponse(status_code=400, content={"detail": safe_msg})
 
 
+def _is_connection_error(e: Exception) -> bool:
+    err = str(e).lower()
+    return (
+        "10060" in err or "timeout" in err or "timed out" in err
+        or "connection" in err and ("refused" in err or "failed" in err or "reset" in err)
+        or "cannot connect" in err or "failed to respond" in err
+        or "name or service not known" in err or "nodename nor servname" in err
+    )
+
+
+def _supabase_unpause_link() -> str:
+    """Direct link to unpause project (free tier pauses after inactivity)."""
+    url = (os.getenv("SUPABASE_URL") or "").strip()
+    if ".supabase.co" in url:
+        try:
+            ref = url.replace("https://", "").replace("http://", "").split(".supabase.co")[0].strip()
+            if ref:
+                return f" Unpause: https://supabase.com/dashboard/project/{ref}/settings/general"
+        except Exception:
+            pass
+    return ""
+
+
+def _connection_error_detail(e: Exception) -> str:
+    base = (
+        "Cannot reach Supabase. Check: (1) Supabase project is not paused, "
+        "(2) SUPABASE_URL and keys in backend/.env are correct, "
+        "(3) Firewall/antivirus allows outbound HTTPS. See SUPABASE_SETUP_GUIDE.md. "
+    )
+    return base + _supabase_unpause_link() + " Tip: Open GET /health/supabase in browser to see the exact error."
+
+
+def _retry_supabase_call(fn, max_attempts: int = 3, delay_sec: float = 2.0):
+    """Retry a call that may fail due to transient connection issues."""
+    import time
+    last_exc = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:
+            last_exc = e
+            _log(f"Supabase attempt {attempt + 1}/{max_attempts} failed: {type(e).__name__}: {e}")
+            if attempt < max_attempts - 1:
+                time.sleep(delay_sec)
+    raise last_exc
+
+
 @api_router.post("/auth/login", response_model=LoginResponse)
 def login(payload: LoginRequest):
     """
@@ -455,37 +533,37 @@ def login(payload: LoginRequest):
     password = payload.password
     result = None
 
-    def _is_connection_error(e: Exception) -> bool:
-        err = str(e).lower()
-        return (
-            "10060" in err or "timeout" in err or "timed out" in err
-            or "connection" in err and ("refused" in err or "failed" in err or "reset" in err)
-            or "cannot connect" in err or "failed to respond" in err
-        )
-
-    def _connection_error_detail(e: Exception) -> str:
-        return (
-            "Cannot reach Supabase. Check: (1) Supabase project is not paused, "
-            "(2) SUPABASE_URL and keys in backend/.env are correct, "
-            "(3) Firewall/antivirus allows outbound HTTPS. See SUPABASE_SETUP_GUIDE.md."
-        )
+    # Pre-check: if Supabase is unreachable, return 503. One retry after 3s (handles project waking from pause).
+    url = (os.getenv("SUPABASE_URL") or "").strip()
+    if url and url.startswith("https://"):
+        import time
+        pre_ok = False
+        for pre_attempt in range(2):
+            try:
+                httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=10.0)
+                pre_ok = True
+                break
+            except Exception as pre_e:
+                if not _is_connection_error(pre_e):
+                    break
+                if pre_attempt == 0:
+                    time.sleep(3)
+                else:
+                    raise HTTPException(status_code=503, detail=_connection_error_detail(pre_e))
 
     try:
-        # Try ANON_KEY client first (recommended for sign_in)
-        result = supabase_auth.auth.sign_in_with_password({
-            "email": email,
-            "password": password,
-        })
+        # Try ANON_KEY client first (recommended for sign_in), with retries for connection issues
+        result = _retry_supabase_call(
+            lambda: supabase_auth.auth.sign_in_with_password({"email": email, "password": password})
+        )
     except Exception as e1:
         print(f"Login (anon) error: {e1}")
         if _is_connection_error(e1):
             raise HTTPException(status_code=503, detail=_connection_error_detail(e1))
         try:
-            # Fallback: try SERVICE_ROLE client
-            result = supabase.auth.sign_in_with_password({
-                "email": email,
-                "password": password,
-            })
+            result = _retry_supabase_call(
+                lambda: supabase.auth.sign_in_with_password({"email": email, "password": password})
+            )
         except Exception as e2:
             print(f"Login (service_role) error: {e2}")
             if _is_connection_error(e2):
@@ -508,9 +586,13 @@ def login(payload: LoginRequest):
             raise HTTPException(status_code=401, detail="Invalid email or password")
 
         user_id = str(result.user.id)
-        profile = supabase.table("user_profiles").select(
-            "id, full_name, role_id, is_active, created_at"
-        ).eq("id", user_id).single().execute()
+
+        def _fetch_profile():
+            return supabase.table("user_profiles").select(
+                "id, full_name, role_id, is_active, created_at"
+            ).eq("id", user_id).single().execute()
+
+        profile = _retry_supabase_call(_fetch_profile)
 
         if not profile.data:
             raise HTTPException(
@@ -524,9 +606,12 @@ def login(payload: LoginRequest):
                 detail="Your account is inactive. Contact your administrator.",
             )
 
-        role_row = supabase.table("roles").select("name").eq(
-            "id", profile.data["role_id"]
-        ).single().execute()
+        def _fetch_role():
+            return supabase.table("roles").select("name").eq(
+                "id", profile.data["role_id"]
+            ).single().execute()
+
+        role_row = _retry_supabase_call(_fetch_role)
         role_name = role_row.data["name"] if role_row.data else "user"
         frontend_role = _normalize_role(role_name)
 
@@ -2753,16 +2838,16 @@ def list_checklist_tasks(
     auth: dict = Depends(get_current_user),
     current: dict = Depends(get_current_user_with_role),
 ):
-    """List checklist tasks. Regular users see only their own. Admin/Master Admin can filter by user_id or see all. All can filter by reference_no."""
+    """List checklist tasks. Default: logged-in user's tasks. Admin/Master can pass user_id to see that user, or see all if explicitly requested."""
     try:
         role = current.get("role", "user")
         if role not in ("admin", "master_admin"):
             user_id = auth["id"]
+        elif user_id is None:
+            user_id = auth["id"]  # default to own tasks for admins too
         q = supabase.table("checklist_tasks").select("*")
         if user_id:
             q = q.eq("doer_id", user_id)
-        elif role not in ("admin", "master_admin"):
-            q = q.eq("doer_id", auth["id"])
         if reference_no:
             q = q.eq("reference_no", reference_no)
         r = q.order("created_at", desc=True).execute()
@@ -2793,18 +2878,18 @@ def list_checklist_occurrences(
 ):
     """
     Get checklist occurrences. filter: today|completed|overdue|upcoming.
-    Regular users see only their tasks. Admin can filter by user_id. All can filter by reference_no.
+    Default: logged-in user's tasks. Admin can pass user_id to see that user.
     """
     try:
-        from app.checklist_utils import get_occurrence_dates
+        from app.checklist_utils import get_occurrence_dates_in_range
         role = current.get("role", "user")
         if role not in ("admin", "master_admin"):
             user_id = auth["id"]
+        elif user_id is None:
+            user_id = auth["id"]  # default to own tasks for admins too
         q = supabase.table("checklist_tasks").select("*")
         if user_id:
             q = q.eq("doer_id", user_id)
-        elif role not in ("admin", "master_admin"):
-            q = q.eq("doer_id", auth["id"])
         if reference_no:
             q = q.eq("reference_no", reference_no)
         r = q.execute()
@@ -2815,20 +2900,35 @@ def list_checklist_occurrences(
             doer_map = {p["id"]: p.get("full_name", "") for p in (prof.data or [])}
         except Exception:
             pass
+        today = date.today()
+        today_str = today.isoformat()
+        # Only generate occurrence dates in the range needed for this filter (fast load)
+        if filter_type == "today":
+            range_start, range_end = today, today
+        elif filter_type == "completed":
+            range_start = today - timedelta(days=365)
+            range_end = today
+        elif filter_type == "overdue":
+            range_start = today - timedelta(days=365)
+            range_end = today - timedelta(days=1)
+        else:  # upcoming
+            range_start = today + timedelta(days=1)
+            range_end = today + timedelta(days=90)
         comp = {}
         try:
-            cr = supabase.table("checklist_completions").select("task_id, occurrence_date, completed_at").execute()
-            for row in cr.data or []:
-                comp[(row["task_id"], row["occurrence_date"])] = row.get("completed_at")
+            task_ids = [t["id"] for t in tasks]
+            if task_ids:
+                cr = supabase.table("checklist_completions").select("task_id, occurrence_date, completed_at")
+                cr = cr.gte("occurrence_date", range_start.isoformat()).lte("occurrence_date", range_end.isoformat())
+                cr = cr.in_("task_id", task_ids)
+                for row in (cr.execute().data or []):
+                    comp[(row["task_id"], row["occurrence_date"])] = row.get("completed_at")
         except Exception:
             pass
-        today = date.today()
-        # Fetch holidays once per year (avoid N*tasks DB calls)
-        holidays_by_year = {
-            today.year - 1: _get_holidays_for_year(today.year - 1),
-            today.year: _get_holidays_for_year(today.year),
-            today.year + 1: _get_holidays_for_year(today.year + 1),
-        }
+        holidays_set = set()
+        for yr in (range_start.year, range_end.year):
+            holidays_set.update(_get_holidays_for_year(yr))
+        is_holiday = lambda d, h=holidays_set: d in h
         occurrences = []
         for task in tasks:
             t_id = task["id"]
@@ -2836,32 +2936,25 @@ def list_checklist_occurrences(
             if isinstance(start, str):
                 start = date.fromisoformat(start)
             freq = task.get("frequency", "D")
-            for yr in [today.year - 1, today.year, today.year + 1]:
-                holidays = holidays_by_year[yr]
-                is_holiday = lambda d, h=holidays: d in h
-                dates = get_occurrence_dates(start, freq, yr, is_holiday)
-                for d in dates:
-                    if (today - timedelta(days=60)).year <= yr <= (today + timedelta(days=365)).year:
-                        occurrences.append({
-                            "task_id": t_id,
-                            "task_name": task.get("task_name", ""),
-                            "reference_no": task.get("reference_no"),
-                            "doer_id": task.get("doer_id"),
-                            "doer_name": doer_map.get(task.get("doer_id"), ""),
-                            "department": task.get("department", ""),
-                            "occurrence_date": d.isoformat(),
-                            "completed_at": comp.get((t_id, d.isoformat())),
-                        })
+            dates = get_occurrence_dates_in_range(start, freq, range_start, range_end, is_holiday)
+            for d in dates:
+                occurrences.append({
+                    "task_id": t_id,
+                    "task_name": task.get("task_name", ""),
+                    "reference_no": task.get("reference_no"),
+                    "doer_id": task.get("doer_id"),
+                    "doer_name": doer_map.get(task.get("doer_id"), ""),
+                    "department": task.get("department", ""),
+                    "occurrence_date": d.isoformat(),
+                    "completed_at": comp.get((t_id, d.isoformat())),
+                })
         occurrences.sort(key=lambda x: (x["occurrence_date"], x["task_name"]))
-        today_str = today.isoformat()
-        if filter_type == "today":
-            occurrences = [o for o in occurrences if o["occurrence_date"] == today_str]
-        elif filter_type == "completed":
+        if filter_type == "completed":
             occurrences = [o for o in occurrences if o.get("completed_at")]
         elif filter_type == "overdue":
-            occurrences = [o for o in occurrences if not o.get("completed_at") and o["occurrence_date"] < today_str]
+            occurrences = [o for o in occurrences if not o.get("completed_at")]
         elif filter_type == "upcoming":
-            occurrences = [o for o in occurrences if not o.get("completed_at") and o["occurrence_date"] > today_str]
+            occurrences = [o for o in occurrences if not o.get("completed_at")]
         return {"occurrences": occurrences}
     except Exception as e:
         _log(f"checklist/occurrences error: {e}")
@@ -2943,14 +3036,19 @@ def list_delegation_tasks(
     auth: dict = Depends(get_current_user),
     current: dict = Depends(get_current_user_with_role),
 ):
-    """List delegation tasks. Default status=pending. Admin/Master can filter by user. All users can filter by reference_no."""
+    """List delegation tasks. Default status=pending. By default show logged-in user's tasks; Admin/Master can choose another user or All."""
     try:
         q = supabase.table("delegation_tasks").select("*")
         role = current.get("role", "user")
         if role not in ("admin", "master_admin"):
             q = q.eq("assignee_id", auth["id"])
-        elif assignee_id:
-            q = q.eq("assignee_id", assignee_id)
+        else:
+            # Admin/Master: default to own tasks; explicit assignee_id = that user; __all__ = all tasks
+            if assignee_id and assignee_id != "__all__":
+                q = q.eq("assignee_id", assignee_id)
+            elif not assignee_id:
+                q = q.eq("assignee_id", auth["id"])
+            # else assignee_id == "__all__": no assignee filter
         # Default pending; send status='all' to see all tasks
         if status == "all":
             pass

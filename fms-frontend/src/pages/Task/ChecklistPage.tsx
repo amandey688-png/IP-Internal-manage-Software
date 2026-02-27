@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card,
   Typography,
@@ -42,6 +42,7 @@ export const ChecklistPage = () => {
   const [occurrences, setOccurrences] = useState<ChecklistOccurrence[]>([])
   const [users, setUsers] = useState<{ id: string; full_name: string }[]>([])
   const [selectedUserId, setSelectedUserId] = useState<string | undefined>(undefined)
+  const initialChecklistUserSet = useRef(false)
   const [referenceNoFilter, setReferenceNoFilter] = useState<string>('__all__')
   const [filter, setFilter] = useState<FilterType>('today')
   const [loading, setLoading] = useState(false)
@@ -76,6 +77,14 @@ export const ChecklistPage = () => {
   useEffect(() => {
     loadChecklistData()
   }, [loadChecklistData])
+
+  // Default user filter to logged-in user (admins see their tasks first; can change to another user)
+  useEffect(() => {
+    if (user?.id && !initialChecklistUserSet.current) {
+      setSelectedUserId(user.id)
+      initialChecklistUserSet.current = true
+    }
+  }, [user?.id])
 
   // Load departments and users in parallel on mount (non-blocking for table)
   useEffect(() => {
