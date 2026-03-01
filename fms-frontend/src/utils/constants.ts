@@ -30,6 +30,7 @@ export const SECTION_LABELS: Record<string, string> = {
   completed_feature: 'Completed Feature',
   solution: 'Solution',
   task: 'Task',
+  success_performance: 'Performance Monitoring',
   settings: 'Settings',
   users: 'Users',
 }
@@ -48,6 +49,8 @@ export const ROUTES = {
   /** Task module (separate from Support) */
   CHECKLIST: '/task/checklist',
   DELEGATION: '/task/delegation',
+  /** Success module */
+  SUCCESS_PERFORMANCE: '/success/performance',
   USERS: '/users',
   SETTINGS: '/settings',
 } as const

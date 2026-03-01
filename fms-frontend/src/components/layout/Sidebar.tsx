@@ -9,6 +9,8 @@ import {
   CheckSquareOutlined,
   SendOutlined,
   UnorderedListOutlined,
+  RiseOutlined,
+  LineChartOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
@@ -25,6 +27,9 @@ const isSupportPage = (pathname: string) =>
 const isTaskPage = (pathname: string) =>
   pathname === ROUTES.CHECKLIST || pathname === ROUTES.DELEGATION
 
+const isSuccessPage = (pathname: string) =>
+  pathname === ROUTES.SUCCESS_PERFORMANCE
+
 interface SidebarProps {
   className?: string
   open?: boolean
@@ -37,12 +42,16 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const { canAccessApproval, canAccessSettings, canAccessUsers, canViewSectionByKey } = useRole()
   const [supportOpen, setSupportOpen] = useState(isSupportPage(location.pathname))
   const [taskOpen, setTaskOpen] = useState(isTaskPage(location.pathname))
+  const [successOpen, setSuccessOpen] = useState(isSuccessPage(location.pathname))
 
   useEffect(() => {
     if (isSupportPage(location.pathname)) setSupportOpen(true)
   }, [location.pathname])
   useEffect(() => {
     if (isTaskPage(location.pathname)) setTaskOpen(true)
+  }, [location.pathname])
+  useEffect(() => {
+    if (isSuccessPage(location.pathname)) setSuccessOpen(true)
   }, [location.pathname])
 
   const linkStyle = { color: 'inherit', display: 'block' }
@@ -69,6 +78,15 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     { key: ROUTES.DELEGATION, icon: <SendOutlined />, label: <Link to={ROUTES.DELEGATION} style={linkStyle}>Delegation</Link> },
   ]
 
+  const successItems: MenuProps['items'] = [
+    { key: ROUTES.SUCCESS_PERFORMANCE, icon: <LineChartOutlined />, label: <Link to={ROUTES.SUCCESS_PERFORMANCE} style={linkStyle}>Performance Monitoring</Link>, sectionKey: 'success_performance' },
+  ]
+  const filteredSuccessItems: MenuProps['items'] = successItems?.filter((item) => {
+    const sectionKey = (item as { sectionKey?: string })?.sectionKey
+    if (sectionKey && !canViewSectionByKey(sectionKey)) return false
+    return true
+  }) ?? []
+
   const showDashboard = canViewSectionByKey('dashboard')
   const hasAnySupportSection = (supportItems?.length ?? 0) > 0
 
@@ -87,6 +105,13 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
       label: 'Task',
       children: taskItems,
       onTitleClick: () => setTaskOpen(!taskOpen),
+    }] : []),
+    ...(filteredSuccessItems.length > 0 ? [{
+      key: 'success',
+      icon: <RiseOutlined />,
+      label: 'Success',
+      children: filteredSuccessItems,
+      onTitleClick: () => setSuccessOpen(!successOpen),
     }] : []),
     ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: <Link to={ROUTES.USERS} style={linkStyle}>Users</Link> }] : []),
     ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: <Link to={ROUTES.SETTINGS} style={linkStyle}>Settings</Link> }] : []),
@@ -108,11 +133,13 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const openKeys = [
     ...(supportOpen ? ['support'] : []),
     ...(taskOpen ? ['task'] : []),
+    ...(successOpen ? ['success'] : []),
   ]
 
   const handleOpenChange = (keys: string[]) => {
     setSupportOpen(keys.includes('support'))
     setTaskOpen(keys.includes('task'))
+    setSuccessOpen(keys.includes('success'))
   }
 
   const menuContent = (

@@ -18,6 +18,7 @@ import { SolutionList } from "./pages/Solutions/SolutionList"
 import { StagingList } from "./pages/Staging/StagingList"
 import { ChecklistPage } from "./pages/Task/ChecklistPage"
 import { DelegationPage } from "./pages/Task/DelegationPage"
+import { PerformanceMonitoringPage } from "./pages/Success/PerformanceMonitoringPage"
 import { UserList } from "./pages/Users/UserList"
 import { SettingsPage } from "./pages/Settings/SettingsPage"
 import { ApprovalConfirmPage } from "./pages/Approval/ApprovalConfirmPage"
@@ -172,6 +173,19 @@ function App() {
                 <ProtectedRoute>
                   <AppLayout>
                     <DelegationPage />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path={ROUTES.SUCCESS_PERFORMANCE}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <PerformanceMonitoringPage />
+                    </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>
               }

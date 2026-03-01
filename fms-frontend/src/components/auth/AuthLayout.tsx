@@ -48,7 +48,7 @@ export const AuthLayout = ({ children, variant = 'register' }: AuthLayoutProps) 
             padding: 32,
           }}
         >
-          <AuthIllustration variant={variant} />
+          <AuthIllustration variant={variant || 'register'} />
         </div>
       </div>
       <div

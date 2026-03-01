@@ -255,7 +255,7 @@ def health_supabase():
         return out
     try:
         # Quick HTTPS reachability (no auth)
-        r = httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=10.0)
+        r = httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=25.0)
         out["reachable"] = "ok" if r.status_code in (200, 301, 302, 404, 401) else f"status_{r.status_code}"
     except Exception as e:
         err_str = str(e).lower()
@@ -509,19 +509,23 @@ def _connection_error_detail(e: Exception) -> str:
     return base + _supabase_unpause_link() + " Tip: Open GET /health/supabase in browser to see the exact error."
 
 
-def _retry_supabase_call(fn, max_attempts: int = 3, delay_sec: float = 2.0):
-    """Retry a call that may fail due to transient connection issues."""
+def _retry_supabase_call(fn, max_attempts: int = 5, delay_secs: list[float] | None = None):
+    """Retry a call that may fail due to transient connection issues (e.g. Supabase waking from pause). Silent retries; no per-attempt logs."""
     import time
+    if delay_secs is None:
+        delay_secs = [5, 10, 20, 30]  # Waits after attempts 0..3; total ~65s for project wake-up
     last_exc = None
     for attempt in range(max_attempts):
         try:
             return fn()
         except Exception as e:
             last_exc = e
-            _log(f"Supabase attempt {attempt + 1}/{max_attempts} failed: {type(e).__name__}: {e}")
-            if attempt < max_attempts - 1:
-                time.sleep(delay_sec)
-    raise last_exc
+            if attempt < max_attempts - 1 and attempt < len(delay_secs):
+                d = delay_secs[attempt]
+                if d > 0:
+                    time.sleep(d)
+    if last_exc is not None:
+        raise last_exc
 
 
 @api_router.post("/auth/login", response_model=LoginResponse)
@@ -533,21 +537,22 @@ def login(payload: LoginRequest):
     password = payload.password
     result = None
 
-    # Pre-check: if Supabase is unreachable, return 503. One retry after 3s (handles project waking from pause).
+    # Pre-check: if Supabase is unreachable, return 503. Silent retries (no per-attempt logs).
     url = (os.getenv("SUPABASE_URL") or "").strip()
     if url and url.startswith("https://"):
         import time
-        pre_ok = False
-        for pre_attempt in range(2):
+        pre_delays = [0, 8, 20, 45]  # Waits between attempts; total ~73s for project wake-up
+        last_pre_e = None
+        for pre_attempt in range(4):
             try:
-                httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=10.0)
-                pre_ok = True
+                httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=25.0)
                 break
             except Exception as pre_e:
+                last_pre_e = pre_e
                 if not _is_connection_error(pre_e):
-                    break
-                if pre_attempt == 0:
-                    time.sleep(3)
+                    raise HTTPException(status_code=503, detail=_connection_error_detail(pre_e))
+                if pre_attempt < 3:
+                    time.sleep(pre_delays[pre_attempt + 1])
                 else:
                     raise HTTPException(status_code=503, detail=_connection_error_detail(pre_e))
 
@@ -1113,8 +1118,15 @@ def list_tickets(
     elif apply_section_filter and type:
         q = q.eq("type", type)
         if type == "feature":
-            # Feature section: approved/unapproved, not yet in Completed Feature (live_status != completed)
-            q = q.not_.is_("approval_status", "null")
+            # Feature section: only APPROVED features; unapproved/pending stay in Approval Status
+            q = q.eq("approval_status", "approved")
+            q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
+            q = q.or_("live_status.is.null,live_status.neq.completed")
+    elif type and not apply_section_filter:
+        # type=feature when no section (e.g. /tickets?type=feature) - only APPROVED features
+        q = q.eq("type", type)
+        if type == "feature":
+            q = q.eq("approval_status", "approved")
             q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
             q = q.or_("live_status.is.null,live_status.neq.completed")
     if company_ids:
@@ -2403,6 +2415,505 @@ def list_divisions(company_id: str | None = None, auth: dict = Depends(get_curre
         return [{"id": "1", "name": "Sales"}, {"id": "2", "name": "Support"}]
 
 
+# ---------- Success Module: Performance Monitoring ----------
+class POCCreateRequest(BaseModel):
+    company_id: str
+    message_owner: str  # yes / no
+    response: str | None = None  # mandatory in UI
+    contact: str | None = None  # mandatory in UI
+
+
+def _generate_performance_reference(company_id: str) -> str:
+    """Generate reference_no: first 4 letters of company + 0001, 0002, etc per company."""
+    try:
+        r = supabase.table("companies").select("name").eq("id", company_id).single().execute()
+        name = (r.data or {}).get("name", "XXXX")
+        prefix = "".join(c for c in name.upper() if c.isalpha())[:4] or "XXXX"
+        rows = supabase.table("performance_monitoring").select("reference_no").eq("company_id", company_id).execute()
+        nums = []
+        for row in (rows.data or []):
+            ref = (row or {}).get("reference_no", "")
+            if ref.startswith(prefix) and ref[len(prefix):].isdigit():
+                nums.append(int(ref[len(prefix):]))
+        next_num = max(nums, default=0) + 1
+        return f"{prefix}{next_num:04d}"
+    except Exception as e:
+        _log(f"generate_performance_reference fallback: {e}")
+        return f"PM{uuid.uuid4().hex[:6].upper()}"
+
+
+@api_router.post("/success/performance/poc")
+def create_poc_details(payload: POCCreateRequest, auth: dict = Depends(get_current_user)):
+    """Add POC details. Generates reference_no (e.g. INDU0001) per company. Requires database/SUCCESS_PERFORMANCE_MONITORING.sql."""
+    if payload.message_owner not in ("yes", "no"):
+        raise HTTPException(status_code=400, detail="message_owner must be yes or no")
+    try:
+        ref = _generate_performance_reference(payload.company_id)
+        row = {
+            "company_id": payload.company_id,
+            "message_owner": payload.message_owner,
+            "response": payload.response or "",
+            "contact": payload.contact or "",
+            "reference_no": ref,
+            "completion_status": "in_progress",
+            "created_by": auth.get("id"),
+        }
+        r = supabase.table("performance_monitoring").insert(row).execute()
+        data = (r.data or [{}])[0] if r.data else {}
+        # Resolve company name
+        try:
+            c = supabase.table("companies").select("name").eq("id", payload.company_id).single().execute()
+            data["company_name"] = (c.data or {}).get("name", "")
+        except Exception:
+            data["company_name"] = ""
+        return data
+    except Exception as e:
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="Run database/SUCCESS_PERFORMANCE_MONITORING.sql in Supabase SQL Editor first.",
+            )
+        raise HTTPException(status_code=400, detail=str(e)[:200])
+
+
+@api_router.get("/success/performance/list")
+def list_performance_poc(
+    completion_status: str | None = None,
+    auth: dict = Depends(get_current_user),
+):
+    """List performance monitoring tickets. Filter by completion_status=in_progress|completed. Includes total_percentage, has_training, feature_count."""
+    try:
+        q = supabase.table("performance_monitoring").select(
+            "id, company_id, message_owner, response, contact, reference_no, completion_status, created_at"
+        )
+        if completion_status in ("in_progress", "completed"):
+            q = q.eq("completion_status", completion_status)
+        r = q.order("created_at", desc=True).execute()
+        rows = r.data or []
+        ticket_ids = [row.get("id") for row in rows if row.get("id")]
+        # Enrich with training total_percentage and feature count
+        training_map = {}
+        feature_count_map = {}
+        if ticket_ids:
+            try:
+                tr = supabase.table("performance_training").select("id, performance_id, total_percentage").in_("performance_id", ticket_ids).execute()
+                for t in tr.data or []:
+                    training_map[t["performance_id"]] = t.get("total_percentage")
+                training_ids = [t["id"] for t in (tr.data or []) if t.get("id")]
+                if training_ids:
+                    tf = supabase.table("ticket_features").select("training_id").in_("training_id", training_ids).execute()
+                    perf_to_training = {t["performance_id"]: t["id"] for t in (tr.data or []) if t.get("performance_id") and t.get("id")}
+                    for f in tf.data or []:
+                        tid = f.get("training_id")
+                        for pid, trid in perf_to_training.items():
+                            if trid == tid:
+                                feature_count_map[pid] = feature_count_map.get(pid, 0) + 1
+                                break
+            except Exception:
+                pass
+        # Resolve company names
+        company_ids = list({row.get("company_id") for row in rows if row.get("company_id")})
+        companies_map = {}
+        if company_ids:
+            try:
+                cr = supabase.table("companies").select("id, name").in_("id", company_ids).execute()
+                companies_map = {c["id"]: c["name"] for c in (cr.data or [])}
+            except Exception:
+                pass
+        for row in rows:
+            row["company_name"] = companies_map.get(row.get("company_id"), "")
+            row["total_percentage"] = training_map.get(row.get("id"))
+            row["has_training"] = row.get("id") in training_map
+            row["feature_count"] = feature_count_map.get(row.get("id"), 0)
+            stage, _ = _compute_current_stage(row.get("id", ""), row.get("completion_status", "in_progress"))
+            row["current_stage"] = stage
+        return {"items": rows}
+    except Exception as e:
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="Run database/SUCCESS_PERFORMANCE_MONITORING.sql in Supabase SQL Editor first.",
+            )
+        raise HTTPException(status_code=400, detail=str(e)[:200])
+
+
+def _compute_current_stage(ticket_id: str, completion_status: str) -> tuple[str, list[str]]:
+    """Return (current_stage_desc, pending_feature_names)."""
+    if completion_status == "completed":
+        return "Completed", []
+    training, tfs = _get_training_for_ticket(ticket_id)
+    if not training:
+        return "POC Added - Pending: Training", []
+    if not tfs:
+        return "Training Done - Pending: Add Feature Committed for Use", []
+    completed = []
+    pending = []
+    fl_ids = list({f["feature_id"] for f in tfs})
+    feature_names = {}
+    if fl_ids:
+        fl = supabase.table("feature_list").select("id, name").in_("id", fl_ids).execute()
+        feature_names = {x["id"]: x["name"] for x in (fl.data or [])}
+    for tf in tfs:
+        r = supabase.table("feature_followups").select("id").eq("ticket_feature_id", tf["id"]).eq("status", "completed").limit(1).execute()
+        name = feature_names.get(tf["feature_id"], "")
+        if r.data and len(r.data) > 0:
+            completed.append(name)
+        else:
+            pending.append(name)
+    total = len(tfs)
+    done = len(completed)
+    if pending:
+        return f"Followup: {done}/{total} completed - Pending: {', '.join(pending)}", pending
+    return f"Followup: {done}/{total} completed", []
+
+
+@api_router.get("/success/performance/details")
+def get_performance_details(
+    ticket_id: str,
+    auth: dict = Depends(get_current_user),
+):
+    """Full ticket details with current_stage and pending_features. Use for View Details."""
+    try:
+        pm = supabase.table("performance_monitoring").select("*").eq("id", ticket_id).limit(1).execute()
+        rows = pm.data or []
+        if not rows:
+            raise HTTPException(status_code=404, detail="Ticket not found")
+        row = rows[0]
+        company_id = row.get("company_id")
+        company_name = ""
+        if company_id:
+            c = supabase.table("companies").select("name").eq("id", company_id).maybe_single().execute()
+            company_name = (c.data or {}).get("name", "")
+        row["company_name"] = company_name
+        current_stage, pending_features = _compute_current_stage(ticket_id, row.get("completion_status", "in_progress"))
+        row["current_stage"] = current_stage
+        row["pending_features"] = pending_features
+        training, tfs = _get_training_for_ticket(ticket_id)
+        row["training"] = training
+        row["feature_ids"] = [f["feature_id"] for f in tfs] if tfs else []
+        row["features_locked"] = _features_locked(training) if training else False
+        tf_ids = [f["id"] for f in tfs] if tfs else []
+        followups = []
+        if tf_ids:
+            fu = supabase.table("feature_followups").select("*").in_("ticket_feature_id", tf_ids).order("created_at", desc=False).execute()
+            followups = fu.data or []
+        fl_ids = list({f["feature_id"] for f in tfs}) if tfs else []
+        feature_names = {}
+        if fl_ids:
+            fl = supabase.table("feature_list").select("id, name").in_("id", fl_ids).execute()
+            feature_names = {x["id"]: x["name"] for x in (fl.data or [])}
+        by_tf = {}
+        for f in (tfs or []):
+            by_tf[f["id"]] = {"ticket_feature_id": f["id"], "feature_name": feature_names.get(f["feature_id"], ""), "status": f.get("status", "Pending"), "followups": []}
+        for fu in followups:
+            tf_id = fu.get("ticket_feature_id")
+            if tf_id in by_tf:
+                by_tf[tf_id]["followups"].append(fu)
+        row["features_with_followups"] = list(by_tf.values())
+        return row
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            raise HTTPException(status_code=503, detail="Run database/SUCCESS_PERFORMANCE_MONITORING.sql first.")
+        raise HTTPException(status_code=400, detail=str(e)[:200])
+
+
+# ---------- Training & Followups (Part 2 & 3) ----------
+class TrainingSubmitRequest(BaseModel):
+    ticket_id: str  # performance_monitoring.id
+    call_poc: str  # yes / no
+    message_poc: str  # yes / no
+    message_owner: str  # yes / no
+    training_schedule_date: str | None = None  # YYYY-MM-DD; mandatory in UI
+    training_status: str  # yes / no
+    remarks: str | None = None
+    feature_ids: list[str] = []  # feature_list ids
+
+
+class FollowupSubmitRequest(BaseModel):
+    ticket_id: str  # performance_monitoring.id
+    ticket_feature_id: str  # ticket_features.id
+    initial_percentage: float | None = None  # 1st time only: user-entered base %; rest divided equally
+    status: str  # completed | pending
+    remarks: str | None = None
+
+
+@api_router.get("/success/performance/features")
+def list_performance_features(auth: dict = Depends(get_current_user)):
+    """List feature_list for Training form multi-select."""
+    try:
+        r = supabase.table("feature_list").select("id, name, display_order").order("display_order").execute()
+        return {"items": r.data or []}
+    except Exception as e:
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            raise HTTPException(status_code=503, detail="Run database/SUCCESS_PERFORMANCE_MONITORING.sql first.")
+        raise HTTPException(status_code=400, detail=str(e)[:200])
+
+
+def _get_training_for_ticket(ticket_id: str):
+    """Return (training_row, ticket_features_list) or (None, [])."""
+    try:
+        tr = supabase.table("performance_training").select("*").eq("performance_id", ticket_id).limit(2).execute()
+        rows = tr.data if tr.data else []
+        if not rows:
+            return None, []
+        # UNIQUE(performance_id) guarantees at most one; take first
+        training = rows[0]
+        if not training.get("id"):
+            return None, []
+        tf = supabase.table("ticket_features").select("id, feature_id, status").eq("training_id", training["id"]).execute()
+        return training, tf.data or []
+    except Exception:
+        return None, []
+
+
+def _features_locked(training: dict | None) -> bool:
+    """True if Feature Committed for Use cannot be edited (after 24hr)."""
+    if not training:
+        return False
+    committed_at = training.get("features_committed_at")
+    if not committed_at:
+        return False
+    try:
+        dt = datetime.fromisoformat(committed_at.replace("Z", "+00:00")) if isinstance(committed_at, str) else committed_at
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        delta = datetime.now(timezone.utc) - dt
+        return delta.total_seconds() >= 24 * 3600
+    except Exception:
+        return False
+
+
+@api_router.get("/success/performance/training")
+def get_performance_training(
+    ticket_id: str,
+    auth: dict = Depends(get_current_user),
+):
+    """Get training record and selected feature ids for a ticket. Returns features_locked if Feature Committed cannot be edited."""
+    training, tfs = _get_training_for_ticket(ticket_id)
+    if not training:
+        return {"training": None, "feature_ids": [], "features_locked": False}
+    feature_ids = [f["feature_id"] for f in tfs]
+    return {"training": training, "feature_ids": feature_ids, "features_locked": _features_locked(training)}
+
+
+@api_router.post("/success/performance/training")
+def submit_performance_training(payload: TrainingSubmitRequest, auth: dict = Depends(get_current_user)):
+    """Create or update training. Feature Committed locked after 24hr."""
+    if payload.call_poc not in ("yes", "no") or payload.message_poc not in ("yes", "no") or payload.message_owner not in ("yes", "no") or payload.training_status not in ("yes", "no"):
+        raise HTTPException(status_code=400, detail="call_poc, message_poc, message_owner, training_status must be yes or no")
+    try:
+        training, existing_tfs = _get_training_for_ticket(payload.ticket_id)
+        features_locked = _features_locked(training) if training else False
+        feature_ids = list(dict.fromkeys(payload.feature_ids))
+        if features_locked:
+            feature_ids = [f["feature_id"] for f in existing_tfs]
+        training_row = {
+            "performance_id": payload.ticket_id,
+            "call_poc": payload.call_poc,
+            "message_poc": payload.message_poc,
+            "message_owner": payload.message_owner,
+            "training_schedule_date": payload.training_schedule_date or None,
+            "training_status": payload.training_status,
+            "remarks": payload.remarks or None,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_by": auth.get("id"),
+        }
+        r = supabase.table("performance_training").upsert(training_row, on_conflict="performance_id").execute()
+        rows = r.data if r.data else []
+        training_id = rows[0].get("id") if rows else None
+        if not training_id:
+            raise HTTPException(status_code=500, detail="Failed to create/update training")
+        now_iso = datetime.now(timezone.utc).isoformat()
+        if not features_locked and feature_ids:
+            supabase.table("ticket_features").delete().eq("training_id", training_id).execute()
+            for fid in feature_ids:
+                supabase.table("ticket_features").insert({
+                    "training_id": training_id,
+                    "feature_id": fid,
+                    "status": "Pending",
+                }).execute()
+            if not (training and training.get("features_committed_at")):
+                supabase.table("performance_training").update({"features_committed_at": now_iso}).eq("id", training_id).execute()
+        training, _ = _get_training_for_ticket(payload.ticket_id)
+        return {"training": training, "feature_ids": feature_ids, "features_locked": _features_locked(training)}
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            raise HTTPException(status_code=503, detail="Run database/SUCCESS_PERFORMANCE_MONITORING.sql first.")
+        raise HTTPException(status_code=400, detail=str(e)[:200])
+
+
+def _last_total_percentage_for_ticket(ticket_id: str) -> float:
+    """Get the latest total_percentage from feature_followups for this ticket (via training -> ticket_features)."""
+    training, tfs = _get_training_for_ticket(ticket_id)
+    if not training or not tfs:
+        return 0.0
+    tf_ids = [f["id"] for f in tfs]
+    try:
+        # Get latest followup by created_at for any of these ticket_features
+        r = supabase.table("feature_followups").select("total_percentage, created_at").in_("ticket_feature_id", tf_ids).order("created_at", desc=True).limit(1).execute()
+        if r.data and len(r.data) > 0 and r.data[0].get("total_percentage") is not None:
+            return float(r.data[0]["total_percentage"])
+    except Exception:
+        pass
+    return 0.0
+
+
+def _all_features_completed_for_ticket(ticket_id: str) -> bool:
+    """True if every ticket_feature has at least one followup with status=completed."""
+    training, tfs = _get_training_for_ticket(ticket_id)
+    if not tfs:
+        return False
+    for tf in tfs:
+        r = supabase.table("feature_followups").select("id").eq("ticket_feature_id", tf["id"]).eq("status", "completed").limit(1).execute()
+        if not r.data or len(r.data) == 0:
+            return False
+    return True
+
+
+def _get_initial_percentage(ticket_id: str) -> float:
+    """Get initial_percentage from performance_training (1st time user entry)."""
+    training, _ = _get_training_for_ticket(ticket_id)
+    if training and training.get("initial_percentage") is not None:
+        return float(training["initial_percentage"])
+    return 0.0
+
+
+def _count_followups_for_ticket(ticket_id: str) -> int:
+    """Count total followup rows for this ticket."""
+    training, tfs = _get_training_for_ticket(ticket_id)
+    if not training or not tfs:
+        return 0
+    tf_ids = [f["id"] for f in tfs]
+    try:
+        r = supabase.table("feature_followups").select("id").in_("ticket_feature_id", tf_ids).execute()
+        return len(r.data or [])
+    except Exception:
+        return 0
+
+
+@api_router.get("/success/performance/followups")
+def list_performance_followups(
+    ticket_id: str,
+    auth: dict = Depends(get_current_user),
+):
+    """List followups for a ticket: selected features with their followup entries. Includes initial_percentage."""
+    training, tfs = _get_training_for_ticket(ticket_id)
+    if not training or not tfs:
+        return {"features": [], "total_percentage": training.get("total_percentage") if training else None, "initial_percentage": None, "is_first_followup": False}
+    tf_ids = [f["id"] for f in tfs]
+    fl_ids = list({f["feature_id"] for f in tfs})
+    feature_names = {}
+    if fl_ids:
+        fl = supabase.table("feature_list").select("id, name").in_("id", fl_ids).execute()
+        feature_names = {x["id"]: x["name"] for x in (fl.data or [])}
+    followups = []
+    try:
+        r = supabase.table("feature_followups").select("*").in_("ticket_feature_id", tf_ids).order("created_at", desc=False).execute()
+        followups = r.data or []
+    except Exception:
+        pass
+    # Build list of features with their followup rows
+    by_tf = {}
+    for f in tfs:
+        by_tf[f["id"]] = {"ticket_feature_id": f["id"], "feature_id": f["feature_id"], "feature_name": feature_names.get(f["feature_id"], ""), "status": f.get("status", "Pending"), "followups": []}
+    for fu in followups:
+        tf_id = fu.get("ticket_feature_id")
+        if tf_id in by_tf:
+            by_tf[tf_id]["followups"].append(fu)
+    total_percentage = training.get("total_percentage")
+    if total_percentage is not None:
+        total_percentage = float(total_percentage)
+    init_pct = training.get("initial_percentage")
+    init_pct = float(init_pct) if init_pct is not None else None
+    n_followups = len(followups)
+    return {"features": list(by_tf.values()), "total_percentage": total_percentage, "initial_percentage": init_pct, "is_first_followup": n_followups == 0}
+
+
+@api_router.post("/success/performance/followup")
+def submit_performance_followup(payload: FollowupSubmitRequest, auth: dict = Depends(get_current_user)):
+    """Add followup. 1st time: user sends initial_percentage; rest (100-initial) divided equally among features."""
+    if payload.status not in ("completed", "pending"):
+        raise HTTPException(status_code=400, detail="status must be completed or pending")
+    try:
+        training, tfs = _get_training_for_ticket(payload.ticket_id)
+        if not training or not tfs:
+            raise HTTPException(status_code=400, detail="No training or features for this ticket")
+        n = len(tfs)
+        n_followups = _count_followups_for_ticket(payload.ticket_id)
+        is_first = n_followups == 0
+        if is_first:
+            # First followup: require initial_percentage from user
+            if payload.initial_percentage is None:
+                raise HTTPException(status_code=400, detail="First followup: enter Initial percentage (base % you already completed)")
+            init_pct = float(payload.initial_percentage)
+            if init_pct < 0 or init_pct > 100:
+                raise HTTPException(status_code=400, detail="initial_percentage must be between 0 and 100")
+            prev = init_pct
+            # Store initial_percentage in performance_training
+            supabase.table("performance_training").update({"initial_percentage": init_pct}).eq("id", training["id"]).execute()
+        else:
+            prev = _last_total_percentage_for_ticket(payload.ticket_id)
+            init_pct = _get_initial_percentage(payload.ticket_id)
+        # Remaining % (100 - initial) divided equally among features
+        remaining = max(0, 100.0 - init_pct)
+        equal_share = round(remaining / n, 2) if n else 0
+        added = equal_share if payload.status == "completed" else 0
+        total = round(prev + added, 2)
+        if total > 100:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Total completion cannot exceed 100%. Current total is {prev}%. This feature's share is {equal_share}%.",
+            )
+        tf_ids = [f["id"] for f in tfs]
+        if payload.ticket_feature_id not in tf_ids:
+            raise HTTPException(status_code=400, detail="ticket_feature_id does not belong to this ticket")
+        existing = supabase.table("feature_followups").select("id, status").eq("ticket_feature_id", payload.ticket_feature_id).execute()
+        if existing.data:
+            has_completed = any(f.get("status") == "completed" for f in existing.data)
+            if has_completed and payload.status == "completed":
+                raise HTTPException(status_code=400, detail="This feature is already marked completed")
+        # Store the server-side previous we used (for display/audit)
+        insert_row = {
+            "ticket_feature_id": payload.ticket_feature_id,
+            "previous_percentage": prev,
+            "added_percentage": added,
+            "total_percentage": total,
+            "status": payload.status,
+            "remarks": payload.remarks or None,
+        }
+        tf = next((f for f in tfs if f["id"] == payload.ticket_feature_id), None)
+        if tf:
+            fl = supabase.table("feature_list").select("name").eq("id", tf["feature_id"]).maybe_single().execute()
+            insert_row["feature_name"] = (fl.data or {}).get("name", "")
+        else:
+            insert_row["feature_name"] = ""
+        ins = supabase.table("feature_followups").insert(insert_row).execute()
+        supabase.table("performance_training").update({"total_percentage": total, "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", training["id"]).execute()
+        if payload.status == "completed":
+            supabase.table("ticket_features").update({"status": "Completed"}).eq("id", payload.ticket_feature_id).execute()
+        if _all_features_completed_for_ticket(payload.ticket_id):
+            supabase.table("performance_monitoring").update({"completion_status": "completed", "updated_at": datetime.now(timezone.utc).isoformat()}).eq("id", payload.ticket_id).execute()
+        created = (ins.data or [{}])[0] if ins.data else {}
+        return {"followup": created, "total_percentage": total}
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            raise HTTPException(status_code=503, detail="Run database/SUCCESS_PERFORMANCE_MONITORING.sql and Part2_Part3 migration first.")
+        raise HTTPException(status_code=400, detail=str(e)[:200])
+
+
+
 # ---------- Users (admin = view only; master_admin = view + edit role, deactivate, section permissions) ----------
 # Role name as stored in DB; frontend displays "Master Admin", "Admin", "Approver", "User"
 def _map_role(name: str) -> str:
@@ -2413,7 +2924,7 @@ def _map_role(name: str) -> str:
 SECTION_KEYS = [
     "dashboard", "support_dashboard", "all_tickets", "chores_bugs", "staging", "feature",
     "approval_status", "completed_chores_bugs", "completed_feature",
-    "solution", "task", "settings", "users",
+    "solution", "task", "success_performance", "settings", "users",
 ]
 
 

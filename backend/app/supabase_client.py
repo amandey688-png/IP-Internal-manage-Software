@@ -67,9 +67,12 @@ elif not _key_ok(SUPABASE_ANON_KEY):
     print("⚠️  SUPABASE_ANON_KEY should be a full JWT starting with eyJ — re-copy from Supabase → API")
 
 # Optional: connectivity check on startup with retries (paused projects often wake up after 10–60s).
-# Run in a background thread so the server starts immediately and can accept requests; check runs without blocking.
+# Run in a background thread so the server starts immediately. Retries run silently; only final result is printed.
 def _startup_supabase_check():
     import time
+    skip = (os.getenv("SUPABASE_SKIP_STARTUP_CHECK") or "").strip().lower() in ("1", "true", "yes")
+    if skip:
+        return
     url = SUPABASE_URL.rstrip("/")
     project_ref = ""
     if ".supabase.co" in url:
@@ -78,7 +81,7 @@ def _startup_supabase_check():
         except Exception:
             pass
     unpause_msg = f" Unpause: https://supabase.com/dashboard/project/{project_ref}/settings/general" if project_ref else ""
-    delays = [0, 5, 15, 30]
+    delays = [0, 5, 15, 30]  # Silent retries; no per-attempt logs
     last_e = None
     for attempt, delay in enumerate(delays):
         if delay > 0:
@@ -86,18 +89,15 @@ def _startup_supabase_check():
         try:
             r = httpx.get(f"{url}/rest/v1/", timeout=20.0)
             if r.status_code in (200, 301, 302, 401, 404):
-                print("✓ Supabase reachable — login should work if keys are correct.")
+                print("Supabase reachable - login should work.")
                 return
             last_e = f"HTTP {r.status_code}"
         except Exception as e:
             last_e = e
-            if attempt < len(delays) - 1:
-                print(f"⚠️  Supabase not reachable (attempt {attempt + 1}/{len(delays)}). Retrying in {delays[attempt + 1]}s...")
-            else:
-                print(f"⚠️  Supabase not reachable after {len(delays)} attempts: {type(e).__name__}.{unpause_msg}")
-                print("   Fix .env or network, then restart. Or open GET /health/supabase in browser for details.")
-    if last_e:
-        print(f"⚠️  Supabase returned {last_e}.{unpause_msg}")
+    # Only print once on final failure
+    err_name = type(last_e).__name__ if isinstance(last_e, Exception) else str(last_e)
+    print(f"Supabase not reachable ({err_name}).{unpause_msg}")
+    print("   Check: (1) project not paused, (2) .env URL/keys correct, (3) firewall/HTTPS allowed.")
 
 
 def _run_startup_check_in_background():
