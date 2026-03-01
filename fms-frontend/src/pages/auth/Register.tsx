@@ -73,8 +73,8 @@ export const Register = () => {
   if (success) {
     return (
       <AuthLayout>
-        <div style={{ width: '100%', maxWidth: 360, textAlign: 'center' }}>
-          <h1 style={{ color: colors.white, fontSize: 28, marginBottom: 16 }}>Registration Successful</h1>
+        <div style={{ width: '100%', maxWidth: 750, textAlign: 'center' }}>
+          <h1 style={{ color: colors.white, fontSize: 36, marginBottom: 20 }}>Registration Successful</h1>
           <Text style={{ color: colors.lightBlue, display: 'block', marginBottom: 8 }}>
             Check your email for a confirmation link.
           </Text>
@@ -111,8 +111,8 @@ export const Register = () => {
 
   return (
     <AuthLayout variant="register">
-      <div style={{ width: '100%', maxWidth: 360 }}>
-        <h1 style={{ color: colors.white, fontSize: 32, fontWeight: 700, marginBottom: 32, textAlign: 'center' }}>
+      <div style={{ width: '100%', maxWidth: 750 }}>
+        <h1 style={{ color: colors.white, fontSize: 48, fontWeight: 700, marginBottom: 48, textAlign: 'center' }}>
           Welcome!
         </h1>
 
@@ -126,25 +126,28 @@ export const Register = () => {
         >
           <Form.Item
             name="full_name"
+            style={{ marginBottom: 24 }}
             rules={[
               { required: true, message: "Please enter your name" },
               { min: 2, message: "Minimum 2 characters" },
             ]}
           >
             <Input
-              prefix={<UserOutlined style={{ color: colors.lightBlue, marginRight: 8 }} />}
+              prefix={<UserOutlined style={{ color: colors.lightBlue, marginRight: 8, fontSize: 20 }} />}
               placeholder="Your name"
               size="large"
               style={{
-                borderRadius: 8,
-                padding: '12px 16px',
+                borderRadius: 15,
+                padding: '16px 20px',
                 background: colors.white,
+                fontSize: 18,
               }}
             />
           </Form.Item>
 
           <Form.Item
             name="email"
+            style={{ marginBottom: 24 }}
             rules={[
               { required: true, message: "Please enter your email" },
               {
@@ -156,19 +159,21 @@ export const Register = () => {
             ]}
           >
             <Input
-              prefix={<MailOutlined style={{ color: colors.lightBlue, marginRight: 8 }} />}
+              prefix={<MailOutlined style={{ color: colors.lightBlue, marginRight: 8, fontSize: 20 }} />}
               placeholder="Your e-mail"
               size="large"
               style={{
-                borderRadius: 8,
-                padding: '12px 16px',
+                borderRadius: 15,
+                padding: '16px 20px',
                 background: colors.white,
+                fontSize: 18,
               }}
             />
           </Form.Item>
 
           <Form.Item
             name="password"
+            style={{ marginBottom: 24 }}
             rules={[
               { required: true, message: "Please create a password" },
               {
@@ -185,13 +190,14 @@ export const Register = () => {
             ]}
           >
             <Input.Password
-              prefix={<LockOutlined style={{ color: colors.lightBlue, marginRight: 8 }} />}
+              prefix={<LockOutlined style={{ color: colors.lightBlue, marginRight: 8, fontSize: 20 }} />}
               placeholder="Create password"
               size="large"
               style={{
-                borderRadius: 8,
-                padding: '12px 16px',
+                borderRadius: 15,
+                padding: '16px 20px',
                 background: colors.white,
+                fontSize: 18,
               }}
             />
           </Form.Item>
@@ -202,7 +208,7 @@ export const Register = () => {
               const s = getPasswordStrength(pwd)
               return pwd ? (
                 <div style={{ marginBottom: 24 }}>
-                  <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, display: 'block', marginBottom: 8 }}>
+                  <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 14, display: 'block', marginBottom: 8 }}>
                     Password strength
                   </Text>
                   <div
@@ -228,7 +234,7 @@ export const Register = () => {
             }}
           </Form.Item>
 
-          <Form.Item style={{ marginBottom: 16 }}>
+          <Form.Item style={{ marginBottom: 20 }}>
             <Button
               type="primary"
               htmlType="submit"
@@ -238,9 +244,10 @@ export const Register = () => {
               style={{
                 background: colors.accent,
                 borderColor: colors.accent,
-                borderRadius: 8,
-                height: 48,
+                borderRadius: 15,
+                height: 56,
                 fontWeight: 600,
+                fontSize: 18,
               }}
             >
               Create account
@@ -253,8 +260,9 @@ export const Register = () => {
               size="large"
               onClick={() => navigate(ROUTES.LOGIN)}
               style={{
-                borderRadius: 8,
-                height: 48,
+                borderRadius: 15,
+                height: 56,
+                fontSize: 18,
                 border: `2px solid ${colors.white}`,
                 color: colors.white,
                 background: 'transparent',
