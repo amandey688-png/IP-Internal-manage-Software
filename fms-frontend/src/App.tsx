@@ -19,6 +19,7 @@ import { StagingList } from "./pages/Staging/StagingList"
 import { ChecklistPage } from "./pages/Task/ChecklistPage"
 import { DelegationPage } from "./pages/Task/DelegationPage"
 import { PerformanceMonitoringPage } from "./pages/Success/PerformanceMonitoringPage"
+import { CompPerformPage } from "./pages/Success/CompPerformPage"
 import { UserList } from "./pages/Users/UserList"
 import { SettingsPage } from "./pages/Settings/SettingsPage"
 import { ApprovalConfirmPage } from "./pages/Approval/ApprovalConfirmPage"
@@ -38,6 +39,8 @@ function AppTitle() {
       [ROUTES.STAGING]: "Staging",
       [ROUTES.CHECKLIST]: "Checklist",
       [ROUTES.DELEGATION]: "Delegation",
+      [ROUTES.SUCCESS_PERFORMANCE]: "Performance Monitoring",
+      [ROUTES.SUCCESS_COMP_PERFORM]: "Comp- Perform",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
     }
@@ -185,6 +188,18 @@ function App() {
                   <AppLayout>
                     <ErrorBoundary>
                       <PerformanceMonitoringPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={ROUTES.SUCCESS_COMP_PERFORM}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <CompPerformPage />
                     </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>

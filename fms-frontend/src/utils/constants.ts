@@ -31,6 +31,7 @@ export const SECTION_LABELS: Record<string, string> = {
   solution: 'Solution',
   task: 'Task',
   success_performance: 'Performance Monitoring',
+  success_comp_perform: 'Comp- Perform',
   settings: 'Settings',
   users: 'Users',
 }
@@ -51,6 +52,7 @@ export const ROUTES = {
   DELEGATION: '/task/delegation',
   /** Success module */
   SUCCESS_PERFORMANCE: '/success/performance',
+  SUCCESS_COMP_PERFORM: '/success/comp-perform',
   USERS: '/users',
   SETTINGS: '/settings',
 } as const
