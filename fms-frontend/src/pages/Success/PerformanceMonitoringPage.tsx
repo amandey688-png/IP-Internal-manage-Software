@@ -11,10 +11,10 @@ import {
   Modal,
   Alert,
   Descriptions,
-  Tabs,
   InputNumber,
+  Popover,
 } from 'antd'
-import { PlusOutlined, LineChartOutlined, EditOutlined, FormOutlined, EyeOutlined } from '@ant-design/icons'
+import { PlusOutlined, LineChartOutlined, EditOutlined, FormOutlined } from '@ant-design/icons'
 import { API_BASE_URL } from '../../api/axios'
 
 const { Title } = Typography
@@ -100,7 +100,7 @@ export const PerformanceMonitoringPage = () => {
   const [followupModalOpen, setFollowupModalOpen] = useState(false)
   const [selectedItem, setSelectedItem] = useState<POCItem | null>(null)
   const [setupError, setSetupError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<string>('active')
+  const activeTab = 'active'
   const [followupData, setFollowupData] = useState<{ features: FollowupFeature[]; total_percentage: number | null; initial_percentage: number | null; is_first_followup: boolean }>({ features: [], total_percentage: null, initial_percentage: null, is_first_followup: false })
   const [followupSubmitting, setFollowupSubmitting] = useState(false)
   const [featuresLocked, setFeaturesLocked] = useState(false)
@@ -117,7 +117,7 @@ export const PerformanceMonitoringPage = () => {
 
   useEffect(() => {
     loadItems()
-  }, [activeTab])
+  }, [])
 
   const fetchWithTimeout = (url: string, options: RequestInit = {}) => {
     const controller = new AbortController()
@@ -157,7 +157,7 @@ export const PerformanceMonitoringPage = () => {
   const loadItems = async () => {
     setLoading(true)
     setSetupError(null)
-    const status = activeTab === 'completed' ? 'completed' : 'in_progress'
+    const status = 'in_progress'
     try {
       const res = await fetchWithTimeout(
         `${API_BASE_URL}/success/performance/list?completion_status=${status}`,
@@ -170,7 +170,12 @@ export const PerformanceMonitoringPage = () => {
         const err = await res.json().catch(() => ({}))
         setSetupError(err?.detail || 'Database tables not set up.')
         setItems([])
+      } else if (res.status === 401) {
+        setSetupError('Please log in again to load the list.')
+        setItems([])
       } else {
+        const err = await res.json().catch(() => ({}))
+        setSetupError(err?.detail || 'Failed to load list.')
         setItems([])
       }
     } catch (e) {
@@ -400,8 +405,29 @@ export const PerformanceMonitoringPage = () => {
       dataIndex: 'current_stage',
       key: 'current_stage',
       width: 220,
-      ellipsis: true,
-      render: (v: string) => v || '-',
+      render: (v: string) => {
+        const text = (v || '').trim() || '-'
+        const words = text.split(/\s+/).filter(Boolean)
+        const maxWords = 25
+        const truncated = words.length <= maxWords ? text : words.slice(0, maxWords).join(' ') + '...'
+        if (words.length <= maxWords) {
+          return <span style={{ wordBreak: 'break-word' }}>{text}</span>
+        }
+        return (
+          <Popover
+            content={<div style={{ maxWidth: 360, wordBreak: 'break-word' }}>{text}</div>}
+            title="Current Stage (full)"
+            trigger="click"
+          >
+            <span
+              style={{ cursor: 'pointer', textDecoration: 'underline', wordBreak: 'break-word' }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {truncated}
+            </span>
+          </Popover>
+        )
+      },
     },
     {
       title: 'Actions',
@@ -422,9 +448,6 @@ export const PerformanceMonitoringPage = () => {
               Followup
             </Button>
           )}
-          <Button type="link" size="small" icon={<EyeOutlined />} onClick={() => openViewDetails(record)}>
-            View Details
-          </Button>
         </span>
       ),
     },
@@ -455,29 +478,27 @@ export const PerformanceMonitoringPage = () => {
 
       <Card>
         <div style={{ marginBottom: 16, display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-          <Input
+          <Select
             placeholder="Filter by Reference"
-            value={filterRef}
-            onChange={(e) => setFilterRef(e.target.value)}
-            style={{ width: 160 }}
-            allowClear
-          />
-          <Input
-            placeholder="Filter by Company"
-            value={filterCompany}
-            onChange={(e) => setFilterCompany(e.target.value)}
+            value={filterRef || undefined}
+            onChange={(v) => setFilterRef(v ?? '')}
             style={{ width: 200 }}
             allowClear
+            showSearch
+            optionFilterProp="label"
+            options={[...new Set(items.map((i) => i.reference_no).filter(Boolean))].sort().map((r) => ({ value: r, label: r }))}
+          />
+          <Select
+            placeholder="Filter by Company"
+            value={filterCompany || undefined}
+            onChange={(v) => setFilterCompany(v ?? '')}
+            style={{ width: 240 }}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            options={[...new Set(items.map((i) => i.company_name).filter(Boolean))].sort().map((c) => ({ value: c, label: c }))}
           />
         </div>
-        <Tabs
-          activeKey={activeTab}
-          onChange={(k) => setActiveTab(k)}
-          items={[
-            { key: 'active', label: 'Active Company' },
-            { key: 'completed', label: 'Completed Company' },
-          ]}
-        />
         <Table
           dataSource={displayItems}
           rowKey="id"
@@ -488,6 +509,11 @@ export const PerformanceMonitoringPage = () => {
           })}
           columns={tableColumns}
           pagination={{ pageSize: 20 }}
+          locale={{
+            emptyText: !loading && !setupError
+              ? 'No active companies. Use "Add POC Details" above to add one, or see Comp-Perform for completed companies.'
+              : undefined,
+          }}
         />
       </Card>
 

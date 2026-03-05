@@ -208,7 +208,8 @@ export const TicketList = () => {
       }
       fetchTickets()
     }
-  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, status2Filter, typeOfRequestFilter, showStageFilter, showStageFilterForFeature])
+    // Refetch when navigating back to list (e.g. from ticket detail) so Stage filter shows current data
+  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, status2Filter, typeOfRequestFilter, showStageFilter, showStageFilterForFeature, location.pathname])
 
   const fetchTickets = async () => {
     setLoading(true)
@@ -317,6 +318,14 @@ export const TicketList = () => {
 
   const fetchTicketsRef = useRef(fetchTickets)
   fetchTicketsRef.current = fetchTickets
+  /** Refetch list so Stage filter shows current data (e.g. after a ticket's stage changes or drawer closes). */
+  const refetchList = () => {
+    if ((showStageFilter && stageFilter) || (showStageFilterForFeature && stageFilter)) {
+      fetchAllTicketsForStageFilter()
+    } else {
+      fetchTickets()
+    }
+  }
   useEffect(() => {
     const onTicketCreated = () => fetchTicketsRef.current()
     window.addEventListener('support-ticket-created', onTicketCreated)
@@ -1106,8 +1115,9 @@ export const TicketList = () => {
           onClose={() => {
             setDrawerTicketId(null)
             setDrawerTicketType(null)
+            refetchList()
           }}
-          onUpdate={fetchTickets}
+          onUpdate={refetchList}
           readOnly={sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'solutions'}
         />
       ) : (
@@ -1117,8 +1127,9 @@ export const TicketList = () => {
           onClose={() => {
             setDrawerTicketId(null)
             setDrawerTicketType(null)
+            refetchList()
           }}
-          onUpdate={fetchTickets}
+          onUpdate={refetchList}
           readOnly={sectionFromUrl === 'completed-feature' || (isApprovalSection && isUser && !isMasterAdmin)}
           approvalMode={isApprovalSection}
         />
