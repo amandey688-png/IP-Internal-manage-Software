@@ -1,5 +1,5 @@
 import { Layout, Dropdown, Avatar, Space, Typography, Button, Badge } from 'antd'
-import { UserOutlined, LogoutOutlined, PlusOutlined, MenuOutlined, BellOutlined } from '@ant-design/icons'
+import { UserOutlined, LogoutOutlined, PlusOutlined, MenuOutlined, BellOutlined, DashboardOutlined } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
@@ -55,7 +55,9 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
   const sectionLabel = viewApproval ? 'Approval Status' : section === 'chores-bugs' ? 'Chores & Bugs' : section === 'completed-chores-bugs' ? 'Completed Chores & Bugs' : section === 'completed-feature' ? 'Completed Feature' : section === 'solutions' ? 'Solution' : ''
   const breadcrumb = location.pathname === ROUTES.DASHBOARD
     ? 'Support / Support Overview'
-    : location.pathname.startsWith(ROUTES.TICKETS)
+    : location.pathname === ROUTES.DASHBOARD_KPI
+      ? 'Dashboard - KPI'
+      : location.pathname.startsWith(ROUTES.TICKETS)
       ? sectionLabel ? `Support / ${sectionLabel}` : 'Support / Tickets'
       : location.pathname.startsWith('/solutions')
         ? 'Support / Solutions'
@@ -73,6 +75,7 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
       style={{
         background: '#fff',
         padding: '0 24px',
+        borderBottom: '2px solid #4A6BFF',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
@@ -91,16 +94,24 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
             type="text"
             icon={<MenuOutlined />}
             onClick={onMenuClick}
-            style={{ fontSize: 18 }}
+            style={{ fontSize: 18, color: '#4A6BFF' }}
             aria-label="Open menu"
           />
         )}
         <Space size="small">
           <img src="/logo.png" alt="Logo" style={{ height: 32, width: 'auto', objectFit: 'contain' }} />
-          <Text type="secondary" className="breadcrumb-text" style={{ marginLeft: 12 }}>{breadcrumb}</Text>
+          <Text className="breadcrumb-text" style={{ marginLeft: 12, color: '#343A40' }}>{breadcrumb}</Text>
         </Space>
       </Space>
       <Space size="middle">
+        <Button
+          type="default"
+          icon={<DashboardOutlined />}
+          onClick={() => navigate(ROUTES.DASHBOARD_KPI)}
+          style={{ fontWeight: 500 }}
+        >
+          Dashboard - KPI
+        </Button>
         {!hideAddNew && onAddNew && (
           <Button
             type="primary"
@@ -146,11 +157,11 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
         </Dropdown>
         <Space>
           <div style={{ textAlign: 'right' }}>
-            <Text strong style={{ display: 'block' }}>{user?.full_name}</Text>
+            <Text strong style={{ display: 'block', color: '#4A6BFF' }}>{user?.full_name}</Text>
           </div>
           <Dropdown menu={{ items: menuItems }} placement="bottomRight">
             <Avatar
-              style={{ backgroundColor: '#2c3e50', cursor: 'pointer' }}
+              style={{ backgroundColor: '#4A6BFF', cursor: 'pointer' }}
               icon={user?.avatar_url ? undefined : <UserOutlined />}
               src={user?.avatar_url}
             >

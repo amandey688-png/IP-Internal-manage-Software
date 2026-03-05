@@ -42,6 +42,7 @@ export const ROUTES = {
   OTP: '/otp',
   CONFIRMATION_SUCCESS: '/confirmation-success',
   DASHBOARD: '/dashboard',
+  DASHBOARD_KPI: '/dashboard/kpi',
   SUPPORT_DASHBOARD: '/support/dashboard',
   TICKETS: '/tickets',
   TICKET_DETAIL: '/tickets/:id',

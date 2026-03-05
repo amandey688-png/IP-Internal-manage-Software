@@ -24,7 +24,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
     (location.pathname === ROUTES.TICKETS && !HIDDEN_ADD_NEW_SECTIONS.includes(section ?? ''))
 
   return (
-    <Layout style={{ minHeight: '100vh', background: '#f5f6f8' }}>
+    <Layout style={{ minHeight: '100vh', background: '#F5F7FB' }}>
       <Sidebar
         className="no-print"
         open={sidebarOpen}

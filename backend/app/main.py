@@ -1821,6 +1821,650 @@ def dashboard_detail(
     return {"success": True, "metric": metric, "tickets": result, "total": len(result)}
 
 
+# ---------- Dashboard KPI (Shreyasi / Rimpa – Checklist, Delegation, Support FMS from DB) ----------
+_MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def _dashboard_kpi_resolve_user_id(name: str) -> str | None:
+    """Resolve display name (e.g. Shreyasi, Rimpa) to user_profiles.id. Case-insensitive partial match on full_name."""
+    if not name or not name.strip():
+        return None
+    try:
+        r = supabase.table("user_profiles").select("id").ilike("full_name", f"%{name.strip()}%").limit(1).execute()
+        if r.data and len(r.data) > 0:
+            return r.data[0].get("id")
+    except Exception as e:
+        _log(f"dashboard/kpi resolve user: {e}")
+    return None
+
+
+def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple[date, date] | None:
+    """Return (range_start, range_end) for the given month and week (e.g. week 2). week 1 = 1-7, 2 = 8-14, 3 = 15-21, 4 = 22-28, 5 = 29-31."""
+    try:
+        import calendar
+        _, last_day = calendar.monthrange(year, month_num)
+        week_num = 2
+        if week_str and "week" in week_str.lower():
+            import re
+            m = re.search(r"(\d+)", week_str)
+            if m:
+                week_num = max(1, min(5, int(m.group(1))))
+        start_day = (week_num - 1) * 7 + 1
+        end_day = min(week_num * 7, last_day)
+        if start_day > last_day:
+            start_day = 1
+            end_day = min(7, last_day)
+        range_start = date(year, month_num, start_day)
+        range_end = date(year, month_num, end_day)
+        return range_start, range_end
+    except Exception:
+        return None
+
+
+def _parse_iso_to_date(value) -> date | None:
+    try:
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, str):
+            if "T" in value or " " in value:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+            return date.fromisoformat(value[:10])
+    except Exception:
+        return None
+
+
+@api_router.get("/dashboard/kpi")
+def dashboard_kpi(
+    name: str = Query(..., description="Person name: Shreyasi, Rimpa, etc."),
+    month: str = Query("Feb", description="Month: Jan..Dec"),
+    year: str = Query("2026", description="Year"),
+    week: str = Query("week 2", description="Week: week 1..week 5"),
+    auth: dict = Depends(get_current_user),
+):
+    """KPI data for Checklist, Delegation, Support FMS from DB. No hardcoded data; no Attendance."""
+    try:
+        user_id = _dashboard_kpi_resolve_user_id(name)
+        if not user_id:
+            return {"success": False, "error": f"User not found for name: {name!r}"}
+
+        month_num = 1
+        for i, m in enumerate(_MONTH_NAMES, 1):
+            if m.lower() == (month or "").strip().lower():
+                month_num = i
+                break
+        try:
+            y = int(year or datetime.now().year)
+        except Exception:
+            y = datetime.now().year
+
+        range_week = _dashboard_kpi_week_range(y, month_num, week or "week 2")
+        if not range_week:
+            range_start = date(y, month_num, 1)
+            import calendar
+            _, last = calendar.monthrange(y, month_num)
+            range_end = date(y, month_num, last)
+        else:
+            range_start, range_end = range_week
+
+        # Month range for monthly percentages
+        import calendar
+        _, last_day = calendar.monthrange(y, month_num)
+        month_start = date(y, month_num, 1)
+        month_end = date(y, month_num, last_day)
+
+        holidays_yr = _get_holidays_for_year(y)
+        is_holiday = lambda d, h=holidays_yr: d in h
+
+        # ----- Checklist -----
+        checklist_rows = []
+        checklist_weekly_pct = 0
+        checklist_monthly_pct = 0
+        try:
+            from app.checklist_utils import get_occurrence_dates_in_range
+            q = supabase.table("checklist_tasks").select("*").eq("doer_id", user_id)
+            r = q.execute()
+            tasks = r.data or []
+            task_ids = [t["id"] for t in tasks]
+            comp_week = {}
+            comp_month = {}
+            if task_ids:
+                cr = supabase.table("checklist_completions").select("task_id, occurrence_date, completed_at")
+                cr = cr.gte("occurrence_date", range_start.isoformat()).lte("occurrence_date", range_end.isoformat())
+                cr = cr.in_("task_id", task_ids)
+                for row in (cr.execute().data or []):
+                    comp_week[(row["task_id"], row["occurrence_date"])] = row.get("completed_at")
+                cr2 = supabase.table("checklist_completions").select("task_id, occurrence_date, completed_at")
+                cr2 = cr2.gte("occurrence_date", month_start.isoformat()).lte("occurrence_date", month_end.isoformat())
+                cr2 = cr2.in_("task_id", task_ids)
+                for row in (cr2.execute().data or []):
+                    comp_month[(row["task_id"], row["occurrence_date"])] = row.get("completed_at")
+            occ_week = []
+            occ_month = []
+            for task in tasks:
+                t_id = task["id"]
+                start = task.get("start_date")
+                if isinstance(start, str):
+                    start = date.fromisoformat(start)
+                freq = task.get("frequency", "D")
+                dates_week = get_occurrence_dates_in_range(start, freq, range_start, range_end, is_holiday)
+                dates_month = get_occurrence_dates_in_range(start, freq, month_start, month_end, is_holiday)
+                for d in dates_week:
+                    occ_week.append((t_id, d, task.get("task_name"), task.get("frequency", "")))
+                for d in dates_month:
+                    occ_month.append((t_id, d))
+            done_week = sum(1 for (tid, d, _, _) in occ_week if comp_week.get((tid, d.isoformat())))
+            total_week = len(occ_week)
+            checklist_weekly_pct = round((done_week / total_week) * 100) if total_week else 0
+            done_month = sum(1 for (tid, d) in occ_month if comp_month.get((tid, d.isoformat())))
+            total_month = len(occ_month)
+            checklist_monthly_pct = round((done_month / total_month) * 100) if total_month else 0
+            for (t_id, d, tname, freq) in occ_week:
+                completed = comp_week.get((t_id, d.isoformat()))
+                checklist_rows.append({
+                    "task_name": tname,
+                    "frequency": freq or "",
+                    "status": "Done" if completed else "Pending",
+                    "details": "Done" if completed else "Pending",
+                })
+        except Exception as e:
+            _log(f"dashboard/kpi checklist: {e}")
+
+        # ----- Delegation -----
+        delegation_rows = []
+        delegation_weekly_pct = 0
+        delegation_monthly_pct = 0
+        try:
+            q = supabase.table("delegation_tasks").select("*").eq("assignee_id", user_id)
+            r = q.execute()
+            all_tasks = r.data or []
+            week_tasks = [t for t in all_tasks if t.get("due_date") or t.get("delegation_on")]
+            def _in_week(t):
+                d = t.get("due_date") or t.get("delegation_on")
+                if not d:
+                    return False
+                if isinstance(d, str):
+                    d = date.fromisoformat(d[:10])
+                return range_start <= d <= range_end
+            def _in_month(t):
+                d = t.get("due_date") or t.get("delegation_on")
+                if not d:
+                    return False
+                if isinstance(d, str):
+                    d = date.fromisoformat(d[:10])
+                return month_start <= d <= month_end
+            week_list = [t for t in week_tasks if _in_week(t)]
+            month_list = [t for t in all_tasks if _in_month(t)]
+            total_w = len(week_list)
+            done_w = sum(1 for t in week_list if str(t.get("status") or "").lower() == "completed")
+            delegation_weekly_pct = round((done_w / total_w) * 100) if total_w else 0
+            total_m = len(month_list)
+            done_m = sum(1 for t in month_list if str(t.get("status") or "").lower() == "completed")
+            delegation_monthly_pct = round((done_m / total_m) * 100) if total_m else 0
+            for t in week_list:
+                delegation_rows.append({
+                    "task": t.get("title") or t.get("task") or "",
+                    "status": (t.get("status") or "pending").replace("_", " ").title(),
+                    "shifted_week": t.get("shifted_week") or "",
+                    "month": month,
+                    "button_url": t.get("document_url") or "-",
+                })
+        except Exception as e:
+            _log(f"dashboard/kpi delegation: {e}")
+
+        # ----- Support FMS (tickets: chore/bug, assignee_id OR created_by = user_id) -----
+        response_delay_count = 0
+        completion_delay_count = 0
+        pending_count = 0
+        target_pending = 1
+        total_cb = 0
+        response_delay_details = []
+        completion_delay_details = []
+        pending_details = []
+        try:
+            types_cb = ["chore", "bug"]
+            cols = (
+                "id, reference_no, title, description, type, company_name, created_by, created_at, assignee_id, "
+                "status, status_4, quality_solution, actual_4, query_arrival_at, query_response_at, "
+                "planned_2, actual_2, actual_1, status_2"
+            )
+            # Support FMS should match Support Dashboard logic (global Chores & Bugs, not per-user)
+            tickets = []
+            try:
+                q = supabase.table("tickets").select(cols).in_("type", types_cb)
+                r = q.execute()
+                tickets = r.data or []
+            except Exception:
+                try:
+                    r1 = supabase.table("tickets").select(cols).in_("type", types_cb).execute()
+                    tickets = r1.data or []
+                except Exception as e2:
+                    _log(f"dashboard/kpi tickets fetch: {e2}")
+
+            # Filter tickets to the selected week/month/year using the same helper as Support Dashboard
+            import re as _re_for_week
+            week_num_selected = 1
+            m_week = _re_for_week.search(r"(\d+)", week or "")
+            if m_week:
+                try:
+                    week_num_selected = max(1, min(5, int(m_week.group(1))))
+                except Exception:
+                    week_num_selected = 1
+
+            week_tickets = []
+            for t in tickets:
+                w_num, m_num, y_num = _get_ticket_week(t)
+                if w_num == week_num_selected and m_num == month_num and y_num == y:
+                    week_tickets.append(t)
+
+            for t in week_tickets:
+                created = t.get("created_at") or ""
+                ref = (t.get("reference_no") or "").strip() or "N/A"
+                row_item = {
+                    "type": (t.get("type") or "Chore").title(),
+                    "company": t.get("company_name"),
+                    "requested_person": "",
+                    "submitted_by": "",
+                    "title": t.get("title"),
+                    "description": t.get("description"),
+                    "reference_no": ref,
+                    "query_arrival": str(t.get("query_arrival_at") or created)[:19],
+                    "month": month,
+                }
+                # Response delay: same SLA logic as Support Dashboard (30 min from query_arrival to response)
+                has_resp, resp_text = _has_response_delay(
+                    t.get("query_arrival_at") or t.get("created_at"),
+                    t.get("query_response_at"),
+                )
+                if has_resp:
+                    response_delay_count += 1
+                    response_delay_details.append({**row_item, "delay_time": resp_text or "Delay"})
+
+                # Completion delay: use Stage‑2 SLA helper (same as Support Dashboard stats)
+                has_comp, comp_text = _has_completion_delay(
+                    resolved_at=t.get("actual_4"),
+                    created_at=t.get("created_at"),
+                    ticket_type=t.get("type"),
+                    planned_2=t.get("planned_2"),
+                    actual_2=t.get("actual_2"),
+                    status_2=t.get("status_2"),
+                    actual_1=t.get("actual_1"),
+                )
+                if has_comp:
+                    completion_delay_count += 1
+                    completion_delay_details.append({**row_item, "delay_time": comp_text or "TAT crossed"})
+
+                # Pending chores & bugs for this owner in the selected week
+                status = t.get("status") or ""
+                if _is_pending(status) and not _is_resolved(status, t.get("status_4")):
+                    pending_count += 1
+                    pending_details.append(row_item)
+
+            # Target = total chores & bugs for this week (same as Support Dashboard weekly stats)
+            total_cb = len(week_tickets)
+            target_pending = max(total_cb, 1)
+        except Exception as e:
+            _log(f"dashboard/kpi support FMS: {e}")
+
+        # ----- Success KPI (Performance Monitoring / Training / Followups for this user – MONTH basis) -----
+        success_kpi = None
+        try:
+            # Base performance tickets created by this user (owner)
+            pm_rows: list[dict] = []
+            try:
+                pr = (
+                    supabase.table("performance_monitoring")
+                    .select("id, company_id, message_owner, response, contact, created_at, created_by")
+                    .eq("created_by", user_id)
+                    .execute()
+                )
+                pm_rows = pr.data or []
+            except Exception:
+                pm_rows = []
+
+            if pm_rows:
+                pm_by_id = {row.get("id"): row for row in pm_rows if row.get("id")}
+                company_ids = {row.get("company_id") for row in pm_rows if row.get("company_id")}
+            else:
+                pm_by_id = {}
+                company_ids = set()
+
+            companies_map: dict[str, str] = {}
+            if company_ids:
+                try:
+                    cr = supabase.table("companies").select("id, name").in_("id", list(company_ids)).execute()
+                    companies_map = {c["id"]: c["name"] for c in (cr.data or [])}
+                except Exception:
+                    companies_map = {}
+
+            pm_ids = [pid for pid in pm_by_id.keys() if pid]
+
+            trainings: list[dict] = []
+            if pm_ids:
+                try:
+                    tr = (
+                        supabase.table("performance_training")
+                        .select("*")
+                        .in_("performance_id", pm_ids)
+                        .execute()
+                    )
+                    trainings = tr.data or []
+                except Exception:
+                    trainings = []
+
+            training_by_id = {t.get("id"): t for t in trainings if t.get("id")}
+            perf_for_training = {t.get("id"): t.get("performance_id") for t in trainings if t.get("id")}
+
+            training_ids = [t_id for t_id in training_by_id.keys() if t_id]
+            ticket_features: list[dict] = []
+            if training_ids:
+                try:
+                    tfr = (
+                        supabase.table("ticket_features")
+                        .select("id, training_id, feature_id, status")
+                        .in_("training_id", training_ids)
+                        .execute()
+                    )
+                    ticket_features = tfr.data or []
+                except Exception:
+                    ticket_features = []
+
+            tf_by_id = {tf.get("id"): tf for tf in ticket_features if tf.get("id")}
+            tf_ids = [tid for tid in tf_by_id.keys() if tid]
+            feature_ids = {tf.get("feature_id") for tf in ticket_features if tf.get("feature_id")}
+
+            feature_names: dict[str, str] = {}
+            if feature_ids:
+                try:
+                    fl = (
+                        supabase.table("feature_list")
+                        .select("id, name")
+                        .in_("id", list(feature_ids))
+                        .execute()
+                    )
+                    feature_names = {x["id"]: x["name"] for x in (fl.data or [])}
+                except Exception:
+                    feature_names = {}
+
+            followups: list[dict] = []
+            if tf_ids:
+                try:
+                    fu = (
+                        supabase.table("feature_followups")
+                        .select("*")
+                        .in_("ticket_feature_id", tf_ids)
+                        .execute()
+                    )
+                    followups = fu.data or []
+                except Exception:
+                    followups = []
+
+            # 1) POC Collected (month range)
+            poc_rows = []
+            for row in pm_rows:
+                d = _parse_iso_to_date(row.get("created_at"))
+                if d and month_start <= d <= month_end:
+                    poc_rows.append(row)
+            poc_current = sum(
+                1
+                for row in poc_rows
+                if str(row.get("message_owner") or "").lower() == "yes"
+            )
+            poc_target = len(poc_rows)
+            poc_pct = round((poc_current / poc_target) * 100) if poc_target else 0
+            poc_details = {
+                "companies": [companies_map.get(row.get("company_id"), "") for row in poc_rows],
+                "messageOwner": [row.get("message_owner") for row in poc_rows],
+                "dates": [str(row.get("created_at") or "") for row in poc_rows],
+                "responses": [row.get("response") or "" for row in poc_rows],
+                "contacts": [row.get("contact") or "" for row in poc_rows],
+            }
+
+            # 2) Training Target (month range)
+            trainings_month = []
+            for t in trainings:
+                d = _parse_iso_to_date(t.get("training_schedule_date") or t.get("created_at"))
+                if d and month_start <= d <= month_end:
+                    trainings_month.append(t)
+            train_target = len(trainings_month)
+            train_current = sum(
+                1 for t in trainings_month if str(t.get("training_status") or "").lower() == "yes"
+            )
+            train_pct = round((train_current / train_target) * 100) if train_target else 0
+            # Map training_id -> list of feature names
+            features_by_training: dict[str, list[str]] = {}
+            for tf in ticket_features:
+                tid = tf.get("training_id")
+                if not tid:
+                    continue
+                fname = feature_names.get(tf.get("feature_id"), "")
+                if fname:
+                    features_by_training.setdefault(tid, []).append(fname)
+            train_companies: list[str] = []
+            train_call_poc: list[str] = []
+            train_message_poc: list[str] = []
+            train_dates: list[str] = []
+            train_status: list[str] = []
+            train_remarks: list[str] = []
+            train_features: list[list[str]] = []
+            for t in trainings_month:
+                perf_id = t.get("performance_id")
+                pm_row = pm_by_id.get(perf_id, {})
+                company_name = companies_map.get(pm_row.get("company_id"), "")
+                train_companies.append(company_name)
+                train_call_poc.append(t.get("call_poc") or "")
+                train_message_poc.append(t.get("message_poc") or "")
+                train_dates.append(str(t.get("training_schedule_date") or t.get("created_at") or ""))
+                train_status.append(t.get("training_status") or "")
+                train_remarks.append(t.get("remarks") or "")
+                train_features.append(features_by_training.get(t.get("id"), []))
+            train_details = {
+                "companies": train_companies,
+                "callPOC": train_call_poc,
+                "messagePOC": train_message_poc,
+                "trainingDates": train_dates,
+                "trainingStatus": train_status,
+                "remarks": train_remarks,
+                "features": train_features,
+            }
+
+            # 3) Training Follow-up KPI (month range)
+            followups_month = []
+            for fu in followups:
+                d = _parse_iso_to_date(fu.get("created_at"))
+                if d and month_start <= d <= month_end:
+                    followups_month.append(fu)
+            fu_target = len(followups_month)
+            fu_current = sum(
+                1 for fu in followups_month if str(fu.get("status") or "").lower() == "completed"
+            )
+            fu_pct = round((fu_current / fu_target) * 100) if fu_target else 0
+            fu_companies: list[str] = []
+            fu_remarks: list[str] = []
+            fu_dates: list[str] = []
+            fu_before: list[float | None] = []
+            fu_after: list[float | None] = []
+            fu_features: list[str] = []
+            for fu in followups_month:
+                tf_id = fu.get("ticket_feature_id")
+                tf_row = tf_by_id.get(tf_id, {})
+                tr = training_by_id.get(tf_row.get("training_id"))
+                pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
+                company_name = companies_map.get(pm_row.get("company_id"), "")
+                fu_companies.append(company_name)
+                fu_remarks.append(fu.get("remarks") or "")
+                fu_dates.append(str(fu.get("created_at") or ""))
+                fu_before.append(
+                    float(fu.get("previous_percentage")) if fu.get("previous_percentage") is not None else None
+                )
+                fu_after.append(
+                    float(fu.get("total_percentage")) if fu.get("total_percentage") is not None else None
+                )
+                fname = fu.get("feature_name") or feature_names.get(tf_row.get("feature_id"), "")
+                fu_features.append(fname)
+            fu_details = {
+                "companies": fu_companies,
+                "remarks": fu_remarks,
+                "followupDates": fu_dates,
+                "beforePercentages": fu_before,
+                "afterPercentages": fu_after,
+                "features": [[f] for f in fu_features],
+            }
+
+            # 4) Success Increase KPI (month range)
+            success_rows = [
+                fu
+                for fu in followups_month
+                if fu.get("total_percentage") is not None
+                and fu.get("previous_percentage") is not None
+                and float(fu["total_percentage"]) > float(fu["previous_percentage"])
+            ]
+            success_target = len(followups_month)
+            success_current = len(success_rows)
+            success_pct = round((success_current / success_target) * 100) if success_target else 0
+            succ_companies: list[str] = []
+            succ_remarks: list[str] = []
+            succ_dates: list[str] = []
+            succ_before: list[float | None] = []
+            succ_after: list[float | None] = []
+            succ_features: list[str] = []
+            for fu in success_rows:
+                tf_id = fu.get("ticket_feature_id")
+                tf_row = tf_by_id.get(tf_id, {})
+                tr = training_by_id.get(tf_row.get("training_id"))
+                pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
+                company_name = companies_map.get(pm_row.get("company_id"), "")
+                succ_companies.append(company_name)
+                succ_remarks.append(fu.get("remarks") or "")
+                succ_dates.append(str(fu.get("created_at") or ""))
+                succ_before.append(
+                    float(fu.get("previous_percentage")) if fu.get("previous_percentage") is not None else None
+                )
+                succ_after.append(
+                    float(fu.get("total_percentage")) if fu.get("total_percentage") is not None else None
+                )
+                fname = fu.get("feature_name") or feature_names.get(tf_row.get("feature_id"), "")
+                succ_features.append(fname)
+            succ_details = {
+                "companies": succ_companies,
+                "remarks": succ_remarks,
+                "followupDates": succ_dates,
+                "beforePercentages": succ_before,
+                "afterPercentages": succ_after,
+                "features": [[f] for f in succ_features],
+            }
+
+            # Overall Success KPI percentage = average of four KPI percentages
+            pct_values = [poc_pct, train_pct, fu_pct, success_pct]
+            overall_pct = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
+
+            success_kpi = {
+                "pocCollected": {
+                    "currentValue": poc_current,
+                    "targetValue": poc_target,
+                    "percentage": f"{poc_current}/{poc_target or 0}",
+                    "details": poc_details,
+                },
+                "weeklyTrainingTarget": {
+                    "currentValue": train_current,
+                    "targetValue": train_target,
+                    "percentage": f"{train_current}/{train_target or 0}",
+                    "details": train_details,
+                },
+                "trainingFollowUp": {
+                    "currentValue": fu_current,
+                    "targetValue": fu_target,
+                    "percentage": f"{fu_current}/{fu_target or 0}",
+                    "details": fu_details,
+                },
+                "successIncrease": {
+                    "currentValue": success_current,
+                    "targetValue": success_target,
+                    "percentage": f"{success_current}/{success_target or 0}",
+                    "details": succ_details,
+                },
+                "overallPercentage": overall_pct,
+            }
+        except Exception as e:
+            _log(f"dashboard/kpi success: {e}")
+
+        # For Rimpa dashboard always expose Success KPI (with zeros if not computed)
+        _empty_details = {
+            "companies": [],
+            "messageOwner": [],
+            "dates": [],
+            "responses": [],
+            "contacts": [],
+            "callPOC": [],
+            "messagePOC": [],
+            "trainingDates": [],
+            "trainingStatus": [],
+            "remarks": [],
+            "features": [],
+            "followupDates": [],
+            "beforePercentages": [],
+            "afterPercentages": [],
+        }
+        if (name or "").strip().lower() == "rimpa" and success_kpi is None:
+            success_kpi = {
+                "pocCollected": {"currentValue": 0, "targetValue": 0, "percentage": "0/0", "details": _empty_details},
+                "weeklyTrainingTarget": {"currentValue": 0, "targetValue": 0, "percentage": "0/0", "details": _empty_details},
+                "trainingFollowUp": {"currentValue": 0, "targetValue": 0, "percentage": "0/0", "details": _empty_details},
+                "successIncrease": {"currentValue": 0, "targetValue": 0, "percentage": "0/0", "details": _empty_details},
+                "overallPercentage": 0,
+            }
+
+        applied = {"name": name, "month": month, "year": year, "week": week}
+        return {
+            "success": True,
+            "meta": {
+                "applied": applied,
+                "availableMonths": list(_MONTH_NAMES),
+                "availableWeeks": ["week 1", "week 2", "week 3", "week 4", "week 5"],
+                "availableYears": ["2024", "2025", "2026", "2027"],
+            },
+            "checklist": {
+                "rows": checklist_rows,
+                "totals": {"done": sum(1 for r in checklist_rows if (r.get("status") or "").lower() == "done"), "pending": sum(1 for r in checklist_rows if (r.get("status") or "").lower() != "done")},
+                "weeklyPercentage": checklist_weekly_pct,
+            },
+            "delegation": {
+                "rows": delegation_rows,
+                "weeklyPercentage": delegation_weekly_pct,
+            },
+            "supportFMS": {
+                "responseDelay": {
+                    "value": response_delay_count,
+                    "target": total_cb,
+                    "percentage": f"{response_delay_count}/{total_cb or 0}",
+                    "details": response_delay_details,
+                },
+                "completionDelay": {
+                    "value": completion_delay_count,
+                    "target": total_cb,
+                    "percentage": f"{completion_delay_count}/{total_cb or 0}",
+                    "details": completion_delay_details,
+                },
+                "pendingChores": {
+                    "value": pending_count,
+                    "target": max(target_pending, 1),
+                    "percentage": f"{pending_count}/{max(target_pending, 1)}",
+                    "details": pending_details,
+                },
+            },
+            "successKpi": success_kpi,
+            "monthlyPercentages": {
+                "checklist": checklist_monthly_pct,
+                "delegation": delegation_monthly_pct,
+                "supportFMS": round(( (target_pending - pending_count) / target_pending * 100 ) if target_pending else 0),
+            },
+        }
+    except Exception as e:
+        _log(f"dashboard/kpi: {e}")
+        return {"success": False, "error": str(e)}
+
+
 # ---------- Support Dashboard Stats (FMS-style: weekly, pending grouped, top companies, features) ----------
 def _week_of_month(dt: datetime) -> int:
     """Week of month (1-5) based on first Monday of month."""
@@ -2924,7 +3568,7 @@ def _map_role(name: str) -> str:
 SECTION_KEYS = [
     "dashboard", "support_dashboard", "all_tickets", "chores_bugs", "staging", "feature",
     "approval_status", "completed_chores_bugs", "completed_feature",
-    "solution", "task", "success_performance", "settings", "users",
+    "solution", "task", "success_performance", "success_comp_perform", "settings", "users",
 ]
 
 
