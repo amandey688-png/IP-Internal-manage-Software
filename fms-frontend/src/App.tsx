@@ -11,6 +11,7 @@ import { OTPVerification } from "./pages/auth/OTPVerification"
 import { ConfirmationSuccess } from "./pages/auth/ConfirmationSuccess"
 
 import { Dashboard } from "./pages/Dashboard"
+import { DashboardKPIPage } from "./pages/Dashboard/DashboardKPIPage"
 import { ErrorBoundary } from "./components/common/ErrorBoundary"
 import { TicketList } from "./pages/Tickets/TicketList"
 import { TicketDetail } from "./pages/Tickets/TicketDetail"
@@ -34,6 +35,7 @@ function AppTitle() {
       [ROUTES.LOGIN]: "Login",
       [ROUTES.REGISTER]: "Register",
       [ROUTES.DASHBOARD]: "Dashboard",
+      [ROUTES.DASHBOARD_KPI]: "Dashboard - KPI",
       [ROUTES.SUPPORT_DASHBOARD]: "Support Dashboard",
       [ROUTES.TICKETS]: "Tickets",
       [ROUTES.STAGING]: "Staging",
@@ -55,13 +57,16 @@ function App() {
     <ConfigProvider
       theme={{
         token: {
-          colorPrimary: "#2c3e50",
+          colorPrimary: "#4A6BFF",
+          colorBgLayout: "#F5F7FB",
+          colorBgContainer: "#FFFFFF",
+          colorText: "#343A40",
+          colorTextSecondary: "#6C757D",
           borderRadius: 8,
-          colorBgContainer: "#ffffff",
         },
         components: {
           Card: {
-            borderRadiusLG: 12,
+            borderRadiusLG: 8,
           },
         },
       }}
@@ -94,6 +99,19 @@ function App() {
                   <AppLayout>
                     <ErrorBoundary>
                       <Dashboard />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path={ROUTES.DASHBOARD_KPI}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <DashboardKPIPage />
                     </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>

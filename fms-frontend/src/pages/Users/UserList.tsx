@@ -83,6 +83,7 @@ export const UserList = () => {
     setSelectedUser(user)
     setEditModalOpen(true)
     const userWithExtra = user as User & { display_name?: string; role_id?: string }
+    form.resetFields()
     form.setFieldsValue({
       full_name: user.full_name,
       display_name: userWithExtra.display_name ?? user.full_name,
@@ -101,8 +102,8 @@ export const UserList = () => {
         const p = perms.find((x: SectionPermission) => x.section_key === key)
         return {
           section_key: key,
-          can_view: p?.can_view ?? true,
-          can_edit: p?.can_edit ?? false,
+          can_view: Boolean(p?.can_view !== false),
+          can_edit: Boolean(p?.can_edit === true),
         }
       })
       form.setFieldsValue({
@@ -150,9 +151,9 @@ export const UserList = () => {
         await usersApi.updateSectionPermissions(
           selectedUser.id,
           permissions.map((p: SectionPermission) => ({
-            section_key: p.section_key,
-            can_view: !!p.can_view,
-            can_edit: !!p.can_edit,
+            section_key: String(p.section_key),
+            can_view: Boolean(p.can_view !== false),
+            can_edit: Boolean(p.can_edit === true),
           }))
         )
       }
