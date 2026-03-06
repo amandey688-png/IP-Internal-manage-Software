@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Card, Typography, Button, Table, Space, Modal, Form, Input, Select, message, DatePicker } from 'antd'
 import type { Dayjs } from 'dayjs'
 import { PlusOutlined } from '@ant-design/icons'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { ROUTES } from '../../utils/constants'
 import { leadsApi, type Lead } from '../../api/leads'
@@ -16,6 +16,10 @@ const wrapRender = (v: string | undefined) => (
 
 export const LeadListPage = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const statusFilter = searchParams.get('status') // 'Closed' for Closed Leads section
+  const isClosedLeads = statusFilter === 'Closed'
+
   const [leads, setLeads] = useState<Lead[]>([])
   const [loading, setLoading] = useState(false)
   const [addModalOpen, setAddModalOpen] = useState(false)
@@ -30,14 +34,9 @@ export const LeadListPage = () => {
 
   const loadLeads = () => {
     setLoading(true)
-    const params: { status?: string; company?: string; stage?: string; reference_no?: string; date_from?: string; date_to?: string } = {}
-    if (filterCompany) params.company = filterCompany
-    if (filterStage) params.stage = filterStage
-    if (filterReferenceNo) params.reference_no = filterReferenceNo
-    if (filterDateRange?.[0]) params.date_from = filterDateRange[0].format('YYYY-MM-DD')
-    if (filterDateRange?.[1]) params.date_to = filterDateRange[1].format('YYYY-MM-DD')
+    const listStatus = isClosedLeads ? 'Closed' : 'Open'
     leadsApi
-      .list(params)
+      .list({ status: listStatus })
       .then((res) => setLeads(res.leads || []))
       .catch(() => message.error('Failed to load leads'))
       .finally(() => setLoading(false))
@@ -47,11 +46,7 @@ export const LeadListPage = () => {
     loadLeads()
     leadsApi.getStages().then((res) => setStages(res.stages || []))
     leadsApi.getUsers().then((res) => setUsers(res.users || []))
-  }, [])
-
-  useEffect(() => {
-    loadLeads()
-  }, [filterCompany, filterStage, filterReferenceNo, filterDateRange])
+  }, [statusFilter])
 
   const companyOptions = useMemo(() => {
     const names = Array.from(new Set(leads.map((l) => l.company_name).filter(Boolean))) as string[]
@@ -62,6 +57,31 @@ export const LeadListPage = () => {
     const refs = Array.from(new Set(leads.map((l) => l.reference_no).filter(Boolean))) as string[]
     return refs.sort().map((r) => ({ label: r, value: r }))
   }, [leads])
+
+  const filteredLeads = useMemo(() => {
+    let result = leads
+    if (filterCompany && filterCompany.trim()) {
+      const search = filterCompany.trim().toLowerCase()
+      result = result.filter((l) => (l.company_name || '').toLowerCase().includes(search))
+    }
+    if (filterStage && filterStage.trim()) {
+      result = result.filter((l) => (l.stage || '').trim() === filterStage.trim())
+    }
+    if (filterReferenceNo && filterReferenceNo.trim()) {
+      const search = filterReferenceNo.trim().toLowerCase()
+      result = result.filter((l) => (l.reference_no || '').toLowerCase().includes(search))
+    }
+    if (filterDateRange?.[0] || filterDateRange?.[1]) {
+      result = result.filter((l) => {
+        const created = l.created_at ? dayjs(l.created_at) : null
+        if (!created) return false
+        if (filterDateRange[0] && created.isBefore(filterDateRange[0], 'day')) return false
+        if (filterDateRange[1] && created.isAfter(filterDateRange[1], 'day')) return false
+        return true
+      })
+    }
+    return result
+  }, [leads, filterCompany, filterStage, filterReferenceNo, filterDateRange])
 
   const handleAddLead = () => {
     form.validateFields().then((values) => {
@@ -97,11 +117,13 @@ export const LeadListPage = () => {
     <div style={{ padding: 24 }}>
       <Space style={{ marginBottom: 16 }} wrap>
         <Title level={4} style={{ margin: 0 }}>
-          Lead
+          {isClosedLeads ? 'Closed Leads' : 'Lead'}
         </Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
-          Add Lead Details
-        </Button>
+        {!isClosedLeads && (
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddModalOpen(true)}>
+            Add Lead Details
+          </Button>
+        )}
       </Space>
 
       <Card>
@@ -148,7 +170,7 @@ export const LeadListPage = () => {
 
         <Table
           loading={loading}
-          dataSource={leads}
+          dataSource={filteredLeads}
           rowKey="id"
           onRow={(record) => ({
             onClick: () => navigate(ROUTES.LEAD_DETAIL.replace(':id', record.reference_no)),

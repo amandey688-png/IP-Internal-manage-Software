@@ -99,6 +99,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const leadItems: MenuProps['items'] = [
     { key: ROUTES.LEADS, icon: <UserAddOutlined />, label: <Link to={ROUTES.LEADS} style={linkStyle}>Lead</Link> },
+    { key: ROUTES.LEADS_CLOSED, icon: <UserAddOutlined />, label: <Link to={ROUTES.LEADS_CLOSED} style={linkStyle}>Closed Leads</Link> },
   ]
 
   const showDashboard = canViewSectionByKey('dashboard')

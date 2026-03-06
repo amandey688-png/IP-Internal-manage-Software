@@ -59,6 +59,7 @@ export const ROUTES = {
   /** Client to Lead module */
   CLIENT_TO_LEAD: '/client-to-lead',
   LEADS: '/client-to-lead/leads',
+  LEADS_CLOSED: '/client-to-lead/leads?status=Closed',
   LEAD_DETAIL: '/client-to-lead/leads/:id',
   USERS: '/users',
   SETTINGS: '/settings',

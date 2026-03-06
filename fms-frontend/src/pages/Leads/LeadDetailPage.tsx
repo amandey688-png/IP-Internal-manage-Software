@@ -7,10 +7,10 @@ import {
   Modal,
   Form,
   message,
-  Tag,
   Spin,
   Input,
   Descriptions,
+  Segmented,
 } from 'antd'
 import { ArrowLeftOutlined, CheckCircleOutlined, EditOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -40,6 +40,7 @@ export const LeadDetailPage = () => {
   const [loading, setLoading] = useState(true)
   const [stageModal, setStageModal] = useState<{ slug: string; title: string } | null>(null)
   const [submitLoading, setSubmitLoading] = useState(false)
+  const [statusUpdating, setStatusUpdating] = useState(false)
   const [form] = Form.useForm()
 
   const loadLead = () => {
@@ -136,14 +137,38 @@ export const LeadDetailPage = () => {
       </Space>
 
       <Card style={{ marginBottom: 24 }}>
-        <Space wrap align="center">
+        <Space wrap align="center" size="middle">
           <Text strong style={{ fontSize: 16 }}>
             {dayjs(lead.created_at).format('DD MMM YYYY HH:mm')}
           </Text>
           <Title level={4} style={{ margin: 0 }}>
             {lead.reference_no} – {lead.company_name}
           </Title>
-          <Tag color={lead.status === 'Open' ? 'blue' : 'default'}>{lead.status}</Tag>
+          <Segmented
+            value={lead.status}
+            options={[
+              { label: 'Open', value: 'Open' },
+              { label: 'Closed', value: 'Closed' },
+            ]}
+            disabled={statusUpdating}
+            onChange={async (value) => {
+              const newStatus = value as string
+              if (newStatus !== 'Open' && newStatus !== 'Closed' || newStatus === lead.status) return
+              setStatusUpdating(true)
+              try {
+                await leadsApi.update(lead.id, { status: newStatus })
+                message.success(newStatus === 'Closed' ? 'Lead marked as Closed. It will appear under Closed Leads.' : 'Lead reopened.')
+                loadLead()
+                if (newStatus === 'Closed') {
+                  navigate(ROUTES.LEADS_CLOSED)
+                }
+              } catch {
+                message.error('Failed to update status')
+              } finally {
+                setStatusUpdating(false)
+              }
+            }}
+          />
           <Text type="secondary">Stage: {lead.stage}</Text>
           {lead.assigned_poc_name && <Text type="secondary">POC: {lead.assigned_poc_name}</Text>}
         </Space>

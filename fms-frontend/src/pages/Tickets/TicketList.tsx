@@ -944,7 +944,10 @@ export const TicketList = () => {
             placeholder="Company"
             style={{ width: 220 }}
             value={filters.company_ids?.length ? filters.company_ids : undefined}
-            onChange={(v) => setFilters((f) => ({ ...f, company_ids: Array.isArray(v) ? v : [] }))}
+            onChange={(v) => {
+              setFilters((f) => ({ ...f, company_ids: Array.isArray(v) ? v : [] }))
+              setPage(1)
+            }}
             allowClear
             showSearch
             optionFilterProp="label"

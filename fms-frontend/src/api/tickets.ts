@@ -169,9 +169,22 @@ export const ticketsApi = {
     sort_by?: string
     sort_order?: string
   }): Promise<ApiResponse<PaginatedResponse<Ticket>>> => {
+    // Serialize arrays as repeated keys (company_ids=id1&company_ids=id2) so FastAPI receives list[str]
+    const paramsSerializer = (p: Record<string, unknown>) => {
+      const search = new URLSearchParams()
+      Object.entries(p || {}).forEach(([key, value]) => {
+        if (value === undefined || value === null || value === '') return
+        if (Array.isArray(value)) {
+          value.forEach((v) => search.append(key, String(v)))
+        } else {
+          search.append(key, String(value))
+        }
+      })
+      return search.toString()
+    }
     const response = await apiClient.get<ApiResponse<PaginatedResponse<Ticket>>>(
       '/tickets',
-      { params }
+      { params, paramsSerializer }
     )
     return response.data
   },
