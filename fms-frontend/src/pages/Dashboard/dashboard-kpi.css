@@ -1,8 +1,30 @@
-/* KPI Dashboard page layout */
+/* KPI Dashboard page layout – responsive for all screen sizes */
 .dashboard-kpi-page {
-  padding: 24px;
+  padding: 16px;
   background: radial-gradient(circle at top left, #f5f7ff 0, #eef2ff 40%, #fdfcff 100%);
   min-height: 100%;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+@media (min-width: 576px) {
+  .dashboard-kpi-page {
+    padding: 20px;
+  }
+}
+
+@media (min-width: 768px) {
+  .dashboard-kpi-page {
+    padding: 24px;
+  }
+}
+
+@media (min-width: 992px) {
+  .dashboard-kpi-page {
+    padding: 24px 32px;
+  }
 }
 
 /* Hero section for "Dashboard - KPI" */
@@ -217,6 +239,18 @@
   box-shadow: 0 4px 16px rgba(15, 23, 42, 0.06);
 }
 
+/* Support FMS section – bold, eye-catching heading */
+.kpi-section-card--support-fms .support-fms-heading {
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: 0.02em;
+  color: #1677ff;
+}
+.kpi-section-card--support-fms .ant-card-head-title .anticon {
+  color: #1677ff;
+  font-size: 1.2em;
+}
+
 .kpi-section-card .ant-card-head {
   border-bottom: none;
 }
@@ -236,5 +270,39 @@
 
 .kpi-modal .ant-table-thead > tr > th {
   background: #f3f5ff;
+}
+
+/* Clickable monthly summary cards */
+.kpi-summary-card--clickable:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
+}
+
+/* Graph modal – responsive chart container */
+.kpi-graph-modal .ant-modal-body {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+/* Responsive: Support FMS row cards stack on small screens */
+@media (max-width: 767px) {
+  .kpi-section-card--support-fms .ant-row {
+    flex-direction: column;
+  }
+  .kpi-section-card--support-fms .ant-col {
+    max-width: 100%;
+  }
+  .kpi-summary-card .ant-progress-circle {
+    transform: scale(0.95);
+  }
+}
+
+/* Ensure selects and filters wrap on small screens */
+.dashboard-kpi-page .ant-space-wrap {
+  width: 100%;
+}
+.dashboard-kpi-page .ant-select {
+  min-width: 0;
+  max-width: 100%;
 }
 

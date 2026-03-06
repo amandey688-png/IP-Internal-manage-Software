@@ -1,6 +1,15 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Typography, Card, Button, Select, Row, Col, Table, Progress, Tag, Space, Spin, message, Modal } from 'antd'
 import { DashboardOutlined, ArrowLeftOutlined, CheckSquareOutlined, SwapOutlined, CustomerServiceOutlined, UnorderedListOutlined } from '@ant-design/icons'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts'
 import dayjs from 'dayjs'
 import './dashboard-kpi.css'
 import {
@@ -20,6 +29,13 @@ const DASHBOARD_OPTIONS: { key: DashboardKpiPerson; label: string }[] = [
   { key: 'Shreyasi', label: 'Shreyasi Dashboard' },
   { key: 'Rimpa', label: 'Rimpa Dashboard' },
 ]
+
+/** Format ISO date/time as 'YYYY-MM-DD hh:mm AM/PM' for Query Arrival display */
+const formatQueryArrival = (val: string | null | undefined): string => {
+  if (!val) return '—'
+  const d = dayjs(val)
+  return d.isValid() ? d.format('YYYY-MM-DD hh:mm A') : String(val)
+}
 
 const getPerformanceLevel = (value?: number) => {
   const pct = typeof value === 'number' ? value : 0
@@ -47,6 +63,7 @@ export const DashboardKPIPage = () => {
         title: string
       }
   >(null)
+  const [graphModal, setGraphModal] = useState<'checklist' | 'delegation' | 'supportFMS' | 'successKpi' | null>(null)
 
   // Default filters: show data for the week prior to the current week
   useEffect(() => {
@@ -188,15 +205,16 @@ export const DashboardKPIPage = () => {
 
         {!loading && data && data.success !== false && (
           <>
-            {/* Monthly KPI summary */}
+            {/* Monthly KPI summary – click to show weekly % graph */}
             {monthly && (
               <Row gutter={[16, 16]}>
-                <Col xs={24} sm={8}>
+                <Col xs={24} sm={24} md={8}>
                   <Card
                     size="small"
                     title="Checklist (Monthly %)"
-                    className="kpi-summary-card kpi-summary-card--checklist"
-                    style={{ borderTop: '3px solid #4A6BFF' }}
+                    className="kpi-summary-card kpi-summary-card--checklist kpi-summary-card--clickable"
+                    style={{ borderTop: '3px solid #4A6BFF', cursor: 'pointer' }}
+                    onClick={() => setGraphModal('checklist')}
                   >
                     <Space direction="vertical" align="center">
                       <Progress type="circle" percent={monthly.checklist ?? 0} size={80} strokeColor="#4A6BFF" />
@@ -206,15 +224,17 @@ export const DashboardKPIPage = () => {
                       >
                         {getPerformanceLevel(monthly.checklist).label} Performance
                       </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Click to see weekly %</Text>
                     </Space>
                   </Card>
                 </Col>
-                <Col xs={24} sm={8}>
+                <Col xs={24} sm={24} md={8}>
                   <Card
                     size="small"
                     title="Delegation (Monthly %)"
-                    className="kpi-summary-card kpi-summary-card--delegation"
-                    style={{ borderTop: '3px solid #28A745' }}
+                    className="kpi-summary-card kpi-summary-card--delegation kpi-summary-card--clickable"
+                    style={{ borderTop: '3px solid #28A745', cursor: 'pointer' }}
+                    onClick={() => setGraphModal('delegation')}
                   >
                     <Space direction="vertical" align="center">
                       <Progress type="circle" percent={monthly.delegation ?? 0} size={80} strokeColor="#28A745" />
@@ -224,16 +244,18 @@ export const DashboardKPIPage = () => {
                       >
                         {getPerformanceLevel(monthly.delegation).label} Performance
                       </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Click to see weekly %</Text>
                     </Space>
                   </Card>
                 </Col>
                 {selectedPerson === 'Shreyasi' && (
-                <Col xs={24} sm={8}>
+                <Col xs={24} sm={24} md={8}>
                   <Card
                     size="small"
                     title="Support FMS (Monthly %)"
-                    className="kpi-summary-card kpi-summary-card--support"
-                    style={{ borderTop: '3px solid #FFC107' }}
+                    className="kpi-summary-card kpi-summary-card--support kpi-summary-card--clickable"
+                    style={{ borderTop: '3px solid #FFC107', cursor: 'pointer' }}
+                    onClick={() => setGraphModal('supportFMS')}
                   >
                     <Space direction="vertical" align="center">
                       <Progress type="circle" percent={monthly.supportFMS ?? 0} size={80} strokeColor="#FFC107" />
@@ -243,17 +265,19 @@ export const DashboardKPIPage = () => {
                       >
                         {getPerformanceLevel(monthly.supportFMS).label} Performance
                       </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Click to see weekly %</Text>
                     </Space>
                   </Card>
                 </Col>
                 )}
                 {selectedPerson === 'Rimpa' && data?.successKpi != null && (
-                <Col xs={24} sm={8}>
+                <Col xs={24} sm={24} md={8}>
                   <Card
                     size="small"
                     title="Success KPI (Monthly %)"
-                    className="kpi-summary-card kpi-summary-card--support"
-                    style={{ borderTop: '3px solid #FAAD14' }}
+                    className="kpi-summary-card kpi-summary-card--support kpi-summary-card--clickable"
+                    style={{ borderTop: '3px solid #FAAD14', cursor: 'pointer' }}
+                    onClick={() => setGraphModal('successKpi')}
                   >
                     <Space direction="vertical" align="center">
                       <Progress type="circle" percent={data.successKpi.overallPercentage ?? 0} size={80} strokeColor="#FAAD14" />
@@ -263,6 +287,7 @@ export const DashboardKPIPage = () => {
                       >
                         {getPerformanceLevel(data.successKpi.overallPercentage).label} Performance
                       </div>
+                      <Text type="secondary" style={{ fontSize: 12 }}>Click to see weekly %</Text>
                     </Space>
                   </Card>
                 </Col>
@@ -397,9 +422,9 @@ export const DashboardKPIPage = () => {
               </Card>
             )}
 
-            {/* Support FMS – Shreyasi only; clickable cards open detail modal */}
+            {/* Support FMS – Shreyasi only; clickable cards open detail modal; show Weekly % in title */}
             {supportFMS && selectedPerson === 'Shreyasi' && (
-              <Card className="kpi-section-card" title={<Space><CustomerServiceOutlined />Support FMS</Space>}>
+              <Card className="kpi-section-card kpi-section-card--support-fms" title={<Space><CustomerServiceOutlined /><span className="support-fms-heading">Support FMS (Weekly: {supportFMS.weeklyPercentage ?? 0}%)</span></Space>}>
                 <Row gutter={[16, 16]}>
                   <Col xs={24} md={8}>
                     <Card
@@ -575,7 +600,7 @@ export const DashboardKPIPage = () => {
                       contact: successKpi.pocCollected.details.contacts?.[i] ?? '',
                     }))}
                     columns={[
-                      { title: 'Company', dataIndex: 'company', key: 'company', width: 150 },
+                      { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
                       { title: 'Message Owner', dataIndex: 'messageOwner', key: 'messageOwner', width: 120 },
                       { title: 'Date', dataIndex: 'date', key: 'date', width: 140 },
                       { title: 'Response', dataIndex: 'response', key: 'response' },
@@ -597,7 +622,7 @@ export const DashboardKPIPage = () => {
                       remarks: successKpi.weeklyTrainingTarget.details.remarks?.[i] ?? '',
                     }))}
                     columns={[
-                      { title: 'Company', dataIndex: 'company', key: 'company', width: 150 },
+                      { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
                       { title: 'Call POC', dataIndex: 'callPOC', key: 'callPOC', width: 90 },
                       { title: 'Message POC', dataIndex: 'messagePOC', key: 'messagePOC', width: 110 },
                       { title: 'Training Date', dataIndex: 'trainingDate', key: 'trainingDate', width: 130 },
@@ -618,7 +643,7 @@ export const DashboardKPIPage = () => {
                       after: successKpi.trainingFollowUp.details.afterPercentages?.[i] ?? null,
                     }))}
                     columns={[
-                      { title: 'Company', dataIndex: 'company', key: 'company', width: 150 },
+                      { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
                       { title: 'Call Date', dataIndex: 'callDate', key: 'callDate', width: 130 },
                       { title: 'Before %', dataIndex: 'before', key: 'before', width: 100 },
                       { title: 'After %', dataIndex: 'after', key: 'after', width: 100 },
@@ -637,7 +662,7 @@ export const DashboardKPIPage = () => {
                       after: successKpi.successIncrease.details.afterPercentages?.[i] ?? null,
                     }))}
                     columns={[
-                      { title: 'Company', dataIndex: 'company', key: 'company', width: 150 },
+                      { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
                       { title: 'Call Date', dataIndex: 'callDate', key: 'callDate', width: 130 },
                       { title: 'Before %', dataIndex: 'before', key: 'before', width: 100 },
                       { title: 'After %', dataIndex: 'after', key: 'after', width: 100 },
@@ -648,13 +673,57 @@ export const DashboardKPIPage = () => {
               </Modal>
             )}
 
+            {/* Weekly % graph modal – opened when user clicks a monthly summary card */}
+            <Modal
+              title={graphModal ? `Weekly % – ${graphModal === 'checklist' ? 'Checklist' : graphModal === 'delegation' ? 'Delegation' : graphModal === 'supportFMS' ? 'Support FMS' : 'Success KPI'} (${month} ${year})` : ''}
+              open={!!graphModal}
+              onCancel={() => setGraphModal(null)}
+              footer={null}
+              width="min(96vw, 640)"
+              className="kpi-modal kpi-graph-modal"
+            >
+              {graphModal && data?.weeklyProgress && (
+                <div style={{ width: '100%', minHeight: 320 }}>
+                  <ResponsiveContainer width="100%" height={320}>
+                    <BarChart
+                      data={(data.weeklyProgress.weeks ?? []).map((weekName, i) => ({
+                        name: weekName,
+                        percentage: graphModal === 'checklist'
+                          ? (data.weeklyProgress!.checklist?.[i] ?? 0)
+                          : graphModal === 'delegation'
+                            ? (data.weeklyProgress!.delegation?.[i] ?? 0)
+                            : graphModal === 'supportFMS'
+                              ? (data.weeklyProgress!.supportFMS?.[i] ?? 0)
+                              : (data.weeklyProgress!.successKpi?.[i] ?? 0),
+                      }))}
+                      margin={{ top: 16, right: 24, left: 0, bottom: 24 }}
+                    >
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
+                      <Tooltip formatter={(value: number) => [`${value}%`, 'Weekly %']} labelFormatter={(label) => `${label}`} />
+                      <Bar
+                        dataKey="percentage"
+                        name="Weekly %"
+                        fill={graphModal === 'checklist' ? '#4A6BFF' : graphModal === 'delegation' ? '#28A745' : graphModal === 'supportFMS' ? '#FFC107' : '#FAAD14'}
+                        radius={[4, 4, 0, 0]}
+                      />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+              {graphModal && (!data?.weeklyProgress || (data.weeklyProgress.weeks?.length ?? 0) === 0) && (
+                <Text type="secondary">No weekly data available for this month.</Text>
+              )}
+            </Modal>
+
             {/* Detail modal for Support FMS cards */}
             <Modal
               title={detailModal?.title}
               open={!!detailModal}
               onCancel={() => setDetailModal(null)}
               footer={null}
-              width={800}
+              width={900}
               className="kpi-modal"
             >
               {detailModal && (
@@ -664,10 +733,39 @@ export const DashboardKPIPage = () => {
                   columns={[
                     { title: 'Ref', dataIndex: 'reference_no', key: 'reference_no', width: 100 },
                     { title: 'Type', dataIndex: 'type', key: 'type', width: 80 },
-                    { title: 'Company', dataIndex: 'company', key: 'company', ellipsis: true },
-                    { title: 'Title', dataIndex: 'title', key: 'title', ellipsis: true },
-                    { title: 'Query Arrival', dataIndex: 'query_arrival', key: 'query_arrival', width: 140 },
-                    { title: 'Delay / Note', dataIndex: 'delay_time', key: 'delay_time', width: 100 },
+                    {
+                      title: 'Company',
+                      dataIndex: 'company',
+                      key: 'company',
+                      width: 160,
+                      ellipsis: false,
+                      render: (val: string) => (
+                        <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>
+                          {val ?? '—'}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: 'Title & Description',
+                      key: 'title_description',
+                      width: 280,
+                      ellipsis: true,
+                      render: (_: unknown, record: SupportFmsDelayItem) => (
+                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                          <span style={{ fontWeight: 600 }}>{record.title ?? '—'}</span>
+                          {record.description ? (
+                            <>
+                              <br />
+                              <span style={{ fontWeight: 400 }}>{record.description}</span>
+                            </>
+                          ) : null}
+                        </div>
+                      ),
+                    },
+                    { title: 'Query Arrival', dataIndex: 'query_arrival', key: 'query_arrival', width: 160, render: (v: string) => formatQueryArrival(v) },
+                    ...(detailModal.title.startsWith('Response Delay') || detailModal.title.startsWith('Completion Delay')
+                      ? [{ title: 'Delay / Note', dataIndex: 'delay_time', key: 'delay_time', width: 120, render: (v: string) => v ?? '—' }]
+                      : []),
                   ]}
                   pagination={detailModal.items.length > 10 ? { pageSize: 10 } : false}
                 />
