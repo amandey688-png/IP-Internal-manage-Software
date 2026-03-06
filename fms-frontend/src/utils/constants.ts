@@ -61,6 +61,7 @@ export const ROUTES = {
   LEADS: '/client-to-lead/leads',
   LEADS_CLOSED: '/client-to-lead/leads?status=Closed',
   LEAD_DETAIL: '/client-to-lead/leads/:id',
+  LEADS_IMPORT: '/client-to-lead/import',
   USERS: '/users',
   SETTINGS: '/settings',
 } as const

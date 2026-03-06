@@ -4461,6 +4461,7 @@ class CreateLeadRequest(BaseModel):
     company_name: str
     stage: str
     assigned_poc_id: str | None = None
+    status: str = "Open"
 
 
 @api_router.get("/leads/stages")
@@ -4518,11 +4519,14 @@ def create_lead(payload: CreateLeadRequest, auth: dict = Depends(get_current_use
     company_name = (payload.company_name or "").strip() or "Test"
     stage = (payload.stage or "Lead").strip()
     reference_no = _generate_lead_reference_no(company_name)
+    status = (payload.status or "Open").strip()
+    if status not in ("Open", "Closed"):
+        status = "Open"
     data = {
         "company_name": company_name,
         "stage": stage,
         "reference_no": reference_no,
-        "status": "Open",
+        "status": status,
         "created_by": auth["id"],
     }
     if payload.assigned_poc_id:
@@ -4549,7 +4553,7 @@ def list_leads(
 ):
     """List leads with optional filters: status, company, stage, reference_no, date_from, date_to."""
     try:
-        q = supabase.table("leads").select("id, company_name, stage, assigned_poc_id, reference_no, status, created_at").order("created_at", desc=True)
+        q = supabase.table("leads").select("id, company_name, stage, assigned_poc_id, reference_no, status, created_at").order("reference_no", desc=True).order("created_at", desc=True)
         if status:
             q = q.eq("status", status)
         if company and company.strip():
@@ -4758,7 +4762,16 @@ def upsert_lead_stage(
         if not r.data or len(r.data) == 0:
             raise HTTPException(400, f"Complete the previous stage '{prev_slug}' first.")
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-    row = {"lead_id": lead_id, "stage_slug": stage_slug, "data": payload, "updated_at": now}
+    # Merge payload into existing stage data so partial saves don't wipe other fields
+    existing_data = {}
+    try:
+        stage_r = supabase.table("lead_stage_data").select("data").eq("lead_id", lead_id).eq("stage_slug", stage_slug).execute()
+        if stage_r.data and len(stage_r.data) > 0 and isinstance(stage_r.data[0].get("data"), dict):
+            existing_data = stage_r.data[0]["data"]
+    except Exception:
+        pass
+    merged_data = {**existing_data, **payload}
+    row = {"lead_id": lead_id, "stage_slug": stage_slug, "data": merged_data, "updated_at": now}
     try:
         supabase.table("lead_stage_data").upsert(row, on_conflict="lead_id,stage_slug").execute()
         return {"success": True, "stage_slug": stage_slug}

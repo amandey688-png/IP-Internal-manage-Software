@@ -27,6 +27,7 @@ import { ApprovalConfirmPage } from "./pages/Approval/ApprovalConfirmPage"
 import { SupportDashboard } from "./pages/Support/SupportDashboard"
 import { LeadListPage } from "./pages/Leads/LeadListPage"
 import { LeadDetailPage } from "./pages/Leads/LeadDetailPage"
+import { LeadImportPage } from "./pages/Leads/LeadImportPage"
 
 import { ROUTES, ROLES, APP_NAME } from "./utils/constants"
 
@@ -47,6 +48,7 @@ function AppTitle() {
       [ROUTES.SUCCESS_COMP_PERFORM]: "Comp- Perform",
       [ROUTES.CLIENT_TO_LEAD]: "Client to Lead",
       [ROUTES.LEADS]: "Lead",
+      [ROUTES.LEADS_IMPORT]: "Import from sheet",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
     }
@@ -247,6 +249,18 @@ function App() {
                   <AppLayout>
                     <ErrorBoundary>
                       <LeadDetailPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={ROUTES.LEADS_IMPORT}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <LeadImportPage />
                     </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>

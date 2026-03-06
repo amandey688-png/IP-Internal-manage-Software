@@ -33,7 +33,7 @@ const isSuccessPage = (pathname: string) =>
   pathname === ROUTES.SUCCESS_PERFORMANCE || pathname === ROUTES.SUCCESS_COMP_PERFORM
 
 const isClientToLeadPage = (pathname: string) =>
-  pathname === ROUTES.LEADS || pathname.startsWith(ROUTES.LEADS + '/')
+  pathname === ROUTES.LEADS || pathname.startsWith(ROUTES.LEADS + '/') || pathname === ROUTES.LEADS_IMPORT
 
 interface SidebarProps {
   className?: string
@@ -100,6 +100,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const leadItems: MenuProps['items'] = [
     { key: ROUTES.LEADS, icon: <UserAddOutlined />, label: <Link to={ROUTES.LEADS} style={linkStyle}>Lead</Link> },
     { key: ROUTES.LEADS_CLOSED, icon: <UserAddOutlined />, label: <Link to={ROUTES.LEADS_CLOSED} style={linkStyle}>Closed Leads</Link> },
+    { key: ROUTES.LEADS_IMPORT, icon: <FileTextOutlined />, label: <Link to={ROUTES.LEADS_IMPORT} style={linkStyle}>Import from sheet (Generate SQL)</Link> },
   ]
 
   const showDashboard = canViewSectionByKey('dashboard')

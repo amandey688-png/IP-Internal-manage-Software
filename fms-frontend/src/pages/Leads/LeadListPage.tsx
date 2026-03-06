@@ -55,7 +55,8 @@ export const LeadListPage = () => {
 
   const referenceOptions = useMemo(() => {
     const refs = Array.from(new Set(leads.map((l) => l.reference_no).filter(Boolean))) as string[]
-    return refs.sort().map((r) => ({ label: r, value: r }))
+    refs.sort((a, b) => b.localeCompare(a, undefined, { numeric: true }))
+    return refs.map((r) => ({ label: r, value: r }))
   }, [leads])
 
   const filteredLeads = useMemo(() => {
