@@ -4434,6 +4434,360 @@ def update_delegation_task(task_id: str, payload: dict, auth: dict = Depends(get
         raise HTTPException(400, str(e)[:200])
 
 
+# ---------------------------------------------------------------------------
+# Client to Lead – Leads (multi-stage workflow)
+# ---------------------------------------------------------------------------
+LEAD_STAGE_ORDER = [
+    "lead_details",
+    "contacted",
+    "brochure",
+    "demo_schedule",
+    "demo_completed",
+    "offer_letter",
+    "po",
+    "performa_invoice",
+    "implementation_invoice",
+    "whatsapp_group",
+    "setup_data",
+    "account_setup",
+    "item_setup",
+    "first_invoice",
+    "first_invoice_payment",
+    "final_closing",
+]
+
+
+class CreateLeadRequest(BaseModel):
+    company_name: str
+    stage: str
+    assigned_poc_id: str | None = None
+
+
+@api_router.get("/leads/stages")
+def list_lead_stages(auth: dict = Depends(get_current_user)):
+    """Stage dropdown options from DB (lead_stages table)."""
+    try:
+        r = supabase.table("lead_stages").select("name").order("display_order").execute()
+        return {"stages": [row["name"] for row in (r.data or [])]}
+    except Exception as e:
+        _log(f"leads/stages: {e}")
+        return {"stages": [
+            "Lead", "Contacted", "Brochure", "Demo Schedule", "Demo Completed",
+            "Quotation", "PO", "Implementation Invoice", "Account Setup", "Item Setup",
+            "Training", "First Invoice", "First Invoice Payment",
+        ]}
+
+
+@api_router.get("/leads/users")
+def list_lead_users(auth: dict = Depends(get_current_user)):
+    """List users for Assigned POC dropdown (user_profiles)."""
+    try:
+        r = supabase.table("user_profiles").select("id, full_name").eq("is_active", True).order("full_name").execute()
+        return {"users": r.data or []}
+    except Exception as e:
+        _log(f"leads/users: {e}")
+        return {"users": []}
+
+
+def _generate_lead_reference_no(company_name: str) -> str:
+    """First 4 letters of company name (UPPERCASE) + running number (e.g. COMP0001)."""
+    prefix = (company_name or "LEAD")[:4].upper()
+    if not prefix.isalnum():
+        prefix = "LEAD"
+    try:
+        existing = supabase.table("leads").select("reference_no").ilike("reference_no", f"{prefix}%").execute()
+        nums = []
+        for row in (existing.data or []):
+            ref = (row.get("reference_no") or "").strip()
+            if ref.startswith(prefix) and len(ref) > len(prefix):
+                try:
+                    nums.append(int(ref[len(prefix):]))
+                except ValueError:
+                    pass
+        next_num = max(nums, default=0) + 1
+        return f"{prefix}{next_num:04d}"
+    except Exception as e:
+        _log(f"lead reference_no: {e}")
+        import uuid
+        return f"{prefix}{str(uuid.uuid4())[:4].upper()}"
+
+
+@api_router.post("/leads")
+def create_lead(payload: CreateLeadRequest, auth: dict = Depends(get_current_user)):
+    """Create lead. Auto-generates reference_no and timestamp."""
+    company_name = (payload.company_name or "").strip() or "Test"
+    stage = (payload.stage or "Lead").strip()
+    reference_no = _generate_lead_reference_no(company_name)
+    data = {
+        "company_name": company_name,
+        "stage": stage,
+        "reference_no": reference_no,
+        "status": "Open",
+        "created_by": auth["id"],
+    }
+    if payload.assigned_poc_id:
+        data["assigned_poc_id"] = payload.assigned_poc_id
+    try:
+        r = supabase.table("leads").insert(data).execute()
+        return r.data[0] if r.data else {}
+    except Exception as e:
+        _log(f"leads create: {e}")
+        if "does not exist" in str(e).lower() or "relation" in str(e).lower():
+            raise HTTPException(503, "Leads table not set up. Run database/CLIENT_TO_LEAD_LEADS.sql in Supabase.")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/leads")
+def list_leads(
+    status: str | None = Query(None),
+    company: str | None = Query(None, description="Filter by company name (partial match)"),
+    stage: str | None = Query(None, description="Filter by stage"),
+    reference_no: str | None = Query(None, description="Filter by reference number (partial match)"),
+    date_from: str | None = Query(None, description="Filter created_at from date YYYY-MM-DD"),
+    date_to: str | None = Query(None, description="Filter created_at to date YYYY-MM-DD"),
+    auth: dict = Depends(get_current_user),
+):
+    """List leads with optional filters: status, company, stage, reference_no, date_from, date_to."""
+    try:
+        q = supabase.table("leads").select("id, company_name, stage, assigned_poc_id, reference_no, status, created_at").order("created_at", desc=True)
+        if status:
+            q = q.eq("status", status)
+        if company and company.strip():
+            q = q.ilike("company_name", f"%{company.strip()}%")
+        if stage and stage.strip():
+            q = q.eq("stage", stage.strip())
+        if reference_no and reference_no.strip():
+            q = q.ilike("reference_no", f"%{reference_no.strip()}%")
+        if date_from and date_from.strip():
+            q = q.gte("created_at", date_from.strip() + "T00:00:00")
+        if date_to and date_to.strip():
+            q = q.lte("created_at", date_to.strip() + "T23:59:59.999999")
+        r = q.execute()
+        rows = r.data or []
+        poc_ids = {row["assigned_poc_id"] for row in rows if row.get("assigned_poc_id")}
+        if poc_ids:
+            try:
+                pr = supabase.table("user_profiles").select("id, full_name").in_("id", list(poc_ids)).execute()
+                poc_map = {p["id"]: p.get("full_name", "") for p in (pr.data or [])}
+            except Exception:
+                poc_map = {}
+        else:
+            poc_map = {}
+        for row in rows:
+            row["assigned_poc_name"] = poc_map.get(row.get("assigned_poc_id"), "")
+        return {"leads": rows}
+    except Exception as e:
+        _log(f"leads list: {e}")
+        if "does not exist" in str(e).lower():
+            return {"leads": []}
+        raise HTTPException(500, str(e)[:200])
+
+
+@api_router.get("/leads/by-reference/{reference_no}")
+def get_lead_by_reference(reference_no: str, auth: dict = Depends(get_current_user)):
+    """Get single lead by reference number (e.g. DEMO0001). Used for pretty URLs."""
+    try:
+        r = supabase.table("leads").select("*").eq("reference_no", reference_no).execute()
+        rows = r.data or []
+        if not rows:
+            raise HTTPException(404, "Lead not found")
+        lead = rows[0]
+        lead_id = lead["id"]
+        stage_r = supabase.table("lead_stage_data").select("stage_slug, data, updated_at").eq("lead_id", lead_id).execute()
+        by_slug = {row["stage_slug"]: {"data": row.get("data") or {}, "updated_at": row.get("updated_at")} for row in (stage_r.data or [])}
+        lead["stage_data"] = by_slug
+        if lead.get("assigned_poc_id"):
+            try:
+                pr = supabase.table("user_profiles").select("id, full_name").eq("id", lead["assigned_poc_id"]).single().execute()
+                lead["assigned_poc_name"] = pr.data.get("full_name", "") if pr.data else ""
+            except Exception:
+                lead["assigned_poc_name"] = ""
+        else:
+            lead["assigned_poc_name"] = ""
+        return lead
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"leads get by reference: {e}")
+        raise HTTPException(500, str(e)[:200])
+
+
+@api_router.get("/leads/active")
+def list_active_leads_for_dashboard(auth: dict = Depends(get_current_user)):
+    """Active (Open) leads with flattened person_name, city, state for dashboard table."""
+    try:
+        q = supabase.table("leads").select("id, company_name, stage, assigned_poc_id, reference_no").eq("status", "Open").order("created_at", desc=True)
+        r = q.execute()
+        rows = r.data or []
+        if not rows:
+            return {"leads": []}
+        lead_ids = [row["id"] for row in rows]
+        poc_ids = {row["assigned_poc_id"] for row in rows if row.get("assigned_poc_id")}
+        poc_map = {}
+        if poc_ids:
+            try:
+                pr = supabase.table("user_profiles").select("id, full_name").in_("id", list(poc_ids)).execute()
+                poc_map = {p["id"]: p.get("full_name", "") for p in (pr.data or [])}
+            except Exception:
+                pass
+        stage_r = supabase.table("lead_stage_data").select("lead_id, stage_slug, data").in_("lead_id", lead_ids).execute()
+        stage_rows = stage_r.data or []
+        by_lead: dict = {}
+        for s in stage_rows:
+            lid = s.get("lead_id")
+            if not lid:
+                continue
+            if lid not in by_lead:
+                by_lead[lid] = {}
+            data = s.get("data") or {}
+            if isinstance(data, dict):
+                by_lead[lid][s.get("stage_slug", "")] = data
+        out = []
+        for row in rows:
+            lid = row["id"]
+            lead_details = (by_lead.get(lid) or {}).get("lead_details") or {}
+            contacted = (by_lead.get(lid) or {}).get("contacted") or {}
+            person_name = lead_details.get("person_name") if isinstance(lead_details, dict) else ""
+            city = contacted.get("city") if isinstance(contacted, dict) else ""
+            state = contacted.get("state") if isinstance(contacted, dict) else ""
+            out.append({
+                "id": row["id"],
+                "reference_no": row.get("reference_no", ""),
+                "company_name": row.get("company_name", ""),
+                "stage": row.get("stage", ""),
+                "assigned_poc_name": poc_map.get(row.get("assigned_poc_id"), ""),
+                "person_name": person_name or "",
+                "city": city or "",
+                "state": state or "",
+            })
+        return {"leads": out}
+    except Exception as e:
+        _log(f"leads/active: {e}")
+        if "does not exist" in str(e).lower():
+            return {"leads": []}
+        raise HTTPException(500, str(e)[:200])
+
+
+@api_router.get("/leads/{lead_id}")
+def get_lead(lead_id: str, auth: dict = Depends(get_current_user)):
+    """Get single lead with all stage data."""
+    try:
+        r = supabase.table("leads").select("*").eq("id", lead_id).single().execute()
+        if not r.data:
+            raise HTTPException(404, "Lead not found")
+        lead = r.data
+        stage_r = supabase.table("lead_stage_data").select("stage_slug, data, updated_at").eq("lead_id", lead_id).execute()
+        by_slug = {row["stage_slug"]: {"data": row.get("data") or {}, "updated_at": row.get("updated_at")} for row in (stage_r.data or [])}
+        lead["stage_data"] = by_slug
+        if lead.get("assigned_poc_id"):
+            try:
+                pr = supabase.table("user_profiles").select("id, full_name").eq("id", lead["assigned_poc_id"]).single().execute()
+                lead["assigned_poc_name"] = pr.data.get("full_name", "") if pr.data else ""
+            except Exception:
+                lead["assigned_poc_name"] = ""
+        else:
+            lead["assigned_poc_name"] = ""
+        return lead
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"leads get: {e}")
+        raise HTTPException(500, str(e)[:200])
+
+
+def _lead_next_stage_slug(lead_id: str) -> str | None:
+    """Return the next stage_slug that is not yet filled for this lead."""
+    try:
+        r = supabase.table("lead_stage_data").select("stage_slug").eq("lead_id", lead_id).execute()
+        filled = {row["stage_slug"] for row in (r.data or [])}
+        for slug in LEAD_STAGE_ORDER:
+            if slug not in filled:
+                return slug
+        return None
+    except Exception:
+        return LEAD_STAGE_ORDER[0]
+
+
+def _lead_editable_by_user(lead_id: str, current_role: str) -> bool:
+    """For role 'user', lead is editable only within 4 hours of lead creation. Admin/approver/master_admin can always edit."""
+    if current_role not in ("user",):
+        return True
+    try:
+        lead_r = supabase.table("leads").select("created_at").eq("id", lead_id).single().execute()
+        if not lead_r.data or not lead_r.data.get("created_at"):
+            return True
+        created_str = lead_r.data["created_at"]
+        if isinstance(created_str, str):
+            created_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+            if created_dt.tzinfo is None:
+                created_dt = created_dt.replace(tzinfo=timezone.utc)
+        else:
+            return True
+        now = datetime.now(timezone.utc)
+        delta = now - created_dt
+        return delta.total_seconds() <= 4 * 3600
+    except Exception:
+        return True
+
+
+@api_router.put("/leads/{lead_id}/stages/{stage_slug}")
+def upsert_lead_stage(
+    lead_id: str,
+    stage_slug: str,
+    payload: dict,
+    auth: dict = Depends(get_current_user),
+    current: dict = Depends(get_current_user_with_role),
+):
+    """Upsert stage data. Validates sequential order: previous stage must be filled first. User role: not editable after 4 hours from lead creation."""
+    if not _lead_editable_by_user(lead_id, current.get("role", "user")):
+        raise HTTPException(403, "This lead can no longer be edited (4-hour limit for User role).")
+    if stage_slug not in LEAD_STAGE_ORDER:
+        raise HTTPException(400, f"Invalid stage: {stage_slug}")
+    try:
+        lead_r = supabase.table("leads").select("id").eq("id", lead_id).single().execute()
+        if not lead_r.data:
+            raise HTTPException(404, "Lead not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(500, str(e)[:200])
+    idx = LEAD_STAGE_ORDER.index(stage_slug)
+    for i in range(idx):
+        prev_slug = LEAD_STAGE_ORDER[i]
+        r = supabase.table("lead_stage_data").select("id").eq("lead_id", lead_id).eq("stage_slug", prev_slug).execute()
+        if not r.data or len(r.data) == 0:
+            raise HTTPException(400, f"Complete the previous stage '{prev_slug}' first.")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    row = {"lead_id": lead_id, "stage_slug": stage_slug, "data": payload, "updated_at": now}
+    try:
+        supabase.table("lead_stage_data").upsert(row, on_conflict="lead_id,stage_slug").execute()
+        return {"success": True, "stage_slug": stage_slug}
+    except Exception as e:
+        _log(f"leads stage upsert: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.patch("/leads/{lead_id}")
+def update_lead(
+    lead_id: str,
+    payload: dict,
+    auth: dict = Depends(get_current_user),
+    current: dict = Depends(get_current_user_with_role),
+):
+    """Update lead (e.g. stage, status). User role: not editable after 4 hours from lead creation."""
+    if not _lead_editable_by_user(lead_id, current.get("role", "user")):
+        raise HTTPException(403, "This lead can no longer be edited (4-hour limit for User role).")
+    allowed = {"stage", "status", "assigned_poc_id", "company_name"}
+    data = {k: v for k, v in payload.items() if k in allowed and v is not None}
+    if not data:
+        raise HTTPException(400, "No valid fields to update")
+    try:
+        r = supabase.table("leads").update(data).eq("id", lead_id).execute()
+        return r.data[0] if r.data else {}
+    except Exception as e:
+        raise HTTPException(400, str(e)[:200])
+
+
 async def _send_checklist_reminder_email(to_email: str, task_names: list[str], doer_name: str) -> bool:
     """Send reminder email via utils/email.py (async SMTP with HTML). Returns True if sent."""
     to_email = (to_email or "").strip()

@@ -1,4 +1,4 @@
-import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Spin } from 'antd'
+import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Spin, Tag } from 'antd'
 import {
   FileTextOutlined,
   ClockCircleOutlined,
@@ -10,12 +10,29 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { dashboardApi, type DashboardDetailTicket } from '../api/dashboard'
 import { ticketsApi } from '../api/tickets'
+import { leadsApi, type ActiveLeadRow } from '../api/leads'
 import { LoadingSpinner } from '../components/common/LoadingSpinner'
 import { PrintExport } from '../components/common/PrintExport'
 import { TICKET_EXPORT_COLUMNS, buildTicketExportRow, getChoresBugsCurrentStage } from '../utils/helpers'
 import { ROUTES } from '../utils/constants'
 import type { Ticket } from '../api/tickets'
 import type { DashboardMetrics } from '../api/dashboard'
+
+const ACTIVE_LEAD_STAGE_COLORS: Record<string, string> = {
+  'Demo Completed': '#22c55e',
+  'Demo Schedule': '#f97316',
+  'Brochure': '#86efac',
+  'Account Setup': '#86efac',
+  'Quotation': '#22d3ee',
+  'Lead': '#e0f2fe',
+  'Contacted': '#bae6fd',
+  'PO': '#a78bfa',
+  'Implementation Invoice': '#fbbf24',
+  'Item Setup': '#c4b5fd',
+  'Training': '#67e8f9',
+  'First Invoice': '#34d399',
+  'First Invoice Payment': '#10b981',
+}
 
 const { Title, Text } = Typography
 
@@ -44,9 +61,18 @@ export const Dashboard = () => {
   const [detailTitle, setDetailTitle] = useState('')
   const [detailData, setDetailData] = useState<DashboardDetailTicket[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
+  const [activeLeads, setActiveLeads] = useState<ActiveLeadRow[]>([])
+  const [activeLeadsLoading, setActiveLeadsLoading] = useState(false)
 
   useEffect(() => {
     fetchData()
+  }, [])
+
+  useEffect(() => {
+    setActiveLeadsLoading(true)
+    leadsApi.listActive().then((res) => {
+      setActiveLeads(res.leads || [])
+    }).catch(() => setActiveLeads([])).finally(() => setActiveLeadsLoading(false))
   }, [])
 
   const fetchData = async () => {
@@ -258,6 +284,77 @@ export const Dashboard = () => {
           </Card>
         </Col>
       </Row>
+
+      {/* Active Leads - from Client to Lead (last, after trends) */}
+      <Title level={4} style={{ marginBottom: 16, marginTop: 28, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>
+        Active Leads
+      </Title>
+      <style>{`.dashboard-active-leads .ant-table-thead > tr > th { background: #22c55e !important; color: #fff !important; border-bottom-color: rgba(255,255,255,0.3) !important; font-weight: 600; }`}</style>
+      <Card
+        className="dashboard-active-leads"
+        style={{ marginBottom: 28, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06)' }}
+        bodyStyle={{ padding: 0 }}
+      >
+        <Table
+          loading={activeLeadsLoading}
+          dataSource={activeLeads}
+          rowKey="id"
+          size="small"
+          pagination={activeLeads.length > 10 ? { pageSize: 10, showSizeChanger: false, showTotal: (t) => `Total ${t} leads` } : false}
+          onRow={(record) => ({
+            onClick: () => navigate(ROUTES.LEAD_DETAIL.replace(':id', record.reference_no)),
+            style: { cursor: 'pointer' },
+          })}
+          columns={[
+            {
+              title: 'Company Name',
+              dataIndex: 'company_name',
+              key: 'company_name',
+              width: 180,
+              render: (v: string) => v || '—',
+            },
+            {
+              title: 'Stage',
+              dataIndex: 'stage',
+              key: 'stage',
+              width: 160,
+              render: (stage: string) => {
+                const color = ACTIVE_LEAD_STAGE_COLORS[stage] || '#94a3b8'
+                const isLight = ['#86efac', '#bae6fd', '#e0f2fe'].includes(color)
+                return <Tag style={{ margin: 0, border: 'none', background: color, color: isLight ? '#0f172a' : '#fff' }}>{stage || '—'}</Tag>
+              },
+            },
+            {
+              title: 'Assigned POC',
+              dataIndex: 'assigned_poc_name',
+              key: 'assigned_poc_name',
+              width: 140,
+              render: (v: string) => v || '—',
+            },
+            {
+              title: 'Person Name',
+              dataIndex: 'person_name',
+              key: 'person_name',
+              width: 140,
+              render: (v: string) => v || '—',
+            },
+            {
+              title: 'City',
+              dataIndex: 'city',
+              key: 'city',
+              width: 120,
+              render: (v: string) => v || '—',
+            },
+            {
+              title: 'State',
+              dataIndex: 'state',
+              key: 'state',
+              width: 120,
+              render: (v: string) => v || '—',
+            },
+          ]}
+        />
+      </Card>
 
       <Modal
         title={detailTitle}
