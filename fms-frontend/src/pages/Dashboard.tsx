@@ -300,6 +300,7 @@ export const Dashboard = () => {
           dataSource={activeLeads}
           rowKey="id"
           size="small"
+          scroll={{ x: 720 }}
           pagination={activeLeads.length > 10 ? { pageSize: 10, showSizeChanger: false, showTotal: (t) => `Total ${t} leads` } : false}
           onRow={(record) => ({
             onClick: () => navigate(ROUTES.LEAD_DETAIL.replace(':id', record.reference_no)),
@@ -323,13 +324,6 @@ export const Dashboard = () => {
                 const isLight = ['#86efac', '#bae6fd', '#e0f2fe'].includes(color)
                 return <Tag style={{ margin: 0, border: 'none', background: color, color: isLight ? '#0f172a' : '#fff' }}>{stage || '—'}</Tag>
               },
-            },
-            {
-              title: 'Assigned POC',
-              dataIndex: 'assigned_poc_name',
-              key: 'assigned_poc_name',
-              width: 140,
-              render: (v: string) => v || '—',
             },
             {
               title: 'Person Name',
