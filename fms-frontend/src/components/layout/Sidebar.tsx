@@ -11,6 +11,8 @@ import {
   UnorderedListOutlined,
   RiseOutlined,
   LineChartOutlined,
+  TeamOutlined,
+  UserAddOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
@@ -30,6 +32,9 @@ const isTaskPage = (pathname: string) =>
 const isSuccessPage = (pathname: string) =>
   pathname === ROUTES.SUCCESS_PERFORMANCE || pathname === ROUTES.SUCCESS_COMP_PERFORM
 
+const isClientToLeadPage = (pathname: string) =>
+  pathname === ROUTES.LEADS || pathname.startsWith(ROUTES.LEADS + '/')
+
 interface SidebarProps {
   className?: string
   open?: boolean
@@ -43,6 +48,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const [supportOpen, setSupportOpen] = useState(isSupportPage(location.pathname))
   const [taskOpen, setTaskOpen] = useState(isTaskPage(location.pathname))
   const [successOpen, setSuccessOpen] = useState(isSuccessPage(location.pathname))
+  const [clientToLeadOpen, setClientToLeadOpen] = useState(isClientToLeadPage(location.pathname))
 
   useEffect(() => {
     if (isSupportPage(location.pathname)) setSupportOpen(true)
@@ -52,6 +58,9 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   }, [location.pathname])
   useEffect(() => {
     if (isSuccessPage(location.pathname)) setSuccessOpen(true)
+  }, [location.pathname])
+  useEffect(() => {
+    if (isClientToLeadPage(location.pathname)) setClientToLeadOpen(true)
   }, [location.pathname])
 
   const linkStyle = { color: 'inherit', display: 'block' }
@@ -88,6 +97,10 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     return true
   }) ?? []
 
+  const leadItems: MenuProps['items'] = [
+    { key: ROUTES.LEADS, icon: <UserAddOutlined />, label: <Link to={ROUTES.LEADS} style={linkStyle}>Lead</Link> },
+  ]
+
   const showDashboard = canViewSectionByKey('dashboard')
   const hasAnySupportSection = (supportItems?.length ?? 0) > 0
 
@@ -114,6 +127,13 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
       children: filteredSuccessItems,
       onTitleClick: () => setSuccessOpen(!successOpen),
     }] : []),
+    {
+      key: 'client-to-lead',
+      icon: <TeamOutlined />,
+      label: 'Client to Lead',
+      children: leadItems,
+      onTitleClick: () => setClientToLeadOpen(!clientToLeadOpen),
+    },
     ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: <Link to={ROUTES.USERS} style={linkStyle}>Users</Link> }] : []),
     ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: <Link to={ROUTES.SETTINGS} style={linkStyle}>Settings</Link> }] : []),
     {
@@ -135,12 +155,14 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     ...(supportOpen ? ['support'] : []),
     ...(taskOpen ? ['task'] : []),
     ...(successOpen ? ['success'] : []),
+    ...(clientToLeadOpen ? ['client-to-lead'] : []),
   ]
 
   const handleOpenChange = (keys: string[]) => {
     setSupportOpen(keys.includes('support'))
     setTaskOpen(keys.includes('task'))
     setSuccessOpen(keys.includes('success'))
+    setClientToLeadOpen(keys.includes('client-to-lead'))
   }
 
   const menuContent = (

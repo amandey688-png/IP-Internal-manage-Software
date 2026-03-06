@@ -25,6 +25,8 @@ import { UserList } from "./pages/Users/UserList"
 import { SettingsPage } from "./pages/Settings/SettingsPage"
 import { ApprovalConfirmPage } from "./pages/Approval/ApprovalConfirmPage"
 import { SupportDashboard } from "./pages/Support/SupportDashboard"
+import { LeadListPage } from "./pages/Leads/LeadListPage"
+import { LeadDetailPage } from "./pages/Leads/LeadDetailPage"
 
 import { ROUTES, ROLES, APP_NAME } from "./utils/constants"
 
@@ -43,10 +45,12 @@ function AppTitle() {
       [ROUTES.DELEGATION]: "Delegation",
       [ROUTES.SUCCESS_PERFORMANCE]: "Performance Monitoring",
       [ROUTES.SUCCESS_COMP_PERFORM]: "Comp- Perform",
+      [ROUTES.CLIENT_TO_LEAD]: "Client to Lead",
+      [ROUTES.LEADS]: "Lead",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
     }
-    const page = titles[pathname] || (pathname.startsWith("/tickets") ? "Ticket" : APP_NAME)
+    const page = titles[pathname] || (pathname.startsWith("/tickets") ? "Ticket" : pathname.startsWith("/client-to-lead/leads/") ? "Lead Detail" : APP_NAME)
     document.title = `${APP_NAME} - ${page}`
   }, [pathname])
   return null
@@ -224,6 +228,30 @@ function App() {
               }
             />
 
+            <Route
+              path={ROUTES.LEADS}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <LeadListPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={ROUTES.LEAD_DETAIL}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <LeadDetailPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
             <Route
               path={ROUTES.USERS}
               element={

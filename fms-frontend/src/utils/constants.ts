@@ -32,6 +32,8 @@ export const SECTION_LABELS: Record<string, string> = {
   task: 'Task',
   success_performance: 'Performance Monitoring',
   success_comp_perform: 'Comp- Perform',
+  client_to_lead: 'Client to Lead',
+  leads: 'Lead',
   settings: 'Settings',
   users: 'Users',
 }
@@ -54,6 +56,10 @@ export const ROUTES = {
   /** Success module */
   SUCCESS_PERFORMANCE: '/success/performance',
   SUCCESS_COMP_PERFORM: '/success/comp-perform',
+  /** Client to Lead module */
+  CLIENT_TO_LEAD: '/client-to-lead',
+  LEADS: '/client-to-lead/leads',
+  LEAD_DETAIL: '/client-to-lead/leads/:id',
   USERS: '/users',
   SETTINGS: '/settings',
 } as const
@@ -88,6 +94,15 @@ export const API_ENDPOINTS = {
     LIST: '/users',
     DETAIL: (id: string) => `/users/${id}`,
     UPDATE: (id: string) => `/users/${id}`,
+  },
+  LEADS: {
+    LIST: '/leads',
+    ACTIVE: '/leads/active',
+    STAGES: '/leads/stages',
+    USERS: '/leads/users',
+    DETAIL: (id: string) => `/leads/${id}`,
+    BY_REFERENCE: (ref: string) => `/leads/by-reference/${ref}`,
+    STAGE: (id: string, slug: string) => `/leads/${id}/stages/${slug}`,
   },
 } as const
 
