@@ -1921,6 +1921,7 @@ def dashboard_kpi(
         checklist_rows = []
         checklist_weekly_pct = 0
         checklist_monthly_pct = 0
+        tasks = []
         try:
             from app.checklist_utils import get_occurrence_dates_in_range
             q = supabase.table("checklist_tasks").select("*").eq("doer_id", user_id)
@@ -1975,6 +1976,7 @@ def dashboard_kpi(
         delegation_rows = []
         delegation_weekly_pct = 0
         delegation_monthly_pct = 0
+        all_tasks = []
         try:
             q = supabase.table("delegation_tasks").select("*").eq("assignee_id", user_id)
             r = q.execute()
@@ -2019,13 +2021,15 @@ def dashboard_kpi(
         pending_count = 0
         target_pending = 1
         total_cb = 0
+        support_fms_weekly_pct = 0
         response_delay_details = []
         completion_delay_details = []
         pending_details = []
+        tickets = []
         try:
             types_cb = ["chore", "bug"]
             cols = (
-                "id, reference_no, title, description, type, company_name, created_by, created_at, assignee_id, "
+                "id, reference_no, title, description, type, company_id, company_name, created_by, created_at, assignee_id, "
                 "status, status_4, quality_solution, actual_4, query_arrival_at, query_response_at, "
                 "planned_2, actual_2, actual_1, status_2"
             )
@@ -2058,16 +2062,20 @@ def dashboard_kpi(
                 if w_num == week_num_selected and m_num == month_num and y_num == y:
                     week_tickets.append(t)
 
+            # Resolve company name: ticket company_name, else companies by company_id, else reference_no fallback (same as list_tickets)
+            _enrich_tickets_with_lookups(week_tickets)
+
             for t in week_tickets:
                 created = t.get("created_at") or ""
                 ref = (t.get("reference_no") or "").strip() or "N/A"
+                company_val = (t.get("company_name") or "").strip() or "—"
                 row_item = {
                     "type": (t.get("type") or "Chore").title(),
-                    "company": t.get("company_name"),
+                    "company": company_val,
                     "requested_person": "",
                     "submitted_by": "",
-                    "title": t.get("title"),
-                    "description": t.get("description"),
+                    "title": (t.get("title") or "").strip() or "—",
+                    "description": (t.get("description") or "").strip() or "",
                     "reference_no": ref,
                     "query_arrival": str(t.get("query_arrival_at") or created)[:19],
                     "month": month,
@@ -2104,11 +2112,14 @@ def dashboard_kpi(
             # Target = total chores & bugs for this week (same as Support Dashboard weekly stats)
             total_cb = len(week_tickets)
             target_pending = max(total_cb, 1)
+            support_fms_weekly_pct = round(((total_cb - pending_count) / total_cb * 100) if total_cb else 0)
         except Exception as e:
             _log(f"dashboard/kpi support FMS: {e}")
+            support_fms_weekly_pct = 0
 
         # ----- Success KPI (Performance Monitoring / Training / Followups for this user – MONTH basis) -----
         success_kpi = None
+        weekly_success_pct = []
         try:
             # Base performance tickets created by this user (owner)
             pm_rows: list[dict] = []
@@ -2359,6 +2370,25 @@ def dashboard_kpi(
             pct_values = [poc_pct, train_pct, fu_pct, success_pct]
             overall_pct = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
 
+            # Weekly Success KPI % for graph (Rimpa only): one value per week of month
+            if (name or "").strip().lower() == "rimpa":
+                for w in range(1, 6):
+                    rng = _dashboard_kpi_week_range(y, month_num, f"week {w}")
+                    if not rng:
+                        weekly_success_pct.append(0)
+                        continue
+                    rs, re = rng
+                    poc_week = [row for row in pm_rows if (lambda d: d is not None and rs <= d <= re)(_parse_iso_to_date(row.get("created_at")))]
+                    poc_pct_w = round((sum(1 for row in poc_week if str(row.get("message_owner") or "").lower() == "yes") / len(poc_week) * 100)) if poc_week else 0
+                    train_week = [t for t in trainings if (lambda d: d is not None and rs <= d <= re)(_parse_iso_to_date(t.get("training_schedule_date") or t.get("created_at")))]
+                    train_pct_w = round((sum(1 for t in train_week if str(t.get("training_status") or "").lower() == "yes") / len(train_week) * 100)) if train_week else 0
+                    fu_week = [fu for fu in followups if (lambda d: d is not None and rs <= d <= re)(_parse_iso_to_date(fu.get("created_at")))]
+                    fu_pct_w = round((sum(1 for fu in fu_week if str(fu.get("status") or "").lower() == "completed") / len(fu_week) * 100)) if fu_week else 0
+                    success_inc_week = [fu for fu in fu_week if fu.get("total_percentage") is not None and fu.get("previous_percentage") is not None and float(fu["total_percentage"]) > float(fu["previous_percentage"])]
+                    success_inc_pct_w = round((len(success_inc_week) / len(fu_week) * 100)) if fu_week else 0
+                    overall_w = round((poc_pct_w + train_pct_w + fu_pct_w + success_inc_pct_w) / 4, 2)
+                    weekly_success_pct.append(overall_w)
+
             success_kpi = {
                 "pocCollected": {
                     "currentValue": poc_current,
@@ -2415,6 +2445,71 @@ def dashboard_kpi(
                 "overallPercentage": 0,
             }
 
+        # ----- Weekly progress (for graph: weekly % per week of month) -----
+        weekly_progress_weeks = []
+        weekly_progress_checklist = []
+        weekly_progress_delegation = []
+        weekly_progress_support_fms = []
+        try:
+            from app.checklist_utils import get_occurrence_dates_in_range
+            task_ids = [t["id"] for t in tasks] if tasks else []
+            for w in range(1, 6):
+                weekly_progress_weeks.append(f"week {w}")
+                rng = _dashboard_kpi_week_range(y, month_num, f"week {w}")
+                if not rng:
+                    weekly_progress_checklist.append(0)
+                    weekly_progress_delegation.append(0)
+                    weekly_progress_support_fms.append(0)
+                    continue
+                rs, re = rng
+                # Checklist % for this week
+                cl_pct = 0
+                if task_ids:
+                    comp_w = {}
+                    cr = supabase.table("checklist_completions").select("task_id, occurrence_date, completed_at")
+                    cr = cr.gte("occurrence_date", rs.isoformat()).lte("occurrence_date", re.isoformat()).in_("task_id", task_ids)
+                    for row in (cr.execute().data or []):
+                        comp_w[(row["task_id"], row["occurrence_date"])] = row.get("completed_at")
+                    occ_w = []
+                    for task in (tasks or []):
+                        t_id = task["id"]
+                        start = task.get("start_date")
+                        if isinstance(start, str):
+                            start = date.fromisoformat(start)
+                        freq = task.get("frequency", "D")
+                        dates_w = get_occurrence_dates_in_range(start, freq, rs, re, is_holiday)
+                        for d in dates_w:
+                            occ_w.append((t_id, d))
+                    total_w = len(occ_w)
+                    done_w = sum(1 for (tid, d) in occ_w if comp_w.get((tid, d.isoformat())))
+                    cl_pct = round((done_w / total_w) * 100) if total_w else 0
+                weekly_progress_checklist.append(cl_pct)
+                # Delegation % for this week
+                def _in_week_del(t, rs_=rs, re_=re):
+                    d = t.get("due_date") or t.get("delegation_on")
+                    if not d:
+                        return False
+                    if isinstance(d, str):
+                        d = date.fromisoformat(d[:10])
+                    return rs_ <= d <= re_
+                week_list_w = [t for t in all_tasks if _in_week_del(t)]
+                total_d = len(week_list_w)
+                done_d = sum(1 for t in week_list_w if str(t.get("status") or "").lower() == "completed")
+                del_pct = round((done_d / total_d) * 100) if total_d else 0
+                weekly_progress_delegation.append(del_pct)
+                # Support FMS % for this week (same formula: (total - pending) / total * 100)
+                week_tickets_w = [t for t in tickets if _get_ticket_week(t) == (w, month_num, y)]
+                total_cb_w = len(week_tickets_w)
+                pending_w = 0
+                for t in week_tickets_w:
+                    st = t.get("status") or ""
+                    if _is_pending(st) and not _is_resolved(st, t.get("status_4")):
+                        pending_w += 1
+                sup_pct = round(((total_cb_w - pending_w) / total_cb_w * 100) if total_cb_w else 0)
+                weekly_progress_support_fms.append(sup_pct)
+        except Exception as e:
+            _log(f"dashboard/kpi weeklyProgress: {e}")
+
         applied = {"name": name, "month": month, "year": year, "week": week}
         return {
             "success": True,
@@ -2452,12 +2547,20 @@ def dashboard_kpi(
                     "percentage": f"{pending_count}/{max(target_pending, 1)}",
                     "details": pending_details,
                 },
+                "weeklyPercentage": support_fms_weekly_pct,
             },
             "successKpi": success_kpi,
             "monthlyPercentages": {
                 "checklist": checklist_monthly_pct,
                 "delegation": delegation_monthly_pct,
                 "supportFMS": round(( (target_pending - pending_count) / target_pending * 100 ) if target_pending else 0),
+            },
+            "weeklyProgress": {
+                "weeks": weekly_progress_weeks,
+                "checklist": weekly_progress_checklist,
+                "delegation": weekly_progress_delegation,
+                "supportFMS": weekly_progress_support_fms,
+                "successKpi": weekly_success_pct,
             },
         }
     except Exception as e:

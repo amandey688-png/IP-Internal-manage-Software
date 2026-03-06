@@ -103,6 +103,7 @@ export interface DashboardKpiResponse {
     responseDelay: SupportFmsSection
     completionDelay: SupportFmsSection
     pendingChores: SupportFmsSection
+    weeklyPercentage?: number
   }
   successKpi?: SuccessKpiResponse
   monthlyPercentages?: {
@@ -115,6 +116,7 @@ export interface DashboardKpiResponse {
     checklist: number[]
     delegation: number[]
     supportFMS: number[]
+    successKpi?: number[]
   }
 }
 
