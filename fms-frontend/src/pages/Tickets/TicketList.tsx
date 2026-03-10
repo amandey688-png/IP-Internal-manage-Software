@@ -91,7 +91,7 @@ export const TicketList = () => {
     reference_filter: '',
     status: '',
     type: typeFromUrl,
-    types_in: sectionFromUrl === 'chores-bugs' ? 'chore,bug' : sectionFromUrl === 'completed-chores-bugs' ? 'chore,bug' : '',
+    types_in: sectionFromUrl === 'chores-bugs' ? 'chore,bug' : sectionFromUrl === 'completed-chores-bugs' ? 'chore,bug' : sectionFromUrl === 'rejected-tickets' ? 'chore,bug' : '',
     company_ids: [] as string[],
     priority: '',
     date_from: '',
@@ -160,6 +160,12 @@ export const TicketList = () => {
         next.status = ''
         next.date_from = ''
         next.date_to = ''
+      } else if (s === 'rejected-tickets') {
+        next.type = ''
+        next.types_in = 'chore,bug'
+        next.status = ''
+        next.date_from = ''
+        next.date_to = ''
       } else if (s === 'completed-feature') {
         next.type = 'feature'
         next.types_in = ''
@@ -221,11 +227,12 @@ export const TicketList = () => {
         ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
         ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
         ...(isChoresBugsSection && typeOfRequestFilter && { type_filter: typeOfRequestFilter }),
-        ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
+        ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
+        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
+        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
         ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
         ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
+        ...(sectionFromUrl === 'rejected-tickets' && { section: 'rejected-tickets' }),
         ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
         ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
         ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
@@ -260,11 +267,12 @@ export const TicketList = () => {
         ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
         ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
         ...(isChoresBugsSection && typeOfRequestFilter && { type_filter: typeOfRequestFilter }),
-        ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
+        ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
+        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
+        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
         ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
         ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
+        ...(sectionFromUrl === 'rejected-tickets' && { section: 'rejected-tickets' }),
         ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
         ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
         ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
@@ -349,7 +357,7 @@ export const TicketList = () => {
     setPage(1)
   }
 
-  const isChoresBugs = sectionFromUrl === 'chores-bugs' || sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'solutions'
+  const isChoresBugs = sectionFromUrl === 'chores-bugs' || sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'rejected-tickets' || sectionFromUrl === 'solutions'
   const showChoresBugsDrawer = isChoresBugs || drawerTicketType === 'chore' || drawerTicketType === 'bug'
   const isSolutionsSection = sectionFromUrl === 'solutions'
 
@@ -868,13 +876,15 @@ export const TicketList = () => {
         ? 'Chores & Bugs'
         : sectionFromUrl === 'completed-chores-bugs'
           ? 'Completed Chores & Bugs'
-          : sectionFromUrl === 'completed-feature'
-            ? 'Completed Feature'
-            : sectionFromUrl === 'solutions'
-              ? 'Solution'
-              : typeFromUrl === 'feature'
-                ? 'Feature'
-                : 'All Tickets'
+          : sectionFromUrl === 'rejected-tickets'
+            ? 'Rejected Tickets'
+            : sectionFromUrl === 'completed-feature'
+              ? 'Completed Feature'
+              : sectionFromUrl === 'solutions'
+                ? 'Solution'
+                : typeFromUrl === 'feature'
+                  ? 'Feature'
+                  : 'All Tickets'
 
   const isCompletedChoresBugs = sectionFromUrl === 'completed-chores-bugs'
 

@@ -230,7 +230,7 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
 
   const showStage2 = status1 === 'no'
   const showStage3 = status2 === 'completed'
-  const showStage4 = status3 === 'completed' || status1 === 'yes'
+  const showStage4 = status3 === 'completed' || status1 === 'yes' || status2 === 'rejected'
   const canSubmitSolution = status4 === 'completed' && !ticket?.quality_solution
   const hasQualitySolution = !!ticket?.quality_solution
   // In Completed Chores & Bugs: only show Stage 1 & 2 for SLA; if ticket went through Staging, show staging stages too
@@ -404,6 +404,10 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                         updates.staging_planned = nowIso
                         updates.staging_review_actual = nowIso
                         updates.staging_review_status = 'pending'
+                      }
+                      if (v === 'rejected') {
+                        updates.actual_2 = nowIso
+                        updates.planned_4 = nowIso
                       }
                       handleUpdate(updates)
                     }}
