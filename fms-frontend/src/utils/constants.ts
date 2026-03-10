@@ -34,6 +34,8 @@ export const SECTION_LABELS: Record<string, string> = {
   success_comp_perform: 'Comp- Perform',
   client_to_lead: 'Client to Lead',
   leads: 'Lead',
+  onboarding: 'Onboarding',
+  onboarding_payment_status: 'Payment Status',
   settings: 'Settings',
   users: 'Users',
 }
@@ -62,6 +64,9 @@ export const ROUTES = {
   LEADS_CLOSED: '/client-to-lead/leads?status=Closed',
   LEAD_DETAIL: '/client-to-lead/leads/:id',
   LEADS_IMPORT: '/client-to-lead/import',
+  /** Onboarding module */
+  ONBOARDING: '/onboarding',
+  ONBOARDING_PAYMENT_STATUS: '/onboarding/payment-status',
   USERS: '/users',
   SETTINGS: '/settings',
 } as const
@@ -96,6 +101,10 @@ export const API_ENDPOINTS = {
     LIST: '/users',
     DETAIL: (id: string) => `/users/${id}`,
     UPDATE: (id: string) => `/users/${id}`,
+  },
+  ONBOARDING_PAYMENT_STATUS: {
+    LIST: '/onboarding/payment-status',
+    CREATE: '/onboarding/payment-status',
   },
   LEADS: {
     LIST: '/leads',

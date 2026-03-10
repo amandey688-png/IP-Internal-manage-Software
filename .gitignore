@@ -26,3 +26,8 @@ backend/backend_errors.log
 .idea/
 Thumbs.db
 .DS_Store
+
+# Supabase backups and local link data
+*.dump
+supabase_backup*.sql
+supabase/

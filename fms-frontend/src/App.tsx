@@ -28,6 +28,7 @@ import { SupportDashboard } from "./pages/Support/SupportDashboard"
 import { LeadListPage } from "./pages/Leads/LeadListPage"
 import { LeadDetailPage } from "./pages/Leads/LeadDetailPage"
 import { LeadImportPage } from "./pages/Leads/LeadImportPage"
+import { PaymentStatusPage } from "./pages/Onboarding/PaymentStatusPage"
 
 import { ROUTES, ROLES, APP_NAME } from "./utils/constants"
 
@@ -49,10 +50,11 @@ function AppTitle() {
       [ROUTES.CLIENT_TO_LEAD]: "Client to Lead",
       [ROUTES.LEADS]: "Lead",
       [ROUTES.LEADS_IMPORT]: "Import from sheet",
+      [ROUTES.ONBOARDING_PAYMENT_STATUS]: "Onboarding – Payment Status",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
     }
-    const page = titles[pathname] || (pathname.startsWith("/tickets") ? "Ticket" : pathname.startsWith("/client-to-lead/leads/") ? "Lead Detail" : APP_NAME)
+    const page = titles[pathname] || (pathname.startsWith("/tickets") ? "Ticket" : pathname.startsWith("/client-to-lead/leads/") ? "Lead Detail" : pathname.startsWith("/onboarding") ? "Onboarding" : APP_NAME)
     document.title = `${APP_NAME} - ${page}`
   }, [pathname])
   return null
@@ -261,6 +263,18 @@ function App() {
                   <AppLayout>
                     <ErrorBoundary>
                       <LeadImportPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={ROUTES.ONBOARDING_PAYMENT_STATUS}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <PaymentStatusPage />
                     </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>

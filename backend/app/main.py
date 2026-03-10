@@ -7,6 +7,9 @@ load_dotenv(_env_path)
 
 import os
 import sys
+import threading
+import time
+from collections import defaultdict, deque
 # Fix Windows console encoding for emoji/special chars
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     try:
@@ -86,11 +89,59 @@ def _log(msg: str):
     except Exception:
         pass
 
+
+def _sanitize_ilike_input(value: str | None, max_len: int = 120) -> str:
+    """Sanitize user-controlled text used in ilike/or_ filters to reduce operator injection."""
+    if not value:
+        return ""
+    allowed = []
+    for ch in value:
+        if ch.isalnum() or ch in (" ", ".", "-", "_", "@"):
+            allowed.append(ch)
+    return "".join(allowed).strip()[:max_len]
+
+
 app = FastAPI(title="IP Internal manage Software Backend")
+
+# Basic in-memory rate limiting for sensitive endpoints.
+_RATE_LIMIT_WINDOW_SEC = int(os.getenv("RATE_LIMIT_WINDOW_SEC", "60"))
+_RATE_LIMIT_MAX_REQUESTS = int(os.getenv("RATE_LIMIT_MAX_REQUESTS", "20"))
+_RATE_LIMIT_PATHS = {
+    "/auth/login",
+    "/auth/register",
+    "/auth/refresh",
+    "/auth/resend-confirmation",
+    "/approval/execute-by-token",
+}
+_rate_limit_hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+_rate_limit_lock = threading.Lock()
+
+
+def _is_rate_limited(request: Request) -> bool:
+    path = request.url.path.rstrip("/")
+    tracked = any(path == p or path == f"/api{p}" for p in _RATE_LIMIT_PATHS)
+    if not tracked:
+        return False
+    now = time.time()
+    ip = (request.client.host if request.client else "unknown").strip() or "unknown"
+    key = (ip, path)
+    with _rate_limit_lock:
+        bucket = _rate_limit_hits[key]
+        while bucket and now - bucket[0] > _RATE_LIMIT_WINDOW_SEC:
+            bucket.popleft()
+        if len(bucket) >= _RATE_LIMIT_MAX_REQUESTS:
+            return True
+        bucket.append(now)
+    return False
 
 # Request logging + CATCH ALL to prevent 500
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
+    if _is_rate_limited(request):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Too many requests. Please try again later."},
+        )
     _log(f"--> {request.method} {request.url.path}")
     try:
         response = await call_next(request)
@@ -101,7 +152,7 @@ async def log_requests(request: Request, call_next):
             _log(f"UNHANDLED ERROR: {ex}")
         except Exception:
             pass
-        # Return 400 - use generic msg for encoding errors on Windows
+        # Return 500 - keep server failures visible to monitoring/alerts
         err_str = str(ex)
         if "charmap" in err_str or "encode" in err_str.lower() or "unicode" in err_str.lower():
             detail = "Registration failed. Restart backend with: set PYTHONIOENCODING=utf-8"
@@ -109,29 +160,29 @@ async def log_requests(request: Request, call_next):
             try:
                 detail = err_str[:300].encode("ascii", errors="replace").decode("ascii")
             except Exception:
-                detail = "Registration failed"
-        return JSONResponse(status_code=400, content={"detail": detail})
+                detail = "Internal server error"
+        return JSONResponse(status_code=500, content={"detail": detail})
 
-# Global exception handler - convert ALL errors to 4xx with message (never 500)
+# Global exception handler - keep 5xx as 5xx for security observability
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     from fastapi import HTTPException
     if isinstance(exc, HTTPException):
-        # Never expose 500 to users - convert 5xx to 400 with detail
+        # Preserve HTTPException status code
         if exc.status_code >= 500:
-            _log(f"!!! 5xx converted to 400: {exc.detail}")
+            _log(f"!!! 5xx: {exc.detail}")
             return JSONResponse(
-                status_code=400,
-                content={"detail": exc.detail if isinstance(exc.detail, str) else str(exc.detail)[:200]},
+                status_code=500,
+                content={"detail": "Internal server error"},
             )
         raise exc
     _log(f"!!! UNHANDLED: {type(exc).__name__}: {exc}")
     import traceback
     _log(traceback.format_exc())
-    # Return 400 instead of 500 - so user sees the error
+    # Return proper 500 for non-HTTP errors
     return JSONResponse(
-        status_code=400,
-        content={"detail": f"Error: {str(exc)[:200]}"},
+        status_code=500,
+        content={"detail": "Internal server error"},
     )
 
 # CORS configuration - allow frontend origin
@@ -163,8 +214,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins_list,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-Cron-Secret"],
 )
 
 # API router - routes work at BOTH / and /api (e.g. /users/me AND /api/users/me)
@@ -1142,7 +1193,7 @@ def list_tickets(
     if date_to:
         q = q.lte("created_at", date_to)
     if search and search.strip():
-        safe = search.strip().replace("%", "").replace("_", "")[:200]
+        safe = _sanitize_ilike_input(search, max_len=200)
         if safe:
             q = q.or_(
                 f"title.ilike.%{safe}%,description.ilike.%{safe}%,user_name.ilike.%{safe}%,"
@@ -1150,7 +1201,7 @@ def list_tickets(
                 f"company_name.ilike.%{safe}%,quality_of_response.ilike.%{safe}%,quality_solution.ilike.%{safe}%,why_feature.ilike.%{safe}%"
             )
     if reference_filter and reference_filter.strip():
-        safe_ref = reference_filter.strip().replace("%", "").replace("_", "")[:80]
+        safe_ref = _sanitize_ilike_input(reference_filter, max_len=80)
         if safe_ref:
             q = q.ilike("reference_no", f"%{safe_ref}%")
     order_col = sort_by if sort_by in ("created_at", "updated_at", "query_arrival_at", "query_response_at", "title", "status", "priority") else "created_at"
@@ -1830,7 +1881,10 @@ def _dashboard_kpi_resolve_user_id(name: str) -> str | None:
     if not name or not name.strip():
         return None
     try:
-        r = supabase.table("user_profiles").select("id").ilike("full_name", f"%{name.strip()}%").limit(1).execute()
+        safe_name = _sanitize_ilike_input(name, max_len=80)
+        if not safe_name:
+            return None
+        r = supabase.table("user_profiles").select("id").ilike("full_name", f"%{safe_name}%").limit(1).execute()
         if r.data and len(r.data) > 0:
             return r.data[0].get("id")
     except Exception as e:
@@ -3162,6 +3216,80 @@ def list_divisions(company_id: str | None = None, auth: dict = Depends(get_curre
         return [{"id": "1", "name": "Sales"}, {"id": "2", "name": "Support"}]
 
 
+# ---------- Onboarding > Payment Status ----------
+class OnboardingPaymentStatusCreate(BaseModel):
+    company_name: str
+    payment_status: str  # Done | Not Done
+    payment_received_date: date | None = None
+    poc_name: str | None = None
+    poc_contact: str | None = None
+    accounts_remarks: str | None = None
+
+
+def _generate_payment_reference(company_name: str) -> str:
+    """Reference: first 4 alpha chars of company name (uppercase) + -0001/0002..."""
+    prefix = "".join(c for c in (company_name or "").upper() if c.isalpha())[:4] or "XXXX"
+    try:
+        r = supabase.table("onboarding_payment_status").select("reference_no").execute()
+        nums = []
+        for row in (r.data or []):
+            ref = (row or {}).get("reference_no", "")
+            if ref.startswith(prefix + "-") and len(ref) > len(prefix) + 1:
+                suffix = ref[len(prefix) + 1:]
+                if suffix.isdigit():
+                    nums.append(int(suffix))
+        next_num = max(nums, default=0) + 1
+        return f"{prefix}-{next_num:04d}"
+    except Exception as e:
+        _log(f"onboarding payment reference: {e}")
+        return f"{prefix}-{int(datetime.now(timezone.utc).timestamp()) % 10000:04d}"
+
+
+@api_router.get("/onboarding/payment-status")
+def list_onboarding_payment_status(auth: dict = Depends(get_current_user)):
+    """List all onboarding payment status records, newest first. Returns empty list if table does not exist."""
+    try:
+        r = supabase.table("onboarding_payment_status").select("*").order("timestamp", desc=True).execute()
+        return {"items": r.data or []}
+    except Exception as e:
+        _log(f"onboarding payment status list: {e}")
+        return {"items": []}
+
+
+@api_router.post("/onboarding/payment-status")
+def create_onboarding_payment_status(payload: OnboardingPaymentStatusCreate, auth: dict = Depends(get_current_user)):
+    """Create payment status record. Auto-generates timestamp and reference_no."""
+    if payload.payment_status not in ("Done", "Not Done"):
+        raise HTTPException(400, "payment_status must be 'Done' or 'Not Done'")
+    company_name = (payload.company_name or "").strip()
+    if not company_name:
+        raise HTTPException(400, "company_name is required")
+    if payload.poc_contact and not (payload.poc_contact.isdigit() and len(payload.poc_contact) == 10):
+        raise HTTPException(400, "poc_contact must be 10 digits")
+    try:
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        ref = _generate_payment_reference(company_name)
+        row = {
+            "timestamp": now,
+            "reference_no": ref,
+            "company_name": company_name,
+            "payment_status": payload.payment_status,
+            "payment_received_date": payload.payment_received_date.isoformat() if payload.payment_received_date else None,
+            "poc_name": (payload.poc_name or "").strip() or None,
+            "poc_contact": (payload.poc_contact or "").strip() or None,
+            "accounts_remarks": (payload.accounts_remarks or "").strip() or None,
+        }
+        r = supabase.table("onboarding_payment_status").insert(row).execute()
+        created = (r.data or [{}])[0]
+        created["timestamp"] = now
+        return created
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"onboarding payment status create: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
 # ---------- Success Module: Performance Monitoring ----------
 class POCCreateRequest(BaseModel):
     company_id: str
@@ -3744,7 +3872,7 @@ def list_users(
     """List users. Admin and Master Admin can view; only Master Admin can edit (via PUT)."""
     safe_search = ""
     if search and search.strip():
-        safe_search = search.strip().replace("%", "").replace("_", "")[:100]
+        safe_search = _sanitize_ilike_input(search, max_len=100)
     try:
         rows, total = _list_users_from_view(safe_search, page, limit)
     except Exception as e:
@@ -4557,11 +4685,15 @@ def list_leads(
         if status:
             q = q.eq("status", status)
         if company and company.strip():
-            q = q.ilike("company_name", f"%{company.strip()}%")
+            safe_company = _sanitize_ilike_input(company, max_len=120)
+            if safe_company:
+                q = q.ilike("company_name", f"%{safe_company}%")
         if stage and stage.strip():
             q = q.eq("stage", stage.strip())
         if reference_no and reference_no.strip():
-            q = q.ilike("reference_no", f"%{reference_no.strip()}%")
+            safe_reference = _sanitize_ilike_input(reference_no, max_len=80)
+            if safe_reference:
+                q = q.ilike("reference_no", f"%{safe_reference}%")
         if date_from and date_from.strip():
             q = q.gte("created_at", date_from.strip() + "T00:00:00")
         if date_to and date_to.strip():
@@ -4935,14 +5067,13 @@ async def send_checklist_daily_reminders(
 ):
     """
     Start checklist daily reminders in background. Returns immediately to avoid Render timeout.
-    POST or GET. Auth: X-Cron-Secret header, ?secret= query, or admin login.
+    POST or GET. Auth: X-Cron-Secret header or admin login.
     Result is logged; check server logs for sent count.
     """
     cron_secret = (os.getenv("CHECKLIST_CRON_SECRET") or "").strip()
     x_cron = (
         request.headers.get("X-Cron-Secret") or
         request.headers.get("x-cron-secret") or
-        request.query_params.get("secret") or
         ""
     ).strip()
     if cron_secret and x_cron and x_cron == cron_secret:
@@ -4952,7 +5083,7 @@ async def send_checklist_daily_reminders(
         if role not in ("admin", "master_admin"):
             raise HTTPException(403, "Admin only")
     else:
-        raise HTTPException(401, "Set CHECKLIST_CRON_SECRET header or ?secret= for cron, or log in as admin")
+        raise HTTPException(401, "Set CHECKLIST_CRON_SECRET in X-Cron-Secret header, or log in as admin")
     background_tasks.add_task(_run_checklist_reminders_background)
     return {"status": "started", "message": "Checklist reminder job started. Check server logs for result."}
 
@@ -5064,14 +5195,13 @@ async def send_delegation_daily_reminders(
 ):
     """
     Start delegation daily reminders in background. Same pattern as checklist.
-    POST or GET. Auth: X-Cron-Secret header, ?secret= query, or admin login.
+    POST or GET. Auth: X-Cron-Secret header or admin login.
     Sends one email per assignee with pending/overdue delegation tasks.
     """
     cron_secret = (os.getenv("DELEGATION_CRON_SECRET") or os.getenv("CHECKLIST_CRON_SECRET") or "").strip()
     x_cron = (
         request.headers.get("X-Cron-Secret") or
         request.headers.get("x-cron-secret") or
-        request.query_params.get("secret") or
         ""
     ).strip()
     if cron_secret and x_cron and x_cron == cron_secret:
@@ -5081,7 +5211,7 @@ async def send_delegation_daily_reminders(
         if role not in ("admin", "master_admin"):
             raise HTTPException(403, "Admin only")
     else:
-        raise HTTPException(401, "Set DELEGATION_CRON_SECRET or CHECKLIST_CRON_SECRET header/query, or log in as admin")
+        raise HTTPException(401, "Set DELEGATION_CRON_SECRET or CHECKLIST_CRON_SECRET in X-Cron-Secret header, or log in as admin")
     background_tasks.add_task(_run_delegation_reminders_background)
     return {"status": "started", "message": "Delegation reminder job started. Check server logs for result."}
 
@@ -5371,13 +5501,12 @@ async def send_pending_digest(
     """
     Start pending reminder digest in background. Returns immediately to avoid Render timeout.
     Content: Checklist & Delegation + Support Chores&Bug & Feature by stage. Sent to admin, master_admin, approver.
-    Auth: X-Cron-Secret header, ?secret= query, or admin login. Result is logged; check server logs for sent count.
+    Auth: X-Cron-Secret header or admin login. Result is logged; check server logs for sent count.
     """
     cron_secret = (os.getenv("CHECKLIST_CRON_SECRET") or os.getenv("PENDING_REMINDER_CRON_SECRET") or "").strip()
     x_cron = (
         request.headers.get("X-Cron-Secret") or
         request.headers.get("x-cron-secret") or
-        request.query_params.get("secret") or
         ""
     ).strip()
     if cron_secret and x_cron and x_cron == cron_secret:
@@ -5387,7 +5516,7 @@ async def send_pending_digest(
         if role not in ("admin", "master_admin"):
             raise HTTPException(403, "Admin only (or use cron secret)")
     else:
-        raise HTTPException(401, "Set PENDING_REMINDER_CRON_SECRET or CHECKLIST_CRON_SECRET header/?secret=, or log in as admin")
+        raise HTTPException(401, "Set PENDING_REMINDER_CRON_SECRET or CHECKLIST_CRON_SECRET in X-Cron-Secret header, or log in as admin")
 
     level12_ids = _get_level1_level2_user_ids()
     if not level12_ids:
