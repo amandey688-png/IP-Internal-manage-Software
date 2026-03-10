@@ -79,6 +79,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     { key: `${ROUTES.TICKETS}?type=feature`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?type=feature`} style={linkStyle}>Feature</Link>, sectionKey: 'feature' },
     { key: `${ROUTES.TICKETS}?type=feature&view=approval`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?type=feature&view=approval`} style={linkStyle}>Approval Status</Link>, sectionKey: 'approval_status' },
     { key: `${ROUTES.TICKETS}?section=completed-chores-bugs`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=completed-chores-bugs`} style={linkStyle}>Completed Chores & Bugs</Link>, sectionKey: 'completed_chores_bugs' },
+    { key: `${ROUTES.TICKETS}?section=rejected-tickets`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=rejected-tickets`} style={linkStyle}>Rejected Tickets</Link>, sectionKey: 'rejected_tickets' },
     { key: `${ROUTES.TICKETS}?section=completed-feature`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=completed-feature`} style={linkStyle}>Completed Feature</Link>, sectionKey: 'completed_feature' },
   ]
   const supportItems: MenuProps['items'] = allSupportItems?.filter((item) => {
