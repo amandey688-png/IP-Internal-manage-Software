@@ -1122,6 +1122,11 @@ def list_tickets(
         types_list = ["chore", "bug"]
         q = q.in_("type", types_list)
         q = q.or_("quality_solution.not.is.null,live_review_status.eq.completed")
+    elif apply_section_filter and section == "rejected-tickets":
+        # Rejected tickets that have completed Stage 4 (moved out of Chores & Bugs)
+        q = q.in_("type", ["chore", "bug"])
+        q = q.eq("status_2", "rejected")
+        q = q.eq("status_4", "completed")
     elif apply_section_filter and section == "solutions":
         q = q.not_.is_("quality_solution", "null")
     elif apply_section_filter and section == "completed-feature":
@@ -1144,6 +1149,9 @@ def list_tickets(
                 if status_2_val != "staging":
                     q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
                     q = q.or_("status_2.is.null,status_2.neq.staging")
+                # Rejected: only show until Stage 4 is completed; once completed, ticket moves to Rejected Tickets section
+                if status_2_val == "rejected":
+                    q = q.or_("status_4.is.null,status_4.neq.completed")
             else:
                 q = q.eq("status_2", status_2_val)
         else:
@@ -3798,7 +3806,7 @@ def _map_role(name: str) -> str:
 # Section keys for user_section_permissions (match sidebar sections)
 SECTION_KEYS = [
     "dashboard", "support_dashboard", "all_tickets", "chores_bugs", "staging", "feature",
-    "approval_status", "completed_chores_bugs", "completed_feature",
+    "approval_status", "completed_chores_bugs", "rejected_tickets", "completed_feature",
     "solution", "task", "success_performance", "success_comp_perform", "settings", "users",
 ]
 

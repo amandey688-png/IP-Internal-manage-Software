@@ -27,6 +27,7 @@ export const SECTION_LABELS: Record<string, string> = {
   feature: 'Feature',
   approval_status: 'Approval Status',
   completed_chores_bugs: 'Completed Chores & Bugs',
+  rejected_tickets: 'Rejected Tickets',
   completed_feature: 'Completed Feature',
   solution: 'Solution',
   task: 'Task',
