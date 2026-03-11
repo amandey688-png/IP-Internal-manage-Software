@@ -261,7 +261,13 @@ class RefreshRequest(BaseModel):
 # ---------- Routes ----------
 @app.get("/health")
 def health():
-    """Lightweight health check (no DB). Use for keep-alive pings (e.g. UptimeRobot every 5 min) to prevent Render cold start."""
+    """Lightweight health check (no DB). Use for keep-alive pings (e.g. UptimeRobot every 5 min) to prevent Render cold start.
+    If DEADMANS_SNITCH_URL is set, pings Snitch so you get alerted when this endpoint stops being hit."""
+    try:
+        from app.snitch import ping_snitch
+        ping_snitch()
+    except Exception:
+        pass
     return {"status": "ok", "message": "Backend is running"}
 
 
@@ -3295,6 +3301,778 @@ def create_onboarding_payment_status(payload: OnboardingPaymentStatusCreate, aut
         raise
     except Exception as e:
         _log(f"onboarding payment status create: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# Pre-Onboarding required keys (all mandatory)
+PRE_ONBOARDING_KEYS = [
+    "total_users", "end_users_id", "gate_id_needed", "store_users", "purchase_users",
+    "training_mode", "computer_literacy", "computer_available", "internet_available",
+    "printer_available", "inventory_volume", "purchase_volume", "domain_email_present",
+    "domain_vendor_contact_shared", "cost_centre_update", "location_update", "current_purchase_management",
+]
+# Pre-Onboarding Checklist required keys (all mandatory)
+PRE_ONBOARDING_CHECKLIST_KEYS = [
+    "poc_collected", "whatsapp_group_created", "owner_added_in_group", "meeting_link_created_shared",
+    "no_of_users_store_purchase_others", "no_of_users_will_use_software", "end_users_will_use_software",
+    "gate_id_needed_or_not", "exact_store_purchase_persons", "training_flow_or_separately",
+    "computer_literacy_level", "computers_in_store", "internet_available_at_store",
+    "printer_available_at_store", "inventory_volume_items", "purchase_volume_po_per_day",
+    "domain_email_present_or_not", "domain_vendor_contact_shared_if_not",
+    "cost_centre_updated_now_or_later", "location_updated_now_or_later",
+    "managing_purchase_now", "quotation_comparison",
+    "basic_details_org_phone_division_gst_address_master_id_company_mail_item_list",
+    "days_required_for_details", "send_basic_details_from_previous_point",
+    "company_folder_created_in_drive", "review_meeting_prepare_plan_of_action",
+]
+
+# POC Checklist required keys (all mandatory)
+POC_CHECKLIST_KEYS = [
+    "user_details_format",
+    "approver_details_format",
+    "approvals_format",
+    "approval_levels_format",
+    "indenter_details_format",
+    "departments_alignment_format",
+    "item_stock_format",
+    "cost_centre_format",
+    "location_format",
+]
+
+
+def _get_editable_until(submitted_at_iso: str | None) -> str | None:
+    """Return ISO timestamp until when record is editable (48h after submit)."""
+    if not submitted_at_iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(submitted_at_iso.replace("Z", "+00:00"))
+        until = dt + timedelta(hours=48)
+        return until.isoformat().replace("+00:00", "Z")
+    except Exception:
+        return None
+
+
+def _is_within_48h_edit(submitted_at_iso: str | None) -> bool:
+    if not submitted_at_iso:
+        return True
+    until = _get_editable_until(submitted_at_iso)
+    if not until:
+        return False
+    try:
+        return datetime.now(timezone.utc) <= datetime.fromisoformat(until.replace("Z", "+00:00"))
+    except Exception:
+        return False
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/pre-onboarding")
+def get_pre_onboarding(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Get Pre-Onboarding data for a payment status record. Returns empty data if not yet filled or if table missing."""
+    try:
+        r = supabase.table("onboarding_pre_onboarding").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        if not row:
+            return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+        submitted_at = row.get("submitted_at")
+        return {
+            "id": row.get("id"),
+            "payment_status_id": row.get("payment_status_id"),
+            "data": row.get("data") or {},
+            "submitted_at": submitted_at,
+            "editable_until": _get_editable_until(submitted_at),
+            "editable_48h": _is_within_48h_edit(submitted_at),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get pre_onboarding: {e}")
+        return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/pre-onboarding")
+def save_pre_onboarding(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Pre-Onboarding. All fields mandatory. Editable only within 48h after first submit."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    for key in PRE_ONBOARDING_KEYS:
+        if key not in data or data[key] is None or (isinstance(data[key], str) and data[key].strip() == ""):
+            raise HTTPException(400, f"Missing or empty required field: {key}")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    data["timestamp"] = data.get("timestamp") or now
+    try:
+        existing = supabase.table("onboarding_pre_onboarding").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row_data = None
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        if row_data:
+            if not _is_within_48h_edit(row_data.get("submitted_at")):
+                raise HTTPException(403, "Pre-Onboarding is no longer editable (48h passed)")
+            supabase.table("onboarding_pre_onboarding").update({"data": data, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+            return {"data": data, "submitted_at": row_data.get("submitted_at"), "editable_until": _get_editable_until(row_data.get("submitted_at")), "editable_48h": True}
+        else:
+            supabase.table("onboarding_pre_onboarding").insert({
+                "payment_status_id": payment_status_id,
+                "data": data,
+                "submitted_at": now,
+                "updated_at": now,
+            }).execute()
+            return {"data": data, "submitted_at": now, "editable_until": _get_editable_until(now), "editable_48h": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save pre_onboarding: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/pre-onboarding-checklist")
+def get_pre_onboarding_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Get Pre-Onboarding Checklist for a payment status record. Returns empty data if not yet filled or if table missing."""
+    try:
+        r = supabase.table("onboarding_pre_onboarding_checklist").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        if not row:
+            return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+        submitted_at = row.get("submitted_at")
+        return {
+            "id": row.get("id"),
+            "payment_status_id": row.get("payment_status_id"),
+            "data": row.get("data") or {},
+            "submitted_at": submitted_at,
+            "editable_until": _get_editable_until(submitted_at),
+            "editable_48h": _is_within_48h_edit(submitted_at),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get pre_onboarding_checklist: {e}")
+        return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/pre-onboarding-checklist")
+def save_pre_onboarding_checklist(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Pre-Onboarding Checklist. All fields mandatory. Editable only within 48h after first submit."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    for key in PRE_ONBOARDING_CHECKLIST_KEYS:
+        if key not in data or data[key] is None or (isinstance(data[key], str) and str(data[key]).strip() == ""):
+            raise HTTPException(400, f"Missing or empty required field: {key}")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("onboarding_pre_onboarding_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row_data = None
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        if row_data:
+            if not _is_within_48h_edit(row_data.get("submitted_at")):
+                raise HTTPException(403, "Pre-Onboarding Checklist is no longer editable (48h passed)")
+            supabase.table("onboarding_pre_onboarding_checklist").update({"data": data, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+            return {"data": data, "submitted_at": row_data.get("submitted_at"), "editable_until": _get_editable_until(row_data.get("submitted_at")), "editable_48h": True}
+        else:
+            supabase.table("onboarding_pre_onboarding_checklist").insert({
+                "payment_status_id": payment_status_id,
+                "data": data,
+                "submitted_at": now,
+                "updated_at": now,
+            }).execute()
+            return {"data": data, "submitted_at": now, "editable_until": _get_editable_until(now), "editable_48h": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save pre_onboarding_checklist: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# ---------- Onboarding > POC Checklist ----------
+@api_router.get("/onboarding/payment-status/{payment_status_id}/poc-checklist")
+def get_poc_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Get POC Checklist data for a payment status record. Returns empty data if not yet filled or if table missing."""
+    try:
+        r = supabase.table("onboarding_poc_checklist").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        if not row:
+            return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+        submitted_at = row.get("submitted_at")
+        return {
+            "id": row.get("id"),
+            "payment_status_id": row.get("payment_status_id"),
+            "data": row.get("data") or {},
+            "submitted_at": submitted_at,
+            "editable_until": _get_editable_until(submitted_at),
+            "editable_48h": _is_within_48h_edit(submitted_at),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get poc_checklist: {e}")
+        return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/poc-checklist")
+def save_poc_checklist(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update POC Checklist. All fields mandatory. Editable only within 48h after first submit."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    for key in POC_CHECKLIST_KEYS:
+        if key not in data or data[key] is None or (isinstance(data[key], str) and str(data[key]).strip() == ""):
+            raise HTTPException(400, f"Missing or empty required field: {key}")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("onboarding_poc_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row_data = None
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        if row_data:
+            if not _is_within_48h_edit(row_data.get("submitted_at")):
+                raise HTTPException(403, "POC Checklist is no longer editable (48h passed)")
+            supabase.table("onboarding_poc_checklist").update({"data": data, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+            return {"data": data, "submitted_at": row_data.get("submitted_at"), "editable_until": _get_editable_until(row_data.get("submitted_at")), "editable_48h": True}
+        else:
+            supabase.table("onboarding_poc_checklist").insert({
+                "payment_status_id": payment_status_id,
+                "data": data,
+                "submitted_at": now,
+                "updated_at": now,
+            }).execute()
+            return {"data": data, "submitted_at": now, "editable_until": _get_editable_until(now), "editable_48h": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save poc_checklist: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# POC Details keys (all optional; stored in JSONB data)
+POC_DETAILS_KEYS = [
+    "details_sent",
+    "details_sent_timestamp",
+    "followup1_status",
+    "followup1_timestamp",
+    "followup2_status",
+    "followup2_timestamp",
+    "followup3_status",
+    "followup3_timestamp",
+    "details_collected",
+    "details_collected_timestamp",
+    "remarks",
+]
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/poc-details")
+def get_poc_details(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Get POC Details for a payment status record. Returns empty data if not yet filled."""
+    try:
+        r = supabase.table("onboarding_poc_details").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        if not row:
+            return {"data": {}}
+        data = row.get("data") or {}
+        return {"id": row.get("id"), "payment_status_id": row.get("payment_status_id"), "data": data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get poc_details: {e}")
+        return {"data": {}}
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/poc-details")
+def save_poc_details(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update POC Details. All fields optional."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    # Restrict to known keys and set missing to None
+    out = {}
+    for k in POC_DETAILS_KEYS:
+        out[k] = data.get(k) if k in data else None
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("onboarding_poc_details").select("id").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        has_row = False
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            has_row = (isinstance(d, dict) and d) or (isinstance(d, list) and len(d) > 0)
+        if has_row:
+            supabase.table("onboarding_poc_details").update({"data": out, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+        else:
+            supabase.table("onboarding_poc_details").insert({
+                "payment_status_id": payment_status_id,
+                "data": out,
+                "updated_at": now,
+            }).execute()
+        return {"data": out}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save poc_details: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# Details Collected Checklist keys (all required; values must be "Done" or "Not Done"). Editable 48h after submit.
+DETAILS_COLLECTED_CHECKLIST_KEYS = [
+    "collect_user_details",
+    "collect_approver_details",
+    "collect_confirmation_approval_system",
+    "collect_approval_levels_info",
+    "collect_indenter_details",
+    "collect_department_details",
+    "collect_item_stock_details",
+    "collect_cost_center_details",
+    "collect_location_details",
+]
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/details-collected-checklist")
+def get_details_collected_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Get Details Collected Checklist. Returns empty data if not yet filled. 48h edit rule."""
+    try:
+        r = supabase.table("onboarding_details_collected_checklist").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        if not row:
+            return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+        submitted_at = row.get("submitted_at")
+        return {
+            "id": row.get("id"),
+            "payment_status_id": row.get("payment_status_id"),
+            "data": row.get("data") or {},
+            "submitted_at": submitted_at,
+            "editable_until": _get_editable_until(submitted_at),
+            "editable_48h": _is_within_48h_edit(submitted_at),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get details_collected_checklist: {e}")
+        return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/details-collected-checklist")
+def save_details_collected_checklist(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Details Collected Checklist. All fields required: Done or Not Done. Editable only within 48h after first submit."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    for key in DETAILS_COLLECTED_CHECKLIST_KEYS:
+        if key not in data or data[key] is None or (isinstance(data[key], str) and str(data[key]).strip() == ""):
+            raise HTTPException(400, f"Missing or empty required field: {key}")
+        if str(data[key]).strip() not in ("Done", "Not Done"):
+            raise HTTPException(400, f"Field {key} must be Done or Not Done")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("onboarding_details_collected_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row_data = None
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        if row_data:
+            if not _is_within_48h_edit(row_data.get("submitted_at")):
+                raise HTTPException(403, "Details Collected Checklist is no longer editable (48h passed)")
+            supabase.table("onboarding_details_collected_checklist").update({"data": data, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+            return {"data": data, "submitted_at": row_data.get("submitted_at"), "editable_until": _get_editable_until(row_data.get("submitted_at")), "editable_48h": True}
+        else:
+            supabase.table("onboarding_details_collected_checklist").insert({
+                "payment_status_id": payment_status_id,
+                "data": data,
+                "submitted_at": now,
+                "updated_at": now,
+            }).execute()
+            return {"data": data, "submitted_at": now, "editable_until": _get_editable_until(now), "editable_48h": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save details_collected_checklist: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# Item Cleaning keys (all optional; timestamp auto-generated on frontend)
+ITEM_CLEANING_KEYS = [
+    "timestamp",
+    "company_name",
+    "raw_item_received",
+    "raw_item_uploaded_in_drive",
+    "create_sheet_raw_item_duplicate",
+    "create_sheet_raw_item_with_code",
+    "create_sheet_raw_with_code_duplicate_person_name",
+    "item_cleaned_in_excel",
+    "item_trimmed_in_excel",
+    "proper_casing",
+    "formatting",
+    "spell_check",
+    "upload_items_in_grok",
+    "grok_cleaned_item_put_on_raw_with_code_duplicate_person_name",
+    "review_on_item_name_check",
+    "review_on_items_uom_proper_casing",
+    "review_on_item_formatting",
+    "pull_all_cleaned_item_by_assigned_item_id_in_raw_with_code",
+    "create_sheet_cleaned_unique_items_with_code",
+]
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/item-cleaning")
+def get_item_cleaning(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Get Item Cleaning data for a payment status record. Returns empty data if not yet filled."""
+    try:
+        r = supabase.table("onboarding_item_cleaning").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        if not row:
+            return {"data": {}}
+        data = row.get("data") or {}
+        return {"id": row.get("id"), "payment_status_id": row.get("payment_status_id"), "data": data}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get item_cleaning: {e}")
+        return {"data": {}}
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/item-cleaning")
+def save_item_cleaning(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Item Cleaning. All fields optional."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    out = {}
+    for k in ITEM_CLEANING_KEYS:
+        out[k] = data.get(k) if k in data else None
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("onboarding_item_cleaning").select("id").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        has_row = False
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            has_row = (isinstance(d, dict) and d) or (isinstance(d, list) and len(d) > 0)
+        if has_row:
+            supabase.table("onboarding_item_cleaning").update({"data": out, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+        else:
+            supabase.table("onboarding_item_cleaning").insert({
+                "payment_status_id": payment_status_id,
+                "data": out,
+                "updated_at": now,
+            }).execute()
+        return {"data": out}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save item_cleaning: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# Item Cleaning Checklist keys (all required; values Done or Not Done). Editable 48h after submit.
+ITEM_CLEANING_CHECKLIST_KEYS = [
+    "raw_item_sent_to_rimpa",
+    "raw_item_uploaded_in_drive",
+    "create_sheet_raw_item_duplicate",
+    "create_sheet_raw_item_with_code",
+    "create_sheet_raw_with_code_duplicate_person_name",
+    "item_cleaned_in_excel",
+    "item_trimmed_in_excel",
+    "proper_casing",
+    "formatting",
+    "spell_check",
+    "upload_items_in_grok",
+    "grok_cleaned_item_put_on_raw_with_code_duplicate_person_name",
+    "review_on_item_name_check",
+    "review_on_items_uom_proper_casing",
+    "review_on_item_formatting",
+    "pull_all_cleaned_item_by_assigned_item_id_in_raw_with_code",
+    "create_sheet_cleaned_unique_items_with_code",
+    "item_list_sent_to_ayush",
+]
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/item-cleaning-checklist")
+def get_item_cleaning_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Get Item Cleaning Checklist. 48h edit rule."""
+    try:
+        r = supabase.table("onboarding_item_cleaning_checklist").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        if not row:
+            return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+        submitted_at = row.get("submitted_at")
+        return {
+            "id": row.get("id"),
+            "payment_status_id": row.get("payment_status_id"),
+            "data": row.get("data") or {},
+            "submitted_at": submitted_at,
+            "editable_until": _get_editable_until(submitted_at),
+            "editable_48h": _is_within_48h_edit(submitted_at),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get item_cleaning_checklist: {e}")
+        return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/item-cleaning-checklist")
+def save_item_cleaning_checklist(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Item Cleaning Checklist. All fields required: Done or Not Done. Editable only within 48h after first submit."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    for key in ITEM_CLEANING_CHECKLIST_KEYS:
+        if key not in data or data[key] is None or (isinstance(data[key], str) and str(data[key]).strip() == ""):
+            raise HTTPException(400, f"Missing or empty required field: {key}")
+        if str(data[key]).strip() not in ("Done", "Not Done"):
+            raise HTTPException(400, f"Field {key} must be Done or Not Done")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("onboarding_item_cleaning_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row_data = None
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        if row_data:
+            if not _is_within_48h_edit(row_data.get("submitted_at")):
+                raise HTTPException(403, "Item Cleaning Checklist is no longer editable (48h passed)")
+            supabase.table("onboarding_item_cleaning_checklist").update({"data": data, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+            return {"data": data, "submitted_at": row_data.get("submitted_at"), "editable_until": _get_editable_until(row_data.get("submitted_at")), "editable_48h": True}
+        else:
+            supabase.table("onboarding_item_cleaning_checklist").insert({
+                "payment_status_id": payment_status_id,
+                "data": data,
+                "submitted_at": now,
+                "updated_at": now,
+            }).execute()
+            return {"data": data, "submitted_at": now, "editable_until": _get_editable_until(now), "editable_48h": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save item_cleaning_checklist: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# Org & Master ID keys (all optional; timestamps auto-generated when Done selected)
+ORG_MASTER_ID_KEYS = [
+    "data_sent_to_ayush",
+    "data_sent_to_ayush_timestamp",
+    "organization_created",
+    "organization_created_timestamp",
+    "master_id_created",
+    "master_id_created_timestamp",
+    "item_uploaded",
+    "item_uploaded_timestamp",
+    "stock_uploaded",
+    "stock_uploaded_timestamp",
+    "status",
+    "remarks",
+]
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/org-master-id")
+def get_org_master_id(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Get Org & Master ID data. Returns empty data if not yet filled."""
+    try:
+        r = supabase.table("onboarding_org_master_id").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        if not row:
+            return {"data": {}}
+        return {"id": row.get("id"), "payment_status_id": row.get("payment_status_id"), "data": row.get("data") or {}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get org_master_id: {e}")
+        return {"data": {}}
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/org-master-id")
+def save_org_master_id(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Org & Master ID. All fields optional."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    out = {}
+    for k in ORG_MASTER_ID_KEYS:
+        out[k] = data.get(k) if k in data else None
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("onboarding_org_master_id").select("id").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        has_row = False
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            has_row = (isinstance(d, dict) and d) or (isinstance(d, list) and len(d) > 0)
+        if has_row:
+            supabase.table("onboarding_org_master_id").update({"data": out, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+        else:
+            supabase.table("onboarding_org_master_id").insert({
+                "payment_status_id": payment_status_id,
+                "data": out,
+                "updated_at": now,
+            }).execute()
+        return {"data": out}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save org_master_id: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+def _checklist_48h_get(table: str, payment_status_id: str, log_name: str):
+    """Common GET for 48h checklists. Returns data, submitted_at, editable_48h."""
+    try:
+        r = supabase.table(table).select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        if not row:
+            return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+        submitted_at = row.get("submitted_at")
+        return {
+            "id": row.get("id"), "payment_status_id": row.get("payment_status_id"),
+            "data": row.get("data") or {},
+            "submitted_at": submitted_at,
+            "editable_until": _get_editable_until(submitted_at),
+            "editable_48h": _is_within_48h_edit(submitted_at),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get {log_name}: {e}")
+        return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+
+
+def _checklist_48h_save(table: str, payment_status_id: str, data: dict, keys: list, log_name: str, allow_remarks: bool = False):
+    """Common save for 48h checklists. Validates Done/Not Done for keys (except optional remarks)."""
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    for key in keys:
+        if allow_remarks and key == "remarks":
+            continue
+        if key not in data or data[key] is None or (isinstance(data[key], str) and str(data[key]).strip() == ""):
+            raise HTTPException(400, f"Missing or empty required field: {key}")
+        if key != "remarks" and str(data[key]).strip() not in ("Done", "Not Done"):
+            raise HTTPException(400, f"Field {key} must be Done or Not Done")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table(table).select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row_data = None
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        if row_data:
+            if not _is_within_48h_edit(row_data.get("submitted_at")):
+                raise HTTPException(403, f"{log_name} is no longer editable (48h passed)")
+            supabase.table(table).update({"data": data, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+            return {"data": data, "submitted_at": row_data.get("submitted_at"), "editable_until": _get_editable_until(row_data.get("submitted_at")), "editable_48h": True}
+        else:
+            supabase.table(table).insert({"payment_status_id": payment_status_id, "data": data, "submitted_at": now, "updated_at": now}).execute()
+            return {"data": data, "submitted_at": now, "editable_until": _get_editable_until(now), "editable_48h": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save {log_name}: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# Org & Master Checklist (10 fields, Done/Not Done). 48h.
+ORG_MASTER_CHECKLIST_KEYS = [
+    "company_name_proper_format", "company_email", "company_phone_number", "gst_number", "company_address",
+    "plant_address", "divisions_name", "cleaned_item", "email_for_master_id", "phone_number_for_master_id",
+]
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/org-master-checklist")
+def get_org_master_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    return _checklist_48h_get("onboarding_org_master_checklist", payment_status_id, "org_master_checklist")
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/org-master-checklist")
+def save_org_master_checklist(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    return _checklist_48h_save("onboarding_org_master_checklist", payment_status_id, data, ORG_MASTER_CHECKLIST_KEYS, "org_master_checklist")
+
+
+# Setup Checklist (12 fields, Done/Not Done). 48h.
+SETUP_CHECKLIST_KEYS = [
+    "create_all_user_with_related_data", "create_all_approvers", "enable_all_required_approvals",
+    "enable_all_required_approval_levels", "create_all_indenters", "create_departments_under_required_divisions",
+    "sent_item_stock_to_ayush_sir", "upload_stock_as_per_requirement", "clean_cc_format", "clean_location_format",
+    "upload_cc", "upload_locations",
+]
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/setup-checklist")
+def get_setup_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    return _checklist_48h_get("onboarding_setup_checklist", payment_status_id, "setup_checklist")
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/setup-checklist")
+def save_setup_checklist(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    return _checklist_48h_save("onboarding_setup_checklist", payment_status_id, data, SETUP_CHECKLIST_KEYS, "setup_checklist")
+
+
+# Item & Stock Checklist (29 fields, Done/Not Done). 48h.
+ITEM_STOCK_CHECKLIST_KEYS = [
+    "collect_org_id", "collect_item_group_id", "collect_item_uom_id", "create_sheet_ids_from_ip",
+    "store_all_ids_exported_in_ids_from_ip", "create_sheet_item_import_company_name",
+    "pull_data_from_item_with_stock_cleaned_unique_items", "calculate_item_rate_against_stock_store",
+    "collect_warehouse_id_store_in_ids_from_ip", "export_item_with_ids_from_ip_store",
+    "assign_item_ids_against_item_names_stock", "export_brands_with_ids_from_ip_store",
+    "assign_brand_ids_against_brand_names", "export_location_with_ids_from_ip_store",
+    "assign_location_ids_against_location_names", "concatenate_item_and_brand_ids",
+    "prepare_make_id_from_concatenation", "create_file_stock_import_div_company_name",
+    "update_file_warehouse_item_make_qty_rate_date_location", "check_warehouse_column_contain_blank",
+    "check_item_id_contain_na_or_blank", "check_make_id_contain_na_or_blank", "check_no_qty_zero_or_negative",
+    "check_all_rates_ge_zero", "check_all_date_cells_date_format", "check_location_id_contain_na_or_blank",
+    "check_duplicate_in_item_id", "remove_duplicates", "upload_file_in_ip",
+]
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/item-stock-checklist")
+def get_item_stock_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    return _checklist_48h_get("onboarding_item_stock_checklist", payment_status_id, "item_stock_checklist")
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/item-stock-checklist")
+def save_item_stock_checklist(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    return _checklist_48h_save("onboarding_item_stock_checklist", payment_status_id, data, ITEM_STOCK_CHECKLIST_KEYS, "item_stock_checklist")
+
+
+# Final Setup (7 Done/Not Done + Remarks). 48h.
+FINAL_SETUP_KEYS = [
+    "item_uploaded", "stock_uploaded", "master_setup_done", "review_completed",
+    "onboarding_setup_done", "handed_to_training", "final_status", "remarks",
+]
+
+
+@api_router.get("/onboarding/payment-status/{payment_status_id}/final-setup")
+def get_final_setup(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    return _checklist_48h_get("onboarding_final_setup", payment_status_id, "final_setup")
+
+
+@api_router.post("/onboarding/payment-status/{payment_status_id}/final-setup")
+def save_final_setup(payment_status_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    # Ensure all keys present; remarks optional (can be empty)
+    out = {k: data.get(k) if k in data else ("" if k == "remarks" else None) for k in FINAL_SETUP_KEYS}
+    for k in FINAL_SETUP_KEYS:
+        if k != "remarks" and (out[k] is None or (isinstance(out[k], str) and str(out[k]).strip() == "")):
+            raise HTTPException(400, f"Missing or empty required field: {k}")
+        if k != "remarks" and str(out[k]).strip() not in ("Done", "Not Done"):
+            raise HTTPException(400, f"Field {k} must be Done or Not Done")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("onboarding_final_setup").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
+        row_data = None
+        if existing is not None and getattr(existing, "data", None) is not None:
+            d = existing.data
+            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        if row_data:
+            if not _is_within_48h_edit(row_data.get("submitted_at")):
+                raise HTTPException(403, "Final Setup is no longer editable (48h passed)")
+            supabase.table("onboarding_final_setup").update({"data": out, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+            return {"data": out, "submitted_at": row_data.get("submitted_at"), "editable_until": _get_editable_until(row_data.get("submitted_at")), "editable_48h": True}
+        else:
+            supabase.table("onboarding_final_setup").insert({"payment_status_id": payment_status_id, "data": out, "submitted_at": now, "updated_at": now}).execute()
+            return {"data": out, "submitted_at": now, "editable_until": _get_editable_until(now), "editable_48h": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save final_setup: {e}")
         raise HTTPException(400, str(e)[:200])
 
 

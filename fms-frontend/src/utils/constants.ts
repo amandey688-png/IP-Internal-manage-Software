@@ -106,6 +106,18 @@ export const API_ENDPOINTS = {
   ONBOARDING_PAYMENT_STATUS: {
     LIST: '/onboarding/payment-status',
     CREATE: '/onboarding/payment-status',
+    PRE_ONBOARDING: (id: string) => `/onboarding/payment-status/${id}/pre-onboarding`,
+    PRE_ONBOARDING_CHECKLIST: (id: string) => `/onboarding/payment-status/${id}/pre-onboarding-checklist`,
+    POC_CHECKLIST: (id: string) => `/onboarding/payment-status/${id}/poc-checklist`,
+    POC_DETAILS: (id: string) => `/onboarding/payment-status/${id}/poc-details`,
+    DETAILS_COLLECTED_CHECKLIST: (id: string) => `/onboarding/payment-status/${id}/details-collected-checklist`,
+    ITEM_CLEANING: (id: string) => `/onboarding/payment-status/${id}/item-cleaning`,
+    ITEM_CLEANING_CHECKLIST: (id: string) => `/onboarding/payment-status/${id}/item-cleaning-checklist`,
+    ORG_MASTER_ID: (id: string) => `/onboarding/payment-status/${id}/org-master-id`,
+    ORG_MASTER_CHECKLIST: (id: string) => `/onboarding/payment-status/${id}/org-master-checklist`,
+    SETUP_CHECKLIST: (id: string) => `/onboarding/payment-status/${id}/setup-checklist`,
+    ITEM_STOCK_CHECKLIST: (id: string) => `/onboarding/payment-status/${id}/item-stock-checklist`,
+    FINAL_SETUP: (id: string) => `/onboarding/payment-status/${id}/final-setup`,
   },
   LEADS: {
     LIST: '/leads',

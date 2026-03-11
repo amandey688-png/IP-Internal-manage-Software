@@ -31,4 +31,149 @@ export const onboardingApi = {
     apiClient
       .post<PaymentStatusRecord>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.CREATE, payload)
       .then((r) => r.data),
+
+  getPreOnboarding: (paymentStatusId: string) =>
+    apiClient
+      .get<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.PRE_ONBOARDING(paymentStatusId)
+      )
+      .then((r) => r.data),
+
+  savePreOnboarding: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient
+      .post<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.PRE_ONBOARDING(paymentStatusId),
+        { data }
+      )
+      .then((r) => r.data),
+
+  getPreOnboardingChecklist: (paymentStatusId: string) =>
+    apiClient
+      .get<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.PRE_ONBOARDING_CHECKLIST(paymentStatusId)
+      )
+      .then((r) => r.data),
+
+  savePreOnboardingChecklist: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient
+      .post<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.PRE_ONBOARDING_CHECKLIST(paymentStatusId),
+        { data }
+      )
+      .then((r) => r.data),
+
+  getPocChecklist: (paymentStatusId: string) =>
+    apiClient
+      .get<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.POC_CHECKLIST(paymentStatusId)
+      )
+      .then((r) => r.data),
+
+  savePocChecklist: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient
+      .post<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.POC_CHECKLIST(paymentStatusId),
+        { data }
+      )
+      .then((r) => r.data),
+
+  getPocDetails: (paymentStatusId: string) =>
+    apiClient
+      .get<{ data: Record<string, unknown> }>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.POC_DETAILS(paymentStatusId))
+      .then((r) => r.data),
+
+  savePocDetails: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient
+      .post<{ data: Record<string, unknown> }>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.POC_DETAILS(paymentStatusId), { data })
+      .then((r) => r.data),
+
+  getDetailsCollectedChecklist: (paymentStatusId: string) =>
+    apiClient
+      .get<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.DETAILS_COLLECTED_CHECKLIST(paymentStatusId)
+      )
+      .then((r) => r.data),
+
+  saveDetailsCollectedChecklist: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient
+      .post<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.DETAILS_COLLECTED_CHECKLIST(paymentStatusId),
+        { data }
+      )
+      .then((r) => r.data),
+
+  getItemCleaning: (paymentStatusId: string) =>
+    apiClient
+      .get<{ data: Record<string, unknown> }>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ITEM_CLEANING(paymentStatusId))
+      .then((r) => r.data),
+
+  saveItemCleaning: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient
+      .post<{ data: Record<string, unknown> }>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ITEM_CLEANING(paymentStatusId), { data })
+      .then((r) => r.data),
+
+  getItemCleaningChecklist: (paymentStatusId: string) =>
+    apiClient
+      .get<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ITEM_CLEANING_CHECKLIST(paymentStatusId)
+      )
+      .then((r) => r.data),
+
+  saveItemCleaningChecklist: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient
+      .post<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+        API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ITEM_CLEANING_CHECKLIST(paymentStatusId),
+        { data }
+      )
+      .then((r) => r.data),
+
+  getOrgMasterId: (paymentStatusId: string) =>
+    apiClient
+      .get<{ data: Record<string, unknown> }>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ORG_MASTER_ID(paymentStatusId))
+      .then((r) => r.data),
+
+  saveOrgMasterId: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient
+      .post<{ data: Record<string, unknown> }>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ORG_MASTER_ID(paymentStatusId), { data })
+      .then((r) => r.data),
+
+  getOrgMasterChecklist: (paymentStatusId: string) =>
+    apiClient.get<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+      API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ORG_MASTER_CHECKLIST(paymentStatusId)
+    ).then((r) => r.data),
+  saveOrgMasterChecklist: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient.post<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+      API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ORG_MASTER_CHECKLIST(paymentStatusId),
+      { data }
+    ).then((r) => r.data),
+
+  getSetupChecklist: (paymentStatusId: string) =>
+    apiClient.get<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+      API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.SETUP_CHECKLIST(paymentStatusId)
+    ).then((r) => r.data),
+  saveSetupChecklist: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient.post<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+      API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.SETUP_CHECKLIST(paymentStatusId),
+      { data }
+    ).then((r) => r.data),
+
+  getItemStockChecklist: (paymentStatusId: string) =>
+    apiClient.get<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+      API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ITEM_STOCK_CHECKLIST(paymentStatusId)
+    ).then((r) => r.data),
+  saveItemStockChecklist: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient.post<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+      API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.ITEM_STOCK_CHECKLIST(paymentStatusId),
+      { data }
+    ).then((r) => r.data),
+
+  getFinalSetup: (paymentStatusId: string) =>
+    apiClient.get<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+      API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.FINAL_SETUP(paymentStatusId)
+    ).then((r) => r.data),
+  saveFinalSetup: (paymentStatusId: string, data: Record<string, unknown>) =>
+    apiClient.post<{ data: Record<string, unknown>; submitted_at: string | null; editable_until: string | null; editable_48h: boolean }>(
+      API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.FINAL_SETUP(paymentStatusId),
+      { data }
+    ).then((r) => r.data),
 }
