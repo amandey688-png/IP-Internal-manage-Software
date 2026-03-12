@@ -582,8 +582,8 @@ export const PerformanceMonitoringPage = () => {
             <Form.Item
               name="feature_ids"
               label="Feature Committed for Use *"
-              rules={[{ required: !featuresLocked, message: 'Required (locked after 24hr)' }]}
-              help={featuresLocked ? 'Locked: cannot edit after 24 hours' : undefined}
+              rules={[{ required: !featuresLocked, message: 'Required (locked after 144 hr)' }]}
+              help={undefined}
             >
               <Select
                 mode="multiple"
