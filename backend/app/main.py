@@ -5106,7 +5106,7 @@ def _get_training_for_ticket(ticket_id: str):
 
 
 def _features_locked(training: dict | None) -> bool:
-    """True if Feature Committed for Use cannot be edited (after 24hr)."""
+    """True if Feature Committed for Use cannot be edited (after 144 hr / 6 days)."""
     if not training:
         return False
     committed_at = training.get("features_committed_at")
@@ -5117,7 +5117,7 @@ def _features_locked(training: dict | None) -> bool:
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
         delta = datetime.now(timezone.utc) - dt
-        return delta.total_seconds() >= 24 * 3600
+        return delta.total_seconds() >= 144 * 3600  # 144 hr = 6 days
     except Exception:
         return False
 
@@ -5137,7 +5137,7 @@ def get_performance_training(
 
 @api_router.post("/success/performance/training")
 def submit_performance_training(payload: TrainingSubmitRequest, auth: dict = Depends(get_current_user)):
-    """Create or update training. Feature Committed locked after 24hr."""
+    """Create or update training. Feature Committed locked after 144 hr (6 days)."""
     if payload.call_poc not in ("yes", "no") or payload.message_poc not in ("yes", "no") or payload.message_owner not in ("yes", "no") or payload.training_status not in ("yes", "no"):
         raise HTTPException(status_code=400, detail="call_poc, message_poc, message_owner, training_status must be yes or no")
     try:
