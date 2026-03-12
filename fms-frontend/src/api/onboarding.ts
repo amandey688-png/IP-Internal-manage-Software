@@ -11,6 +11,8 @@ export interface PaymentStatusRecord {
   poc_name: string | null
   poc_contact: string | null
   accounts_remarks: string | null
+  status?: string
+  fi_do?: string
   created_at: string
 }
 

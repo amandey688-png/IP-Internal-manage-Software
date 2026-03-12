@@ -68,6 +68,9 @@ export const ROUTES = {
   /** Onboarding module */
   ONBOARDING: '/onboarding',
   ONBOARDING_PAYMENT_STATUS: '/onboarding/payment-status',
+  /** Training module */
+  TRAINING: '/training',
+  TRAINING_CLIENT: '/training/client-training',
   USERS: '/users',
   SETTINGS: '/settings',
 } as const
@@ -127,6 +130,17 @@ export const API_ENDPOINTS = {
     DETAIL: (id: string) => `/leads/${id}`,
     BY_REFERENCE: (ref: string) => `/leads/by-reference/${ref}`,
     STAGE: (id: string, slug: string) => `/leads/${id}/stages/${slug}`,
+  },
+  TRAINING: {
+    CLIENTS: '/training/clients',
+    ASSIGN: (id: string) => `/training/clients/${id}/assignment`,
+    USERS: '/training/users',
+    DAY0: (id: string) => `/training/clients/${id}/day0-checklist`,
+    STAGES_CONFIG: '/training/stages-config',
+    TRAINING_STATUS: (id: string) => `/training/clients/${id}/training-status`,
+    STAGE: (id: string, stageKey: string) => `/training/clients/${id}/stages/${stageKey}`,
+    AVAILABLE_FOR_MANUAL: '/training/clients/available-for-manual',
+    MANUAL_ADD: '/training/clients/manual',
   },
 } as const
 
