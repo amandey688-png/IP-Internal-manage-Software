@@ -14,6 +14,7 @@ import {
   TeamOutlined,
   UserAddOutlined,
   AuditOutlined,
+  ReadOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
@@ -39,6 +40,9 @@ const isClientToLeadPage = (pathname: string) =>
 const isOnboardingPage = (pathname: string) =>
   pathname.startsWith(ROUTES.ONBOARDING)
 
+const isTrainingPage = (pathname: string) =>
+  pathname.startsWith(ROUTES.TRAINING)
+
 interface SidebarProps {
   className?: string
   open?: boolean
@@ -54,6 +58,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const [successOpen, setSuccessOpen] = useState(isSuccessPage(location.pathname))
   const [clientToLeadOpen, setClientToLeadOpen] = useState(isClientToLeadPage(location.pathname))
   const [onboardingOpen, setOnboardingOpen] = useState(isOnboardingPage(location.pathname))
+  const [trainingOpen, setTrainingOpen] = useState(isTrainingPage(location.pathname))
   useEffect(() => {
     if (isSupportPage(location.pathname)) setSupportOpen(true)
   }, [location.pathname])
@@ -68,6 +73,9 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   }, [location.pathname])
   useEffect(() => {
     if (isOnboardingPage(location.pathname)) setOnboardingOpen(true)
+  }, [location.pathname])
+  useEffect(() => {
+    if (isTrainingPage(location.pathname)) setTrainingOpen(true)
   }, [location.pathname])
 
   const linkStyle = { color: 'inherit', display: 'block' }
@@ -107,6 +115,10 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const onboardingItems: MenuProps['items'] = [
     { key: ROUTES.ONBOARDING_PAYMENT_STATUS, icon: <FileTextOutlined />, label: <Link to={ROUTES.ONBOARDING_PAYMENT_STATUS} style={linkStyle}>Payment Status</Link> },
+  ]
+
+  const trainingItems: MenuProps['items'] = [
+    { key: ROUTES.TRAINING_CLIENT, icon: <ReadOutlined />, label: <Link to={ROUTES.TRAINING_CLIENT} style={linkStyle}>Client Training</Link> },
   ]
 
   const leadItems: MenuProps['items'] = [
@@ -155,6 +167,13 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
       children: onboardingItems,
       onTitleClick: () => setOnboardingOpen(!onboardingOpen),
     },
+    {
+      key: 'training',
+      icon: <ReadOutlined />,
+      label: 'Training',
+      children: trainingItems,
+      onTitleClick: () => setTrainingOpen(!trainingOpen),
+    },
     ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: <Link to={ROUTES.USERS} style={linkStyle}>Users</Link> }] : []),
     ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: <Link to={ROUTES.SETTINGS} style={linkStyle}>Settings</Link> }] : []),
     {
@@ -178,6 +197,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     ...(successOpen ? ['success'] : []),
     ...(clientToLeadOpen ? ['client-to-lead'] : []),
     ...(onboardingOpen ? ['onboarding'] : []),
+    ...(trainingOpen ? ['training'] : []),
   ]
 
   const handleOpenChange = (keys: string[]) => {
@@ -186,6 +206,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     setSuccessOpen(keys.includes('success'))
     setClientToLeadOpen(keys.includes('client-to-lead'))
     setOnboardingOpen(keys.includes('onboarding'))
+    setTrainingOpen(keys.includes('training'))
   }
 
   const menuContent = (

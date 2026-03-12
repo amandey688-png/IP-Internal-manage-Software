@@ -29,6 +29,7 @@ import { LeadListPage } from "./pages/Leads/LeadListPage"
 import { LeadDetailPage } from "./pages/Leads/LeadDetailPage"
 import { LeadImportPage } from "./pages/Leads/LeadImportPage"
 import { PaymentStatusPage } from "./pages/Onboarding/PaymentStatusPage"
+import { ClientTrainingPage } from "./pages/Training/ClientTrainingPage"
 
 import { ROUTES, ROLES, APP_NAME } from "./utils/constants"
 
@@ -51,6 +52,7 @@ function AppTitle() {
       [ROUTES.LEADS]: "Lead",
       [ROUTES.LEADS_IMPORT]: "Import from sheet",
       [ROUTES.ONBOARDING_PAYMENT_STATUS]: "Onboarding – Payment Status",
+      [ROUTES.TRAINING_CLIENT]: "Client Training",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
     }
@@ -275,6 +277,18 @@ function App() {
                   <AppLayout>
                     <ErrorBoundary>
                       <PaymentStatusPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={ROUTES.TRAINING_CLIENT}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <ClientTrainingPage />
                     </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>

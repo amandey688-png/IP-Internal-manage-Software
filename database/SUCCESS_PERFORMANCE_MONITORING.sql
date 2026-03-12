@@ -134,6 +134,7 @@ CREATE INDEX IF NOT EXISTS idx_feature_followups_ticket_feature ON public.featur
 ALTER TABLE public.performance_monitoring ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.performance_training ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.ticket_features ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.feature_list ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.feature_followups ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS performance_select ON public.performance_monitoring;
@@ -156,6 +157,9 @@ DROP POLICY IF EXISTS ticket_features_insert ON public.ticket_features;
 CREATE POLICY ticket_features_insert ON public.ticket_features FOR INSERT TO authenticated WITH CHECK (true);
 DROP POLICY IF EXISTS ticket_features_delete ON public.ticket_features;
 CREATE POLICY ticket_features_delete ON public.ticket_features FOR DELETE TO authenticated USING (true);
+
+DROP POLICY IF EXISTS feature_list_select_authenticated ON public.feature_list;
+CREATE POLICY feature_list_select_authenticated ON public.feature_list FOR SELECT TO authenticated USING (true);
 
 DROP POLICY IF EXISTS followups_select ON public.feature_followups;
 CREATE POLICY followups_select ON public.feature_followups FOR SELECT TO authenticated USING (true);

@@ -1001,19 +1001,25 @@ export function PaymentStatusPage() {
       title: 'Timestamp',
       dataIndex: 'timestamp',
       key: 'timestamp',
-      width: 170,
+      width: 128,
       render: (v: string) => (v ? dayjs(v).format('DD-MMM-YYYY HH:mm') : '—'),
     },
     {
-      title: 'Reference No',
+      title: 'Reference',
       dataIndex: 'reference_no',
       key: 'reference_no',
       width: 100,
     },
     {
-      title: 'Company Name',
+      title: <span style={{ whiteSpace: 'normal' }}>Company</span>,
       dataIndex: 'company_name',
       key: 'company_name',
+      width: 180,
+      ellipsis: false,
+      render: (v: string | null) => <span style={{ wordBreak: 'break-word' }}>{v || '—'}</span>,
+      filters: [...new Set(records.map((r) => r.company_name).filter(Boolean))].sort().map((c) => ({ text: c, value: c })),
+      onFilter: (value, record) => record.company_name === value,
+      filterSearch: true,
     },
     {
       title: 'Payment Status',
@@ -1029,9 +1035,12 @@ export function PaymentStatusPage() {
       render: (v: string | null) => (v ? dayjs(v).format('DD-MMM-YYYY') : '—'),
     },
     {
-      title: 'POC Name',
+      title: <span style={{ whiteSpace: 'normal' }}>POC</span>,
       dataIndex: 'poc_name',
       key: 'poc_name',
+      width: 140,
+      ellipsis: false,
+      render: (v: string | null) => <span style={{ wordBreak: 'break-word' }}>{v || '—'}</span>,
     },
     {
       title: 'POC Contact',
@@ -1040,11 +1049,29 @@ export function PaymentStatusPage() {
       width: 120,
     },
     {
-      title: 'Accounts Remarks',
+      title: <span style={{ whiteSpace: 'normal' }}>Acc Remark</span>,
       dataIndex: 'accounts_remarks',
       key: 'accounts_remarks',
-      ellipsis: true,
-      render: (v: string | null) => (v ? <span title={v}>{v}</span> : '—'),
+      width: 180,
+      ellipsis: false,
+      render: (v: string | null) => (v ? <span style={{ wordBreak: 'break-word' }} title={v}>{v}</span> : '—'),
+    },
+    {
+      title: 'Status',
+      dataIndex: 'status',
+      key: 'status',
+      width: 120,
+      render: (v: string | null | undefined) => v || '—',
+      filters: [...new Set(records.map((r) => (r.status && r.status !== '—' ? r.status : '—')).filter(Boolean))].sort().map((s) => ({ text: s, value: s })),
+      onFilter: (value, record) => (record.status || '—') === value,
+      filterSearch: true,
+    },
+    {
+      title: 'Fi-DO',
+      dataIndex: 'fi_do',
+      key: 'fi_do',
+      width: 100,
+      render: (v: string | null | undefined) => v || '—',
     },
   ]
 
@@ -1505,8 +1532,8 @@ export function PaymentStatusPage() {
                     </div>
                   ) : <Button type="primary" block onClick={openItemStockChecklist} size="large" icon={<CheckSquareOutlined />}>Item & Stock Checklist</Button>
                 )}
-                {/* Final Setup: after Item & Stock Checklist submitted */}
-                {drawerItemStockChecklistStatus?.submitted && (
+                {/* Final Setup: show details whenever Final Setup is submitted; show button only after Item & Stock Checklist */}
+                {(drawerItemStockChecklistStatus?.submitted || drawerFinalSetupStatus?.submitted) && (
                   drawerFinalSetupStatus?.submitted ? (
                     <div style={{ marginBottom: 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8, marginBottom: 8 }}>
@@ -1525,7 +1552,7 @@ export function PaymentStatusPage() {
                         </div>
                       )}
                     </div>
-                  ) : <Button type="primary" block onClick={openFinalSetup} size="large" icon={<CheckSquareOutlined />}>Final Setup</Button>
+                  ) : drawerItemStockChecklistStatus?.submitted ? <Button type="primary" block onClick={openFinalSetup} size="large" icon={<CheckSquareOutlined />}>Final Setup</Button> : null
                 )}
               </Space>
             )}

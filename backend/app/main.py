@@ -19,6 +19,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
         pass
 
 from datetime import datetime, date, timedelta, timezone
+from typing import Optional
 from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request, UploadFile, File, Query, BackgroundTasks
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -3259,12 +3260,65 @@ def _generate_payment_reference(company_name: str) -> str:
         return f"{prefix}-{int(datetime.now(timezone.utc).timestamp()) % 10000:04d}"
 
 
+# Order of onboarding stages (last completed = highest index that has data). Used for Status column.
+_ONBOARDING_STAGE_TABLES = [
+    ("Final Setup", "onboarding_final_setup", "submitted_at"),
+    ("Item & Stock Checklist", "onboarding_item_stock_checklist", "submitted_at"),
+    ("Setup Checklist", "onboarding_setup_checklist", "submitted_at"),
+    ("Org & Master Checklist", "onboarding_org_master_checklist", "submitted_at"),
+    ("Org & Master ID", "onboarding_org_master_id", "any"),
+    ("Item Cleaning Checklist", "onboarding_item_cleaning_checklist", "submitted_at"),
+    ("Item Cleaning", "onboarding_item_cleaning", "any"),
+    ("Details Collected Checklist", "onboarding_details_collected_checklist", "submitted_at"),
+    ("POC Details", "onboarding_poc_details", "any"),
+    ("POC Checklist", "onboarding_poc_checklist", "submitted_at"),
+    ("Pre-Onboarding Checklist", "onboarding_pre_onboarding_checklist", "submitted_at"),
+    ("Pre-Onboarding", "onboarding_pre_onboarding", "submitted_at"),
+]
+
+
+def _get_onboarding_stage_status(payment_status_ids: list) -> dict:
+    """Return dict payment_status_id -> last completed stage label (e.g. 'POC Checklist')."""
+    if not payment_status_ids:
+        return {}
+    out = {}
+    for label, table, key in _ONBOARDING_STAGE_TABLES:
+        try:
+            if key == "any":
+                r = supabase.table(table).select("payment_status_id").in_("payment_status_id", payment_status_ids).execute()
+            else:
+                r = supabase.table(table).select("payment_status_id").in_("payment_status_id", payment_status_ids).not_.is_(key, "null").execute()
+            for row in (r.data or []):
+                pid = row.get("payment_status_id")
+                if pid and pid not in out:
+                    out[pid] = label
+        except Exception:
+            continue
+    return out
+
+
 @api_router.get("/onboarding/payment-status")
 def list_onboarding_payment_status(auth: dict = Depends(get_current_user)):
-    """List all onboarding payment status records, newest first. Returns empty list if table does not exist."""
+    """List all onboarding payment status records, newest first. Each item includes 'status' = last completed stage and 'fi_do' = Done if Final step submitted else Not Done."""
     try:
         r = supabase.table("onboarding_payment_status").select("*").order("timestamp", desc=True).execute()
-        return {"items": r.data or []}
+        rows = r.data or []
+        ids = [row.get("id") for row in rows if row.get("id")]
+        status_map = _get_onboarding_stage_status(ids)
+        # Fi-DO: Done if Final step (Final Setup) data submitted, else Not Done
+        final_setup_ids = set()
+        try:
+            fs = supabase.table("onboarding_final_setup").select("payment_status_id").execute()
+            for x in (fs.data or []):
+                pid = x.get("payment_status_id")
+                if pid:
+                    final_setup_ids.add(pid)
+        except Exception:
+            pass
+        for row in rows:
+            row["status"] = status_map.get(row.get("id")) or "—"
+            row["fi_do"] = "Done" if row.get("id") in final_setup_ids else "Not Done"
+        return {"items": rows}
     except Exception as e:
         _log(f"onboarding payment status list: {e}")
         return {"items": []}
@@ -3301,6 +3355,751 @@ def create_onboarding_payment_status(payload: OnboardingPaymentStatusCreate, aut
         raise
     except Exception as e:
         _log(f"onboarding payment status create: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# ---------- Training: Expected Day 0 = timestamp + 24h; Status = Pending / Done in X / Done, X delay ----------
+def _parse_iso_ts(s) -> Optional[datetime]:
+    """Parse ISO timestamp string to timezone-aware datetime."""
+    if not s:
+        return None
+    s = str(s).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _format_duration_short(seconds: float) -> str:
+    """Format seconds as 'Xm', 'Xh', 'Xd Xh' for display."""
+    if seconds is None or seconds < 0:
+        return ""
+    s = int(round(seconds))
+    if s < 60:
+        return f"{s}m"
+    if s < 3600:
+        return f"{s // 60}m"
+    if s < 86400:
+        h, r = divmod(s, 3600)
+        if r >= 1800:
+            h += 1
+        return f"{h}h"
+    d, r = divmod(s, 86400)
+    h = r // 3600
+    if h > 0:
+        return f"{d}d {h}h"
+    return f"{d}d"
+
+
+# ---------- Training: Clients (only when Payment Status Fi-DO = Done / Final Setup submitted) ----------
+@api_router.get("/training/clients")
+def list_training_clients(auth: dict = Depends(get_current_user)):
+    """List clients: only companies where Onboarding > Payment Status has Fi-DO = Done (Final Setup submitted).
+    For each such company, Company name, POC, and Old reference number are pulled from Payment Status and shown in Client Training in the relevant columns."""
+    try:
+        r = supabase.table("onboarding_final_setup").select("payment_status_id, submitted_at").execute()
+        rows = r.data or []
+        done_ids = []
+        submitted_map = {}
+        for row in rows:
+            pid = row.get("payment_status_id")
+            if not pid:
+                continue
+            pid_str = str(pid)
+            done_ids.append(pid_str)
+            submitted_map[pid_str] = row.get("submitted_at") or ""
+        all_ids = list(done_ids)
+        if not all_ids:
+            return {"items": []}
+        pay = supabase.table("onboarding_payment_status").select("id, company_name, reference_no, timestamp, poc_name").in_("id", all_ids).execute()
+        pay_rows = {}
+        for p in (pay.data or []):
+            kid = p.get("id")
+            if kid is not None:
+                k = str(kid)
+                pay_rows[k] = p
+        # Select without expected_day0 if column missing in DB (migration may not have been run)
+        assign_r = supabase.table("training_client_assignments").select("payment_status_id, poc_name, poc_user_id, trainer_user_id, created_at").in_("payment_status_id", all_ids).execute()
+        assign_map = {}
+        trainer_ids: set[str] = set()
+        for row in (assign_r.data or []):
+            pid = row.get("payment_status_id")
+            if pid:
+                assign_map[str(pid)] = row
+                tid = row.get("trainer_user_id")
+                if tid:
+                    trainer_ids.add(str(tid))
+        # Optional: fetch expected_day0 if column exists (second query to avoid breaking when column missing)
+        try:
+            assign_day0_r = supabase.table("training_client_assignments").select("payment_status_id, expected_day0").in_("payment_status_id", all_ids).execute()
+            for row in (assign_day0_r.data or []):
+                pid = row.get("payment_status_id")
+                if pid and assign_map.get(str(pid)) is not None:
+                    assign_map[str(pid)]["expected_day0"] = row.get("expected_day0")
+        except Exception:
+            pass
+        day0_map: dict[str, str] = {}
+        day0_trainer_map: dict[str, str] = {}  # pid -> trainer_user_id from Day 0 checklist
+        day0_skipped_map: dict[str, bool] = {}
+        try:
+            day0_r = supabase.table("training_day0_checklist").select("payment_status_id, submitted_at, data").in_("payment_status_id", all_ids).execute()
+            for row in (day0_r.data or []):
+                pid = row.get("payment_status_id")
+                if pid:
+                    pid_str = str(pid)
+                    day0_map[pid_str] = row.get("submitted_at") or ""
+                    data = row.get("data") or {}
+                    if isinstance(data, dict):
+                        tid = data.get("trainer_user_id")
+                        if tid and str(tid).strip():
+                            tid_str = str(tid).strip()
+                            day0_trainer_map[pid_str] = tid_str
+                            trainer_ids.add(tid_str)
+                        if row.get("submitted_at"):
+                            all_na = all(str(data.get(k, "")).strip().upper() == "NA" for k in DAY0_CHECKLIST_KEYS)
+                            if all_na:
+                                day0_skipped_map[pid_str] = True
+        except Exception:
+            pass
+        trainer_map: dict[str, str] = {}
+        if trainer_ids:
+            try:
+                tr = supabase.table("user_profiles").select("id, full_name").in_("id", list(trainer_ids)).execute()
+                for u in (tr.data or []):
+                    uid = str(u.get("id"))
+                    name = (u.get("full_name") or "").strip()
+                    if uid:
+                        trainer_map[uid] = name
+            except Exception:
+                trainer_map = {}
+        day0_trainer_name_map: dict[str, str] = {}
+        for pid, tid in day0_trainer_map.items():
+            name = trainer_map.get(tid)
+            if name:
+                day0_trainer_name_map[pid] = name
+        stages_map: dict[str, dict[str, str]] = {}
+        skipped_stages_map: dict[str, dict[str, bool]] = {}  # pid -> stage_key -> True if skipped
+        try:
+            stages_r = supabase.table("training_checklist_stages").select("payment_status_id, stage_key, submitted_at, data").in_("payment_status_id", all_ids).execute()
+            for row in (stages_r.data or []):
+                pid = str(row.get("payment_status_id"))
+                sk = row.get("stage_key") or ""
+                if pid not in stages_map:
+                    stages_map[pid] = {}
+                    skipped_stages_map[pid] = {}
+                stages_map[pid][sk] = row.get("submitted_at") or ""
+                if row.get("submitted_at"):
+                    data = row.get("data") or {}
+                    if isinstance(data, dict) and data:
+                        all_na = all(str(v).strip().upper() == "NA" for v in data.values())
+                        if all_na:
+                            skipped_stages_map[pid][sk] = True
+        except Exception:
+            pass
+        ordered = sorted(
+            [pid for pid in all_ids if pay_rows.get(pid)],
+            key=lambda pid: submitted_map.get(pid) or "",
+            reverse=False,
+        )
+        items = []
+        for i, pid in enumerate(ordered, start=1):
+            p = pay_rows.get(pid) or {}
+            assign = assign_map.get(pid) or {}
+            stages = stages_map.get(pid) or {}
+            day0_at = day0_map.get(pid) or ""
+            ts_raw = submitted_map.get(pid) or p.get("timestamp") or ""
+            # Trainer: from assignment first, else from Day 0 Checklist
+            assignment_trainer_name = trainer_map.get(str(assign.get("trainer_user_id") or ""))
+            day0_trainer_name = day0_trainer_name_map.get(pid)
+            display_trainer_name = assignment_trainer_name or day0_trainer_name
+            # Expected Day 0 = ticket timestamp + 24 hours
+            expected_day0_dt = None
+            expected_day0_iso = None
+            base_dt = _parse_iso_ts(ts_raw)
+            if base_dt is not None:
+                expected_day0_dt = base_dt + timedelta(hours=24)
+                expected_day0_iso = expected_day0_dt.isoformat()
+            # Status Day 0: Pending / Done in X / Done, X delay
+            day0_status = "pending"
+            day0_completed_in_text = None
+            day0_delay_text = None
+            if day0_at:
+                done_dt = _parse_iso_ts(day0_at)
+                if done_dt is not None and base_dt is not None:
+                    completed_sec = (done_dt - base_dt).total_seconds()
+                    day0_completed_in_text = _format_duration_short(completed_sec)
+                    if expected_day0_dt is not None:
+                        if done_dt <= expected_day0_dt:
+                            day0_status = "on_time"
+                        else:
+                            delay_sec = (done_dt - expected_day0_dt).total_seconds()
+                            day0_delay_text = _format_duration_short(delay_sec) + " delay"
+                            day0_status = "delayed"
+                    else:
+                        day0_status = "on_time"
+            # Day '1' Planed = Day '0' Completed; expected Day 1 = Day '1' Planed + 24h; delay if Day 1 done after that
+            day1_planed_dt = _parse_iso_ts(day0_at) if day0_at else None
+            expected_day1_dt = (day1_planed_dt + timedelta(hours=24)) if day1_planed_dt else None
+            day1_delay_text = None
+            day1_at = stages.get("day1") or ""
+            if day1_at and expected_day1_dt:
+                day1_done_dt = _parse_iso_ts(day1_at)
+                if day1_done_dt and day1_done_dt > expected_day1_dt:
+                    delay_sec = (day1_done_dt - expected_day1_dt).total_seconds()
+                    day1_delay_text = _format_duration_short(delay_sec) + " delay"
+            # Day '2' Planed = DAY 1 (+1day) Checklist Done date & time (day1_plus1_submitted_at)
+            day2_planed_iso = stages.get("day1_plus1") or ""
+            expected_day2_dt = None
+            if day2_planed_iso:
+                day2_planed_dt = _parse_iso_ts(day2_planed_iso)
+                if day2_planed_dt:
+                    expected_day2_dt = day2_planed_dt + timedelta(hours=24)
+            day2_delay_text = None
+            day2_at = stages.get("day2") or ""
+            if day2_at and expected_day2_dt:
+                day2_done_dt = _parse_iso_ts(day2_at)
+                if day2_done_dt and day2_done_dt > expected_day2_dt:
+                    delay_sec = (day2_done_dt - expected_day2_dt).total_seconds()
+                    day2_delay_text = _format_duration_short(delay_sec) + " delay"
+            skipped = skipped_stages_map.get(pid) or {}
+            items.append({
+                "payment_status_id": pid,
+                "company_name": p.get("company_name") or "",
+                "onboarding_reference_no": p.get("reference_no") or "",
+                "timestamp": ts_raw,
+                "client_reference_no": f"CLT-{i:04d}",
+                "has_assignment": bool(assign),
+                "poc_name": assign.get("poc_name") or p.get("poc_name"),
+                "trainer_user_id": assign.get("trainer_user_id"),
+                "trainer_name": display_trainer_name,
+                "assignment_created_at": assign.get("created_at"),
+                "expected_day0": expected_day0_iso,
+                "day0_status": day0_status,
+                "day0_completed_in_text": day0_completed_in_text,
+                "day0_delay_text": day0_delay_text,
+                "day0_submitted_at": day0_at,
+                "day0_skipped": day0_skipped_map.get(pid, False),
+                "day1_minus2_submitted_at": stages.get("day1_minus2") or "",
+                "day1_submitted_at": stages.get("day1") or "",
+                "day1_planed_iso": day0_at,
+                "day1_delay_text": day1_delay_text,
+                "day1_plus1_submitted_at": stages.get("day1_plus1") or "",
+                "day1_minus2_skipped": skipped.get("day1_minus2", False),
+                "day1_skipped": skipped.get("day1", False),
+                "day1_plus1_skipped": skipped.get("day1_plus1", False),
+                "day2_skipped": skipped.get("day2", False),
+                "day3_skipped": skipped.get("day3", False),
+                "feedback_skipped": skipped.get("feedback", False),
+                "day2_planed_iso": day2_planed_iso,
+                "day2_delay_text": day2_delay_text,
+                "day2_submitted_at": stages.get("day2") or "",
+                "day3_planed_iso": stages.get("day2") or "",
+                "day3_submitted_at": stages.get("day3") or "",
+                "feedback_submitted_at": stages.get("feedback") or "",
+            })
+        items.reverse()
+        return {"items": items}
+    except Exception as e:
+        _log(f"training clients list: {e}")
+        import traceback
+        _log(traceback.format_exc())
+        return {"items": []}
+
+
+@api_router.get("/training/clients/available-for-manual")
+def list_available_for_manual(auth: dict = Depends(get_current_user)):
+    """List onboarding payment status records that are not yet in the training list (for 'Add client manually' dropdown)."""
+    try:
+        r = supabase.table("onboarding_final_setup").select("payment_status_id, data").execute()
+        done_ids = set()
+        for row in (r.data or []):
+            data = row.get("data")
+            if isinstance(data, dict) and str(data.get("final_status", "")).strip() == "Done":
+                done_ids.add(row.get("payment_status_id"))
+        try:
+            manual_r = supabase.table("training_manual_clients").select("payment_status_id").execute()
+            for row in (manual_r.data or []):
+                done_ids.add(row.get("payment_status_id"))
+        except Exception:
+            pass
+        pay = supabase.table("onboarding_payment_status").select("id, company_name, reference_no, timestamp").order("timestamp", desc=True).execute()
+        out = []
+        for p in (pay.data or []):
+            pid = p.get("id")
+            if pid and pid not in done_ids:
+                out.append({
+                    "payment_status_id": pid,
+                    "company_name": p.get("company_name") or "",
+                    "reference_no": p.get("reference_no") or "",
+                    "timestamp": p.get("timestamp"),
+                })
+        return {"items": out}
+    except Exception as e:
+        _log(f"training available-for-manual: {e}")
+        return {"items": []}
+
+
+class TrainingManualAddPayload(BaseModel):
+    payment_status_id: str
+
+
+@api_router.post("/training/clients/manual")
+def add_training_client_manual(payload: TrainingManualAddPayload, auth: dict = Depends(get_current_user)):
+    """Add a client to the training list manually (so they appear and can go through Day 0 → ... sequence)."""
+    pid = (payload.payment_status_id or "").strip()
+    if not pid:
+        raise HTTPException(400, "payment_status_id is required")
+    try:
+        existing = supabase.table("training_manual_clients").select("payment_status_id").eq("payment_status_id", pid).limit(1).execute()
+        if existing.data and len(existing.data) > 0:
+            raise HTTPException(400, "This client is already in the training list (added manually)")
+        final_r = supabase.table("onboarding_final_setup").select("payment_status_id, data").eq("payment_status_id", pid).limit(1).execute()
+        if final_r.data and len(final_r.data) > 0:
+            data = final_r.data[0].get("data")
+            if isinstance(data, dict) and str(data.get("final_status", "")).strip() == "Done":
+                raise HTTPException(400, "This client is already in the training list")
+        supabase.table("training_manual_clients").insert({"payment_status_id": pid}).execute()
+        return {"message": "Client added to training list", "payment_status_id": pid}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"add_training_client_manual: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/training/users")
+def list_training_users(auth: dict = Depends(get_current_user)):
+    """List users for Trainer dropdown in Client Training. All users who use the software (from user_profiles)."""
+    try:
+        r = supabase.table("user_profiles").select("id, full_name").eq("is_active", True).order("full_name").execute()
+        return {"users": r.data or []}
+    except Exception:
+        try:
+            r = supabase.table("user_profiles").select("id, full_name").order("full_name").execute()
+            return {"users": r.data or []}
+        except Exception:
+            return {"users": []}
+
+
+class TrainingAssignmentCreate(BaseModel):
+    poc_name: str
+    trainer_user_id: str
+    expected_day0: Optional[str] = None  # YYYY-MM-DD
+
+
+@api_router.post("/training/clients/{payment_status_id}/assignment")
+def create_training_assignment(payment_status_id: str, payload: TrainingAssignmentCreate, auth: dict = Depends(get_current_user)):
+    """Assign POC & Trainer for a training client. Only one assignment per payment_status_id is allowed."""
+    poc_name = (payload.poc_name or "").strip()
+    trainer_user_id = (payload.trainer_user_id or "").strip()
+    if not poc_name or not trainer_user_id:
+        raise HTTPException(400, "poc_name and trainer_user_id are required")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    expected_day0 = (payload.expected_day0 or "").strip() or None
+    try:
+        existing = supabase.table("training_client_assignments").select("id").eq("payment_status_id", payment_status_id).limit(1).execute()
+        if existing.data and len(existing.data) > 0:
+            raise HTTPException(400, "POC & Trainer already submitted for this client")
+        row: dict = {
+            "payment_status_id": payment_status_id,
+            "poc_user_id": None,
+            "poc_name": poc_name,
+            "trainer_user_id": trainer_user_id,
+            "created_at": now,
+        }
+        if expected_day0:
+            row["expected_day0"] = expected_day0
+        supabase.table("training_client_assignments").insert(row).execute()
+        return {"message": "Assignment saved", "payment_status_id": payment_status_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"create_training_assignment: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+class TrainingAssignmentUpdate(BaseModel):
+    poc_name: Optional[str] = None
+    trainer_user_id: Optional[str] = None
+    expected_day0: Optional[str] = None  # YYYY-MM-DD or null to clear
+
+
+@api_router.put("/training/clients/{payment_status_id}/assignment")
+def update_training_assignment(payment_status_id: str, payload: TrainingAssignmentUpdate, auth: dict = Depends(get_current_user)):
+    """Update POC, Trainer and/or Expected Day 0 for an existing assignment."""
+    try:
+        existing = supabase.table("training_client_assignments").select("id").eq("payment_status_id", payment_status_id).limit(1).execute()
+        if not existing.data or len(existing.data) == 0:
+            raise HTTPException(404, "No assignment found for this client")
+        updates: dict = {}
+        if payload.poc_name is not None:
+            updates["poc_name"] = (payload.poc_name or "").strip() or None
+        if payload.trainer_user_id is not None:
+            updates["trainer_user_id"] = (payload.trainer_user_id or "").strip() or None
+        if payload.expected_day0 is not None:
+            updates["expected_day0"] = (payload.expected_day0 or "").strip() or None
+        if not updates:
+            return {"message": "Nothing to update", "payment_status_id": payment_status_id}
+        supabase.table("training_client_assignments").update(updates).eq("payment_status_id", payment_status_id).execute()
+        return {"message": "Assignment updated", "payment_status_id": payment_status_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"update_training_assignment: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# Day 0 Checklist – allowed values Yes/No/NA for each field
+DAY0_CHECKLIST_KEYS = [
+    "confirm_share_live_credentials",
+    "google_meet_test_run",
+    "hardware_requirements_ok",
+    "network_connection_ok",
+    "identify_training_members",
+    "check_master_data",
+    "final_followup_doubts_documented",
+    "tasks_completed_before_day1",
+    "min_one_item",
+    "min_two_vendors",
+    "min_one_indent",
+    "min_two_rfq",
+    "min_two_qc",
+    "meeting_link_day1_created",
+    "how_to_videos_shared",
+]
+
+
+@api_router.get("/training/clients/{payment_status_id}/day0-checklist")
+def get_training_day0_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Get Day 0 Checklist for a training client. Returns empty data if not yet filled. Includes editable_48h and resolved trainer_name."""
+    try:
+        r = supabase.table("training_day0_checklist").select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row = (r.data or [None])[0] if r.data else None
+        if not row:
+            return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False, "trainer_name": None}
+        submitted_at = row.get("submitted_at")
+        data = row.get("data") or {}
+        trainer_name = None
+        trainer_id = data.get("trainer_user_id") if isinstance(data.get("trainer_user_id"), str) else None
+        if trainer_id and trainer_id.strip():
+            try:
+                pr = supabase.table("user_profiles").select("full_name").eq("id", trainer_id.strip()).limit(1).execute()
+                if pr.data and len(pr.data) > 0:
+                    trainer_name = (pr.data[0].get("full_name") or "").strip() or None
+            except Exception:
+                pass
+            if trainer_name:
+                data = {**data, "trainer_name": trainer_name}
+        return {
+            "data": data,
+            "submitted_at": submitted_at,
+            "editable_until": _get_editable_until(submitted_at),
+            "editable_48h": _is_within_48h_edit(submitted_at),
+            "trainer_name": trainer_name,
+        }
+    except Exception as e:
+        _log(f"get training day0_checklist: {e}")
+        return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False, "trainer_name": None}
+
+
+class TrainingDay0ChecklistPayload(BaseModel):
+    data: dict
+
+
+@api_router.post("/training/clients/{payment_status_id}/day0-checklist")
+def save_training_day0_checklist(payment_status_id: str, payload: TrainingDay0ChecklistPayload, auth: dict = Depends(get_current_user)):
+    """Create or update Day 0 Checklist. All fields must be Yes / No / NA. Edits allowed only within 48 hours of submit."""
+    data = payload.data or {}
+    allowed_values = {"Yes", "No", "NA"}
+    for key in DAY0_CHECKLIST_KEYS:
+        val = str(data.get(key, "")).strip()
+        if val not in allowed_values:
+            raise HTTPException(400, f"Field {key} must be one of Yes / No / NA")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("training_day0_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).limit(1).execute()
+        has_row = bool(existing.data and len(existing.data) > 0)
+        if has_row:
+            row_data = existing.data[0]
+            if not _is_within_48h_edit(row_data.get("submitted_at")):
+                raise HTTPException(403, "Edit window (48 hours) has expired. Day 0 Checklist can no longer be changed.")
+            supabase.table("training_day0_checklist").update({"data": data, "submitted_at": now, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
+        else:
+            supabase.table("training_day0_checklist").insert({
+                "payment_status_id": payment_status_id,
+                "data": data,
+                "submitted_at": now,
+                "updated_at": now,
+            }).execute()
+        return {"data": data, "submitted_at": now}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save training day0_checklist: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# Training checklist stages (after Day 0). Order: must complete previous to unlock next.
+TRAINING_STAGE_ORDER = [
+    "day1_minus2",   # DAY 1(-2 hour) Checklist
+    "day1",          # DAY 1 Checklist
+    "day1_plus1",    # DAY 1 (+1day)
+    "day2",          # DAY 2 Checklist
+    "day3",          # DAY 3 Checklist
+    "feedback",      # Training Feedback Form
+]
+
+# stage_key -> list of (field_key, label) for Yes/No/NA dropdowns
+TRAINING_STAGE_FIELDS = {
+    "day1_minus2": [
+        ("confirm_scheduled_time", "Confirm the scheduled time with customer."),
+        ("confirm_tasks_done", "Confirm given tasks has been done."),
+        ("confirm_responsible_persons", "Confirm responsible persons for the meeting are present (Store Manager, Indenter, Purchaser, Approver etc.)"),
+        ("confirm_meeting_link", "Confirm Meeting Link is working well."),
+        ("confirm_noted_doubt", "Confirm to bring noted doubt by client side."),
+    ],
+    "day1": [
+        ("create_indent", "Create Indent"),
+        ("create_item", "Create Item"),
+        ("create_item_group", "Create Item Group"),
+        ("create_brand", "Create Brand"),
+        ("create_vendor", "Create Vendor"),
+        ("set_reorder_level", "Set Reorder Level"),
+        ("create_rfq", "Create RFQ"),
+        ("quotation_comparison", "How to do Quotation Comparison"),
+        ("negotiate_vendor", "How to Negotiate with Vendor through software"),
+        ("create_issue", "Create Issue"),
+        ("create_po", "Create PO"),
+        ("create_grn", "Create GRN"),
+        ("stock_adjustment", "How to Stock Adjustment"),
+        ("tag_vendors", "How to tag Vendors (Optional)"),
+        ("tasks_for_customer", "Tasks for customer"),
+    ],
+    "day1_plus1": [
+        ("follow_up_tasks_day1", "Follow up for given tasks on day 1."),
+        ("follow_up_doubts", "Follow up for any doubts in data updating."),
+        ("send_approvals_list", "Send list of 'Approvals' available in the software IndustryPrime."),
+        ("collect_approval_data", "Collect data for \"Approval System\" from customer."),
+        ("create_schedule_day2_link", "Create & schedule day 2 training link."),
+        ("test_day2_link", "Test the training link for day 2 is working well."),
+        ("share_link_customer", "Share the training link with customer."),
+    ],
+    "day2": [
+        ("create_returnable_gate_pass", "Create Returnable Gate Pass."),
+        ("create_non_returnable_gate_pass", "Create Non-Returnable Gate Pass."),
+        ("create_issue_returnable", "Create Issue Items on Returnable Basis."),
+        ("create_work_order_indent", "Create Work Order Indent"),
+        ("create_work_order_indent_rfq", "Create Work Order Indent RFQ"),
+        ("set_monthly_budget", "Set Monthly Budget (Optional)"),
+        ("stock_transfer", "How to Stock Transfer (Optional)"),
+        ("cost_center_info", "Information on Cost Center & how to create it in the system."),
+        ("physical_stock_taking", "Physical Stock Taking"),
+        ("stock_summary", "Stock Summary"),
+        ("item_summary", "Item Summary"),
+        ("item_stock", "Item Stock"),
+        ("max_level", "Max Level"),
+        ("share_how_to_videos", "Share How To Videos for, RGP, NRGP, Issue item on returnable basis, WO indent, WO indent RFQ, Monthly Budget, Stock Transfer (Optional), Cost Center, Stock Summary, Item Summary, Item Stock, Max Level, Best way to create item name, Cost Center tagging, Primary & Secondary UOM."),
+        ("tasks_for_customer_day2", "Tasks for customer"),
+    ],
+    "day3": [
+        ("company_division_stock_movement", "Company Division Wise Stock Movement Summary."),
+        ("department_consumption", "Department Wise Consumption Report."),
+        ("monthly_purchase_saving", "Monthly Purchase Saving Report."),
+        ("vendor_summary", "Vendor Summary Report."),
+        ("item_group_consumption", "Item Group Wise Consumption."),
+        ("cost_center_consumption", "Cost Center Wise Consumption Report."),
+        ("all_history_report", "All History Report (Item Purchase, Vendor GRN, Vendor Purchase, Cost Center)."),
+        ("po_audit_report", "PO Audit Report."),
+        ("tag_with_bills", "Tag With Bills."),
+        ("scrap_management", "Scrap Management."),
+        ("send_how_to_videos_reports", "Send How To Videos for above topic (Report Section)."),
+        ("reference_number", "Reference number"),
+    ],
+    "feedback": [
+        ("mention_name", "Mention your Name:"),
+        ("overall_satisfied", "Overall, how satisfied are you with the IndustryPrime training sessions?"),
+        ("rate_pace", "How would you rate the pace of the training?"),
+        ("store_mgmt_setup", "Store Management [Managing set up. Create Item, Brand, UOM, Item Group]"),
+        ("store_mgmt_indent", "Store Management [Create Indent, check all fields in indent.]"),
+        ("store_mgmt_grn", "Store Management [Create Goods Receipt Note (GRN)]"),
+        ("store_mgmt_issue", "Store Management [Create Issue, all fields in issue. Scrap Management]"),
+        ("store_mgmt_stock_adj", "Store Management [Create Stock Adjustment]"),
+        ("store_mgmt_wo_indent", "Store Management [Work Order Indent]"),
+        ("store_mgmt_wrn", "Store Management [Create Work order Receipt Note (WRN)]"),
+        ("store_mgmt_other", "Are there any other training topics you'd like us to cover? Please specify: (Store)"),
+        ("purchase_vendor", "Purchase & Advanced Functions [Vendor Creation, Mail for update, manage vendor.]"),
+        ("purchase_rfq", "Purchase & Advanced Functions [Create RFQ, Quotation Comparison, manage pending Indents.]"),
+        ("purchase_po", "Purchase & Advanced Functions [Create Purchase Order (PO)]"),
+        ("purchase_wo", "Purchase & Advanced Functions [Create Work Order (WO), WO RFQ]"),
+        ("purchase_rgp", "Purchase & Advanced Functions [Returnable/Non-Returnable Gate Pass (RGP/NRGP)]"),
+        ("purchase_other", "Are there any other training topics you'd like us to cover? Please specify: (Purchase)"),
+        ("reporting_stock", "Reporting & Analytics [Stock Summary & Stock Movement]"),
+        ("reporting_division", "Reporting & Analytics [Company Division wise Stock Movement Summary]"),
+        ("reporting_audit", "Reporting & Analytics [Audit Reports (e.g., PO Audit)]"),
+        ("reporting_department", "Reporting & Analytics [Department wise Consumption Report]"),
+        ("reporting_item_stock", "Reporting & Analytics [Item Stock, Stock Ledger]"),
+        ("reporting_history", "Reporting & Analytics [All History Report]"),
+        ("reporting_registers", "Reporting & Analytics [All Registers]"),
+        ("reporting_other", "Are there any other training topics you'd like us to cover? Please specify: (Reporting)"),
+        ("rate_trainer_knowledge", "How do you rate the trainer's knowledge of the IndustryPrime software?"),
+        ("rate_trainer_explain", "How do you rate the trainer's ability to explain concepts clearly?"),
+        ("helpful_materials", "Which training materials were most helpful? (Select all that apply)"),
+        ("theory_practice_balance", "Was the balance between theory (explanation) and practice (hands-on tasks) right?"),
+        ("confident_using", "How confident do you feel in using IndustryPrime independently in your daily work?"),
+        ("biggest_challenge", "What has been the biggest challenge in implementing the software so far (Select All that apply)?"),
+        ("followup_support", "How helpful has the post-training follow-up support been? (e.g., daily check-ins, doubt clearing)"),
+        ("liked_most", "What did you like MOST about the training?"),
+        ("needs_improvement", "What aspect of the training needs the MOST improvement?"),
+        ("suggestions_improve", "Do you have any specific suggestions to improve the training sessions? (e.g., more time on a specific topic, different training method, etc.)"),
+        ("other_feedback", "Is there any other feedback you would like to share about the software or the training?"),
+    ],
+}
+
+
+def _training_stage_keys(stage_key: str) -> list[str]:
+    return [k for k, _ in TRAINING_STAGE_FIELDS.get(stage_key, [])]
+
+
+TRAINING_STAGE_TITLES = {
+    "day1_minus2": "DAY 1(-2 hour) Checklist",
+    "day1": "DAY 1 Checklist",
+    "day1_plus1": "DAY 1 (+1day)",
+    "day2": "DAY 2 Checklist",
+    "day3": "DAY 3 Checklist",
+    "feedback": "Training Feedback Form",
+}
+
+
+@api_router.get("/training/stages-config")
+def get_training_stages_config(auth: dict = Depends(get_current_user)):
+    """Returns stage keys in order with title and fields (key, label) for building forms."""
+    return {
+        "order": TRAINING_STAGE_ORDER,
+        "stages": {
+            sk: {"title": TRAINING_STAGE_TITLES.get(sk, sk), "fields": TRAINING_STAGE_FIELDS.get(sk, [])}
+            for sk in TRAINING_STAGE_ORDER
+        },
+    }
+
+
+@api_router.get("/training/clients/{payment_status_id}/training-status")
+def get_training_status(payment_status_id: str, auth: dict = Depends(get_current_user)):
+    """Returns day0 submitted status, all stages (submitted_at, editable_48h, data), and next_stage key. Used to show which button to display."""
+    try:
+        result = {"day0_submitted": False, "day0_submitted_at": None, "stages": {}, "next_stage": None}
+        r0 = supabase.table("training_day0_checklist").select("submitted_at").eq("payment_status_id", payment_status_id).limit(1).execute()
+        if r0.data and len(r0.data) > 0 and r0.data[0].get("submitted_at"):
+            result["day0_submitted"] = True
+            result["day0_submitted_at"] = r0.data[0].get("submitted_at")
+        r_stages = supabase.table("training_checklist_stages").select("stage_key, data, submitted_at").eq("payment_status_id", payment_status_id).execute()
+        stages_map = {}
+        if r_stages.data:
+            for row in r_stages.data:
+                sk = row.get("stage_key")
+                submitted_at = row.get("submitted_at")
+                stages_map[sk] = {
+                    "data": row.get("data") or {},
+                    "submitted_at": submitted_at,
+                    "editable_48h": _is_within_48h_edit(submitted_at),
+                    "editable_until": _get_editable_until(submitted_at),
+                }
+        for sk in TRAINING_STAGE_ORDER:
+            default = {"data": {}, "submitted_at": None, "editable_48h": False, "editable_until": None}
+            result["stages"][sk] = stages_map.get(sk, default)
+        if not result["day0_submitted"]:
+            result["next_stage"] = None
+        else:
+            result["next_stage"] = None
+            for sk in TRAINING_STAGE_ORDER:
+                st = result["stages"][sk]
+                if not st.get("submitted_at"):
+                    result["next_stage"] = sk
+                    break
+        return result
+    except Exception as e:
+        _log(f"get training-status: {e}")
+        return {"day0_submitted": False, "day0_submitted_at": None, "stages": {}, "next_stage": None}
+
+
+@api_router.get("/training/clients/{payment_status_id}/stages/{stage_key}")
+def get_training_stage(payment_status_id: str, stage_key: str, auth: dict = Depends(get_current_user)):
+    """Get one training stage checklist. Returns data, submitted_at, editable_48h."""
+    if stage_key not in TRAINING_STAGE_ORDER:
+        raise HTTPException(404, "Unknown stage")
+    try:
+        r = supabase.table("training_checklist_stages").select("*").eq("payment_status_id", payment_status_id).eq("stage_key", stage_key).limit(1).execute()
+        row = (r.data or [None])[0] if r.data else None
+        if not row:
+            return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+        submitted_at = row.get("submitted_at")
+        return {
+            "data": row.get("data") or {},
+            "submitted_at": submitted_at,
+            "editable_until": _get_editable_until(submitted_at),
+            "editable_48h": _is_within_48h_edit(submitted_at),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get training stage {stage_key}: {e}")
+        return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
+
+
+class TrainingStagePayload(BaseModel):
+    data: dict
+
+
+def _training_prev_stage_submitted(payment_status_id: str, stage_key: str) -> bool:
+    """Check if the previous stage in order is submitted so this one can be opened."""
+    idx = next((i for i, s in enumerate(TRAINING_STAGE_ORDER) if s == stage_key), -1)
+    if idx <= 0:
+        return True
+    prev_key = TRAINING_STAGE_ORDER[idx - 1]
+    r = supabase.table("training_checklist_stages").select("submitted_at").eq("payment_status_id", payment_status_id).eq("stage_key", prev_key).limit(1).execute()
+    if not r.data or len(r.data) == 0:
+        return False
+    return bool(r.data[0].get("submitted_at"))
+
+
+@api_router.post("/training/clients/{payment_status_id}/stages/{stage_key}")
+def save_training_stage(payment_status_id: str, stage_key: str, payload: TrainingStagePayload, auth: dict = Depends(get_current_user)):
+    """Save a training stage. All fields Yes/No/NA. 48h edit. Previous stage must be submitted."""
+    if stage_key not in TRAINING_STAGE_ORDER:
+        raise HTTPException(404, "Unknown stage")
+    keys = _training_stage_keys(stage_key)
+    data = payload.data or {}
+    allowed_values = {"Yes", "No", "NA"}
+    for key in keys:
+        val = str(data.get(key, "")).strip()
+        if val not in allowed_values:
+            raise HTTPException(400, f"Field {key} must be one of Yes / No / NA")
+    if not _training_prev_stage_submitted(payment_status_id, stage_key):
+        raise HTTPException(400, "Complete the previous stage first.")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        existing = supabase.table("training_checklist_stages").select("id, submitted_at").eq("payment_status_id", payment_status_id).eq("stage_key", stage_key).limit(1).execute()
+        has_row = bool(existing.data and len(existing.data) > 0)
+        if has_row:
+            row_data = existing.data[0]
+            if not _is_within_48h_edit(row_data.get("submitted_at")):
+                raise HTTPException(403, "Edit window (48 hours) has expired for this stage.")
+            supabase.table("training_checklist_stages").update({"data": data, "submitted_at": now, "updated_at": now}).eq("payment_status_id", payment_status_id).eq("stage_key", stage_key).execute()
+        else:
+            supabase.table("training_checklist_stages").insert({
+                "payment_status_id": payment_status_id,
+                "stage_key": stage_key,
+                "data": data,
+                "submitted_at": now,
+                "updated_at": now,
+            }).execute()
+        return {"data": data, "submitted_at": now}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save training stage {stage_key}: {e}")
         raise HTTPException(400, str(e)[:200])
 
 
@@ -3368,8 +4167,8 @@ def _is_within_48h_edit(submitted_at_iso: str | None) -> bool:
 def get_pre_onboarding(payment_status_id: str, auth: dict = Depends(get_current_user)):
     """Get Pre-Onboarding data for a payment status record. Returns empty data if not yet filled or if table missing."""
     try:
-        r = supabase.table("onboarding_pre_onboarding").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        r = supabase.table("onboarding_pre_onboarding").select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
             return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
         submitted_at = row.get("submitted_at")
@@ -3400,11 +4199,8 @@ def save_pre_onboarding(payment_status_id: str, payload: dict, auth: dict = Depe
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     data["timestamp"] = data.get("timestamp") or now
     try:
-        existing = supabase.table("onboarding_pre_onboarding").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row_data = None
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        existing = supabase.table("onboarding_pre_onboarding").select("id, submitted_at").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row_data = (existing.data or [None])[0] if (existing.data and len(existing.data) > 0) else None
         if row_data:
             if not _is_within_48h_edit(row_data.get("submitted_at")):
                 raise HTTPException(403, "Pre-Onboarding is no longer editable (48h passed)")
@@ -3429,8 +4225,8 @@ def save_pre_onboarding(payment_status_id: str, payload: dict, auth: dict = Depe
 def get_pre_onboarding_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
     """Get Pre-Onboarding Checklist for a payment status record. Returns empty data if not yet filled or if table missing."""
     try:
-        r = supabase.table("onboarding_pre_onboarding_checklist").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        r = supabase.table("onboarding_pre_onboarding_checklist").select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
             return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
         submitted_at = row.get("submitted_at")
@@ -3460,11 +4256,8 @@ def save_pre_onboarding_checklist(payment_status_id: str, payload: dict, auth: d
             raise HTTPException(400, f"Missing or empty required field: {key}")
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        existing = supabase.table("onboarding_pre_onboarding_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row_data = None
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        existing = supabase.table("onboarding_pre_onboarding_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row_data = (existing.data or [None])[0] if (existing.data and len(existing.data) > 0) else None
         if row_data:
             if not _is_within_48h_edit(row_data.get("submitted_at")):
                 raise HTTPException(403, "Pre-Onboarding Checklist is no longer editable (48h passed)")
@@ -3490,8 +4283,8 @@ def save_pre_onboarding_checklist(payment_status_id: str, payload: dict, auth: d
 def get_poc_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
     """Get POC Checklist data for a payment status record. Returns empty data if not yet filled or if table missing."""
     try:
-        r = supabase.table("onboarding_poc_checklist").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        r = supabase.table("onboarding_poc_checklist").select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
             return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
         submitted_at = row.get("submitted_at")
@@ -3521,11 +4314,8 @@ def save_poc_checklist(payment_status_id: str, payload: dict, auth: dict = Depen
             raise HTTPException(400, f"Missing or empty required field: {key}")
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        existing = supabase.table("onboarding_poc_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row_data = None
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        existing = supabase.table("onboarding_poc_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row_data = (existing.data or [None])[0] if (existing.data and len(existing.data) > 0) else None
         if row_data:
             if not _is_within_48h_edit(row_data.get("submitted_at")):
                 raise HTTPException(403, "POC Checklist is no longer editable (48h passed)")
@@ -3566,8 +4356,8 @@ POC_DETAILS_KEYS = [
 def get_poc_details(payment_status_id: str, auth: dict = Depends(get_current_user)):
     """Get POC Details for a payment status record. Returns empty data if not yet filled."""
     try:
-        r = supabase.table("onboarding_poc_details").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        r = supabase.table("onboarding_poc_details").select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
             return {"data": {}}
         data = row.get("data") or {}
@@ -3591,11 +4381,8 @@ def save_poc_details(payment_status_id: str, payload: dict, auth: dict = Depends
         out[k] = data.get(k) if k in data else None
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        existing = supabase.table("onboarding_poc_details").select("id").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        has_row = False
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            has_row = (isinstance(d, dict) and d) or (isinstance(d, list) and len(d) > 0)
+        existing = supabase.table("onboarding_poc_details").select("id").eq("payment_status_id", payment_status_id).limit(1).execute()
+        has_row = bool(existing.data and len(existing.data) > 0)
         if has_row:
             supabase.table("onboarding_poc_details").update({"data": out, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
         else:
@@ -3630,8 +4417,8 @@ DETAILS_COLLECTED_CHECKLIST_KEYS = [
 def get_details_collected_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
     """Get Details Collected Checklist. Returns empty data if not yet filled. 48h edit rule."""
     try:
-        r = supabase.table("onboarding_details_collected_checklist").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        r = supabase.table("onboarding_details_collected_checklist").select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
             return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
         submitted_at = row.get("submitted_at")
@@ -3663,11 +4450,8 @@ def save_details_collected_checklist(payment_status_id: str, payload: dict, auth
             raise HTTPException(400, f"Field {key} must be Done or Not Done")
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        existing = supabase.table("onboarding_details_collected_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row_data = None
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        existing = supabase.table("onboarding_details_collected_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row_data = (existing.data or [None])[0] if (existing.data and len(existing.data) > 0) else None
         if row_data:
             if not _is_within_48h_edit(row_data.get("submitted_at")):
                 raise HTTPException(403, "Details Collected Checklist is no longer editable (48h passed)")
@@ -3716,8 +4500,8 @@ ITEM_CLEANING_KEYS = [
 def get_item_cleaning(payment_status_id: str, auth: dict = Depends(get_current_user)):
     """Get Item Cleaning data for a payment status record. Returns empty data if not yet filled."""
     try:
-        r = supabase.table("onboarding_item_cleaning").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        r = supabase.table("onboarding_item_cleaning").select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
             return {"data": {}}
         data = row.get("data") or {}
@@ -3740,11 +4524,8 @@ def save_item_cleaning(payment_status_id: str, payload: dict, auth: dict = Depen
         out[k] = data.get(k) if k in data else None
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        existing = supabase.table("onboarding_item_cleaning").select("id").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        has_row = False
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            has_row = (isinstance(d, dict) and d) or (isinstance(d, list) and len(d) > 0)
+        existing = supabase.table("onboarding_item_cleaning").select("id").eq("payment_status_id", payment_status_id).limit(1).execute()
+        has_row = bool(existing.data and len(existing.data) > 0)
         if has_row:
             supabase.table("onboarding_item_cleaning").update({"data": out, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
         else:
@@ -3788,8 +4569,8 @@ ITEM_CLEANING_CHECKLIST_KEYS = [
 def get_item_cleaning_checklist(payment_status_id: str, auth: dict = Depends(get_current_user)):
     """Get Item Cleaning Checklist. 48h edit rule."""
     try:
-        r = supabase.table("onboarding_item_cleaning_checklist").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        r = supabase.table("onboarding_item_cleaning_checklist").select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
             return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
         submitted_at = row.get("submitted_at")
@@ -3821,11 +4602,8 @@ def save_item_cleaning_checklist(payment_status_id: str, payload: dict, auth: di
             raise HTTPException(400, f"Field {key} must be Done or Not Done")
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        existing = supabase.table("onboarding_item_cleaning_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row_data = None
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        existing = supabase.table("onboarding_item_cleaning_checklist").select("id, submitted_at").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row_data = (existing.data or [None])[0] if (existing.data and len(existing.data) > 0) else None
         if row_data:
             if not _is_within_48h_edit(row_data.get("submitted_at")):
                 raise HTTPException(403, "Item Cleaning Checklist is no longer editable (48h passed)")
@@ -3867,8 +4645,8 @@ ORG_MASTER_ID_KEYS = [
 def get_org_master_id(payment_status_id: str, auth: dict = Depends(get_current_user)):
     """Get Org & Master ID data. Returns empty data if not yet filled."""
     try:
-        r = supabase.table("onboarding_org_master_id").select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        r = supabase.table("onboarding_org_master_id").select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
             return {"data": {}}
         return {"id": row.get("id"), "payment_status_id": row.get("payment_status_id"), "data": row.get("data") or {}}
@@ -3890,11 +4668,8 @@ def save_org_master_id(payment_status_id: str, payload: dict, auth: dict = Depen
         out[k] = data.get(k) if k in data else None
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        existing = supabase.table("onboarding_org_master_id").select("id").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        has_row = False
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            has_row = (isinstance(d, dict) and d) or (isinstance(d, list) and len(d) > 0)
+        existing = supabase.table("onboarding_org_master_id").select("id").eq("payment_status_id", payment_status_id).limit(1).execute()
+        has_row = bool(existing.data and len(existing.data) > 0)
         if has_row:
             supabase.table("onboarding_org_master_id").update({"data": out, "updated_at": now}).eq("payment_status_id", payment_status_id).execute()
         else:
@@ -3912,10 +4687,12 @@ def save_org_master_id(payment_status_id: str, payload: dict, auth: dict = Depen
 
 
 def _checklist_48h_get(table: str, payment_status_id: str, log_name: str):
-    """Common GET for 48h checklists. Returns data, submitted_at, editable_48h."""
+    """Common GET for 48h checklists. Returns data, submitted_at, editable_48h.
+    Uses limit(1) instead of maybe_single() to avoid PostgREST 204 No Content when no row exists."""
     try:
-        r = supabase.table(table).select("*").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row = (r.data if isinstance(r.data, dict) else (r.data or [{}])[0]) if r.data else None
+        r = supabase.table(table).select("*").eq("payment_status_id", payment_status_id).limit(1).execute()
+        data_list = r.data if isinstance(r.data, list) else []
+        row = data_list[0] if data_list else None
         if not row:
             return {"data": {}, "submitted_at": None, "editable_until": None, "editable_48h": False}
         submitted_at = row.get("submitted_at")
@@ -3946,11 +4723,9 @@ def _checklist_48h_save(table: str, payment_status_id: str, data: dict, keys: li
             raise HTTPException(400, f"Field {key} must be Done or Not Done")
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        existing = supabase.table(table).select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row_data = None
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        r = supabase.table(table).select("id, submitted_at").eq("payment_status_id", payment_status_id).limit(1).execute()
+        data_list = r.data if isinstance(r.data, list) else []
+        row_data = data_list[0] if data_list else None
         if row_data:
             if not _is_within_48h_edit(row_data.get("submitted_at")):
                 raise HTTPException(403, f"{log_name} is no longer editable (48h passed)")
@@ -4056,11 +4831,8 @@ def save_final_setup(payment_status_id: str, payload: dict, auth: dict = Depends
             raise HTTPException(400, f"Field {k} must be Done or Not Done")
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        existing = supabase.table("onboarding_final_setup").select("id, submitted_at").eq("payment_status_id", payment_status_id).maybe_single().execute()
-        row_data = None
-        if existing is not None and getattr(existing, "data", None) is not None:
-            d = existing.data
-            row_data = d if isinstance(d, dict) else (d[0] if isinstance(d, list) and len(d) > 0 else None)
+        existing = supabase.table("onboarding_final_setup").select("id, submitted_at").eq("payment_status_id", payment_status_id).limit(1).execute()
+        row_data = (existing.data or [None])[0] if (existing.data and len(existing.data) > 0) else None
         if row_data:
             if not _is_within_48h_edit(row_data.get("submitted_at")):
                 raise HTTPException(403, "Final Setup is no longer editable (48h passed)")
