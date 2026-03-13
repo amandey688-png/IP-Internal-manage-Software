@@ -1000,6 +1000,12 @@ def create_ticket(payload: CreateTicketRequest, auth: dict = Depends(get_current
     # Feature requests start as pending approval (show in Approval Status section)
     if payload.type == "feature":
         data["approval_status"] = None
+    # Chores & Bugs: default SLA stages when ticket is first created
+    if payload.type in ("chore", "bug"):
+        # Stage 1: response (Yes/No) – start as "no" until first response is added
+        data.setdefault("status_1", "no")
+        # Stage 2: development / staging – start as "pending"
+        data.setdefault("status_2", "pending")
     extras = ["company_id", "page_id", "division_id", "division_other", "user_name", "communicated_through", "submitted_by", "query_arrival_at", "quality_of_response", "customer_questions", "query_response_at", "why_feature", "attachment_url"]
     for k in extras:
         v = getattr(payload, k, None)
