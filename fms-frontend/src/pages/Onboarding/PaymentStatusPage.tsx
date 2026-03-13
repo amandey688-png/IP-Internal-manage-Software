@@ -1003,12 +1003,76 @@ export function PaymentStatusPage() {
       key: 'timestamp',
       width: 128,
       render: (v: string) => (v ? dayjs(v).format('DD-MMM-YYYY HH:mm') : '—'),
+      filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }) => {
+        const raw = (selectedKeys[0] as string | undefined) || ''
+        const [startStr, endStr] = raw.split('|')
+        const value: [dayjs.Dayjs | null, dayjs.Dayjs | null] = [
+          startStr ? dayjs(startStr) : null,
+          endStr ? dayjs(endStr) : null,
+        ]
+        return (
+          <div style={{ padding: 8 }}>
+            <DatePicker.RangePicker
+              showTime
+              style={{ marginBottom: 8, display: 'block' }}
+              value={value}
+              onChange={(vals) => {
+                if (!vals || !vals[0] || !vals[1]) {
+                  setSelectedKeys([])
+                  return
+                }
+                const start = vals[0].startOf('minute').toISOString()
+                const end = vals[1].endOf('minute').toISOString()
+                setSelectedKeys([`${start}|${end}`])
+              }}
+              format="DD-MMM-YYYY HH:mm"
+            />
+            <div style={{ textAlign: 'right' }}>
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => confirm()}
+                style={{ marginRight: 8 }}
+              >
+                OK
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  clearFilters?.()
+                  confirm()
+                }}
+              >
+                Reset
+              </Button>
+            </div>
+          </div>
+        )
+      },
+      onFilter: (value, record) => {
+        const raw = String(value || '')
+        if (!raw) return true
+        const [startStr, endStr] = raw.split('|')
+        if (!record.timestamp) return false
+        const ts = dayjs(record.timestamp)
+        const start = startStr ? dayjs(startStr) : null
+        const end = endStr ? dayjs(endStr) : null
+        if (start && ts.isBefore(start)) return false
+        if (end && ts.isAfter(end)) return false
+        return true
+      },
+      filterIcon: (filtered: boolean) => (
+        <span style={{ color: filtered ? '#1890ff' : undefined }}>▼</span>
+      ),
     },
     {
       title: 'Reference',
       dataIndex: 'reference_no',
       key: 'reference_no',
       width: 100,
+      filters: [...new Set(records.map((r) => r.reference_no).filter(Boolean))].sort().map((v) => ({ text: v, value: v })),
+      onFilter: (value, record) => record.reference_no === value,
+      filterSearch: true,
     },
     {
       title: <span style={{ whiteSpace: 'normal' }}>Company</span>,
@@ -1026,6 +1090,9 @@ export function PaymentStatusPage() {
       dataIndex: 'payment_status',
       key: 'payment_status',
       width: 110,
+      filters: [...new Set(records.map((r) => r.payment_status).filter(Boolean))].sort().map((v) => ({ text: v, value: v })),
+      onFilter: (value, record) => record.payment_status === value,
+      filterSearch: true,
     },
     {
       title: 'Payment Received Date',
@@ -1033,6 +1100,66 @@ export function PaymentStatusPage() {
       key: 'payment_received_date',
       width: 150,
       render: (v: string | null) => (v ? dayjs(v).format('DD-MMM-YYYY') : '—'),
+      filterDropdown: ({ setSelectedKeys, selectedKeys, confirm, clearFilters }) => {
+        const raw = (selectedKeys[0] as string | undefined) || ''
+        const [startStr, endStr] = raw.split('|')
+        const value: [dayjs.Dayjs | null, dayjs.Dayjs | null] = [
+          startStr ? dayjs(startStr) : null,
+          endStr ? dayjs(endStr) : null,
+        ]
+        return (
+          <div style={{ padding: 8 }}>
+            <DatePicker.RangePicker
+              style={{ marginBottom: 8, display: 'block' }}
+              value={value}
+              onChange={(vals) => {
+                if (!vals || !vals[0] || !vals[1]) {
+                  setSelectedKeys([])
+                  return
+                }
+                const start = vals[0].startOf('day').toISOString()
+                const end = vals[1].endOf('day').toISOString()
+                setSelectedKeys([`${start}|${end}`])
+              }}
+              format="DD-MMM-YYYY"
+            />
+            <div style={{ textAlign: 'right' }}>
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => confirm()}
+                style={{ marginRight: 8 }}
+              >
+                OK
+              </Button>
+              <Button
+                size="small"
+                onClick={() => {
+                  clearFilters?.()
+                  confirm()
+                }}
+              >
+                Reset
+              </Button>
+            </div>
+          </div>
+        )
+      },
+      onFilter: (value, record) => {
+        const raw = String(value || '')
+        if (!raw) return true
+        if (!record.payment_received_date) return false
+        const [startStr, endStr] = raw.split('|')
+        const date = dayjs(record.payment_received_date)
+        const start = startStr ? dayjs(startStr) : null
+        const end = endStr ? dayjs(endStr) : null
+        if (start && date.isBefore(start, 'day')) return false
+        if (end && date.isAfter(end, 'day')) return false
+        return true
+      },
+      filterIcon: (filtered: boolean) => (
+        <span style={{ color: filtered ? '#1890ff' : undefined }}>▼</span>
+      ),
     },
     {
       title: <span style={{ whiteSpace: 'normal' }}>POC</span>,
@@ -1041,12 +1168,18 @@ export function PaymentStatusPage() {
       width: 140,
       ellipsis: false,
       render: (v: string | null) => <span style={{ wordBreak: 'break-word' }}>{v || '—'}</span>,
+      filters: [...new Set(records.map((r) => r.poc_name || '—').filter((x) => x !== null && x !== undefined))].sort().map((v) => ({ text: v, value: v })),
+      onFilter: (value, record) => (record.poc_name || '—') === value,
+      filterSearch: true,
     },
     {
       title: 'POC Contact',
       dataIndex: 'poc_contact',
       key: 'poc_contact',
       width: 120,
+      filters: [...new Set(records.map((r) => r.poc_contact || '—').filter((x) => x !== null && x !== undefined))].sort().map((v) => ({ text: v, value: v })),
+      onFilter: (value, record) => (record.poc_contact || '—') === value,
+      filterSearch: true,
     },
     {
       title: <span style={{ whiteSpace: 'normal' }}>Acc Remark</span>,
@@ -1055,6 +1188,9 @@ export function PaymentStatusPage() {
       width: 180,
       ellipsis: false,
       render: (v: string | null) => (v ? <span style={{ wordBreak: 'break-word' }} title={v}>{v}</span> : '—'),
+      filters: [...new Set(records.map((r) => (r.accounts_remarks || '—').toString().trim()).filter((x) => x !== ''))].sort().slice(0, 100).map((v) => ({ text: v.length > 50 ? v.slice(0, 50) + '…' : v, value: v })),
+      onFilter: (value, record) => (record.accounts_remarks || '—').toString().trim() === value,
+      filterSearch: true,
     },
     {
       title: 'Status',
@@ -1072,6 +1208,9 @@ export function PaymentStatusPage() {
       key: 'fi_do',
       width: 100,
       render: (v: string | null | undefined) => v || '—',
+      filters: [...new Set(records.map((r) => r.fi_do || '—').filter((x) => x !== null && x !== undefined))].sort().map((v) => ({ text: v, value: v })),
+      onFilter: (value, record) => (record.fi_do || '—') === value,
+      filterSearch: true,
     },
   ]
 

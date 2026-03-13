@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
-import { Typography, Card, Table, message, Button, Modal, Form, Select, Space, Drawer, Descriptions } from 'antd'
+import { useState, useEffect, useMemo } from 'react'
+import { Typography, Card, Table, message, Button, Modal, Form, Select, Space, Drawer, Descriptions, Input } from 'antd'
+import { SearchOutlined } from '@ant-design/icons'
 import { CheckCircleOutlined, FormOutlined, EditOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import {
@@ -51,6 +52,12 @@ export function ClientTrainingPage() {
   const [stageForm] = Form.useForm()
   const [stageLoading, setStageLoading] = useState(false)
   const [day0Users, setDay0Users] = useState<TrainingUser[]>([])
+  const [searchText, setSearchText] = useState('')
+  const [filterRef, setFilterRef] = useState<string | undefined>(undefined)
+  const [filterCompany, setFilterCompany] = useState<string | undefined>(undefined)
+  const [filterOnbRef, setFilterOnbRef] = useState<string | undefined>(undefined)
+  const [filterPoc, setFilterPoc] = useState<string | undefined>(undefined)
+  const [filterTrainer, setFilterTrainer] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     trainingApi.getStagesConfig().then(setStagesConfig).catch(() => setStagesConfig(null))
@@ -251,7 +258,7 @@ export function ClientTrainingPage() {
     { title: 'Reference No', dataIndex: 'client_reference_no', key: 'client_reference_no', width: 100, fixed: 'left' as const },
     { title: 'Company Name', dataIndex: 'company_name', key: 'company_name', width: 140, fixed: 'left' as const, render: (v: string) => v || '—' },
     { title: 'Point of Contact', dataIndex: 'poc_name', key: 'poc_name', width: 120, render: (v: string) => v || '—' },
-    { title: 'Old ref', dataIndex: 'onboarding_reference_no', key: 'old_ref', width: 100, render: (v: string) => v || '—' },
+    { title: 'Onb Ref', dataIndex: 'onboarding_reference_no', key: 'onb_ref', width: 100, render: (v: string) => v || '—' },
     { title: 'Expected Day 0', dataIndex: 'expected_day0', key: 'expected_day0', width: 140, render: (v: string) => (v ? dayjs(v).format('DD-MMM-YYYY HH:mm') : '—') },
     { title: 'Trainer', dataIndex: 'trainer_name', key: 'trainer_name', width: 100, render: (v: string) => v || '—' },
     { title: "Day '0' Checklist", key: 'day0_checklist', width: 110, render: (_: unknown, r: TrainingClientRecord) => r.day0_skipped ? 'Skip' : r.day0_submitted_at ? 'Done' : '—' },
@@ -284,14 +291,110 @@ export function ClientTrainingPage() {
     { title: 'Training Feedback', key: 'feedback', width: 120, render: (_: unknown, r: TrainingClientRecord) => r.feedback_skipped ? 'Skip' : r.feedback_submitted_at ? 'Done' : '—' },
   ]
 
+  const displayItems = useMemo(() => {
+    return items.filter((r) => {
+      if (searchText.trim()) {
+        const q = searchText.trim().toLowerCase()
+        const ref = (r.client_reference_no || '').toLowerCase()
+        const company = (r.company_name || '').toLowerCase()
+        const onb = (r.onboarding_reference_no || '').toLowerCase()
+        const poc = (r.poc_name || '').toLowerCase()
+        const trainer = (r.trainer_name || '').toLowerCase()
+        if (!ref.includes(q) && !company.includes(q) && !onb.includes(q) && !poc.includes(q) && !trainer.includes(q)) return false
+      }
+      if (filterRef && (r.client_reference_no || '').toLowerCase() !== filterRef.toLowerCase()) return false
+      if (filterCompany && (r.company_name || '').toLowerCase() !== filterCompany.toLowerCase()) return false
+      if (filterOnbRef && (r.onboarding_reference_no || '').toLowerCase() !== filterOnbRef.toLowerCase()) return false
+      if (filterPoc && (r.poc_name || '').toLowerCase() !== filterPoc.toLowerCase()) return false
+      if (filterTrainer && (r.trainer_name || '').toLowerCase() !== filterTrainer.toLowerCase()) return false
+      return true
+    })
+  }, [items, searchText, filterRef, filterCompany, filterOnbRef, filterPoc, filterTrainer])
+
+  const refOptions = useMemo(() => [...new Set(items.map((r) => r.client_reference_no).filter(Boolean))].sort().map((v) => ({ value: v!, label: v! })), [items])
+  const companyOptions = useMemo(() => [...new Set(items.map((r) => r.company_name).filter(Boolean))].sort().map((v) => ({ value: v!, label: v! })), [items])
+  const onbRefOptions = useMemo(() => [...new Set(items.map((r) => r.onboarding_reference_no).filter(Boolean))].sort().map((v) => ({ value: v!, label: v! })), [items])
+  const pocOptions = useMemo(() => [...new Set(items.map((r) => r.poc_name).filter(Boolean))].sort().map((v) => ({ value: v!, label: v! })), [items])
+  const trainerOptions = useMemo(() => [...new Set(items.map((r) => r.trainer_name).filter(Boolean))].sort().map((v) => ({ value: v!, label: v! })), [items])
+
+  const clearFilters = () => {
+    setSearchText('')
+    setFilterRef(undefined)
+    setFilterCompany(undefined)
+    setFilterOnbRef(undefined)
+    setFilterPoc(undefined)
+    setFilterTrainer(undefined)
+  }
+
   return (
     <div style={{ padding: 24 }}>
       <Title level={4} style={{ marginBottom: 24 }}>
         Client Training
       </Title>
       <Card title="Clients">
+        <div style={{ marginBottom: 16, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <Input
+            placeholder="Search (Ref, Company, Onb Ref, POC, Trainer)"
+            prefix={<SearchOutlined />}
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            allowClear
+            style={{ width: 280 }}
+          />
+          <Select
+            placeholder="Filter by Reference No"
+            value={filterRef}
+            onChange={(v) => setFilterRef(v)}
+            style={{ width: 160 }}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            options={refOptions}
+          />
+          <Select
+            placeholder="Filter by Company"
+            value={filterCompany}
+            onChange={(v) => setFilterCompany(v)}
+            style={{ width: 180 }}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            options={companyOptions}
+          />
+          <Select
+            placeholder="Filter by Onb Ref"
+            value={filterOnbRef}
+            onChange={(v) => setFilterOnbRef(v)}
+            style={{ width: 140 }}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            options={onbRefOptions}
+          />
+          <Select
+            placeholder="Filter by POC"
+            value={filterPoc}
+            onChange={(v) => setFilterPoc(v)}
+            style={{ width: 140 }}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            options={pocOptions}
+          />
+          <Select
+            placeholder="Filter by Trainer"
+            value={filterTrainer}
+            onChange={(v) => setFilterTrainer(v)}
+            style={{ width: 140 }}
+            allowClear
+            showSearch
+            optionFilterProp="label"
+            options={trainerOptions}
+          />
+          <Button onClick={clearFilters}>Clear filters</Button>
+        </div>
         <Table
-          dataSource={items}
+          dataSource={displayItems}
           columns={columns}
           rowKey="payment_status_id"
           loading={loading}
@@ -315,7 +418,7 @@ export function ClientTrainingPage() {
               <Descriptions column={1} size="small" bordered>
                 <Descriptions.Item label="Company">{selectedClient.company_name}</Descriptions.Item>
                 <Descriptions.Item label="Reference No">{selectedClient.client_reference_no}</Descriptions.Item>
-                <Descriptions.Item label="Old ref (Onboarding)">{selectedClient.onboarding_reference_no || '—'}</Descriptions.Item>
+                <Descriptions.Item label="Onb Ref">{selectedClient.onboarding_reference_no || '—'}</Descriptions.Item>
                 <Descriptions.Item label="Timestamp">{selectedClient.timestamp ? dayjs(selectedClient.timestamp).format('DD-MMM-YYYY HH:mm') : '—'}</Descriptions.Item>
                 <Descriptions.Item label="Point of Contact">{selectedClient.poc_name || '—'}</Descriptions.Item>
                 <Descriptions.Item label="Trainer">{selectedClient.trainer_name || '—'}</Descriptions.Item>
