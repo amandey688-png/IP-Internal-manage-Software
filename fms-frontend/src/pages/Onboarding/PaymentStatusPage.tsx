@@ -1014,7 +1014,7 @@ export function PaymentStatusPage() {
           <div style={{ padding: 8 }}>
             <DatePicker.RangePicker
               showTime
-              style={{ marginBottom: 8, display: 'block' }}
+              style={{ marginBottom: 8, display: 'block', width: 220 }}
               value={value}
               onChange={(vals) => {
                 if (!vals || !vals[0] || !vals[1]) {
@@ -1110,7 +1110,7 @@ export function PaymentStatusPage() {
         return (
           <div style={{ padding: 8 }}>
             <DatePicker.RangePicker
-              style={{ marginBottom: 8, display: 'block' }}
+              style={{ marginBottom: 8, display: 'block', width: 220 }}
               value={value}
               onChange={(vals) => {
                 if (!vals || !vals[0] || !vals[1]) {
