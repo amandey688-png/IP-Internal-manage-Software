@@ -1090,8 +1090,14 @@ def _enrich_tickets_with_lookups(rows: list) -> list:
             or (companies_map.get(row.get("company_id")) if row.get("company_id") else None)
             or ref_to_company.get(row.get("reference_no") or "")
         )
-        row["page_name"] = pages_map.get(row.get("page_id")) if row.get("page_id") else None
-        row["division_name"] = divisions_map.get(row.get("division_id")) if row.get("division_id") else None
+        row["page_name"] = (
+            (pages_map.get(row.get("page_id")) if row.get("page_id") else None)
+            or (str(row.get("page")).strip() if row.get("page") and str(row.get("page")).strip() else None)
+        )
+        row["division_name"] = (
+            (divisions_map.get(row.get("division_id")) if row.get("division_id") else None)
+            or (str(row.get("division")).strip() if row.get("division") and str(row.get("division")).strip() else None)
+        )
         row["approved_by_name"] = approvers_map.get(row.get("approved_by")) if row.get("approved_by") else None
     return rows
 
@@ -1806,7 +1812,7 @@ def dashboard_detail(
     week_ago = now - timedelta(days=7)
     week_start = week_ago.replace(hour=0, minute=0, second=0, microsecond=0)
     types_cb = ["chore", "bug"]
-    cols = "id, reference_no, title, description, type, status, company_name, assignee_id, created_at, query_arrival_at, query_response_at, status_4, quality_solution, staging_planned, live_review_status, actual_4"
+    cols = "id, reference_no, title, description, type, status, company_name, company_id, assignee_id, created_at, query_arrival_at, query_response_at, status_4, quality_solution, staging_planned, live_review_status, actual_4"
     result = []
     try:
         q = supabase.table("tickets").select(cols).in_("type", types_cb)
@@ -1820,6 +1826,16 @@ def dashboard_detail(
         week_tickets = rw.data or []
     except Exception:
         week_tickets = []
+
+    # Resolve company names when company_name is empty (e.g. BU/CH tickets)
+    company_ids = {t.get("company_id") for t in all_cb + week_tickets if t.get("company_id")}
+    companies_map = {}
+    if company_ids:
+        try:
+            cr = supabase.table("companies").select("id,name").in_("id", list(company_ids)).execute()
+            companies_map = {r["id"]: (r.get("name") or "").strip() for r in (cr.data or []) if r.get("id")}
+        except Exception:
+            pass
 
     def _stage4_done(t):
         return str(t.get("status_4") or "").lower() == "completed"
@@ -1854,13 +1870,16 @@ def dashboard_detail(
             return False
 
     def row(t):
+        cn = (t.get("company_name") or "").strip()
+        if not cn and t.get("company_id"):
+            cn = companies_map.get(t.get("company_id"), "")
         return {
             "id": t.get("id"),
             "referenceNo": (t.get("reference_no") or "").strip() or "N/A",
             "title": (t.get("title") or "").strip(),
             "description": (t.get("description") or "").strip(),
             "type": t.get("type"),
-            "company": (t.get("company_name") or "").strip() or "Unknown",
+            "company": cn or "Unknown",
             "status": t.get("status") or "",
         }
 
@@ -1884,6 +1903,16 @@ def dashboard_detail(
             if ticket_ids:
                 r2 = supabase.table("tickets").select(cols).in_("id", ticket_ids).execute()
                 staging_tickets = r2.data or []
+                # Fetch companies for staging tickets not yet in map
+                extra_cids = {t.get("company_id") for t in staging_tickets if t.get("company_id") and t.get("company_id") not in companies_map}
+                if extra_cids:
+                    try:
+                        cr2 = supabase.table("companies").select("id,name").in_("id", list(extra_cids)).execute()
+                        for r in (cr2.data or []):
+                            if r.get("id"):
+                                companies_map[r["id"]] = (r.get("name") or "").strip()
+                    except Exception:
+                        pass
                 if metric == "staging_feature":
                     result = [row(t) for t in staging_tickets if t.get("type") == "feature"]
                 else:
