@@ -6019,15 +6019,15 @@ def list_delegation_tasks(
     try:
         q = supabase.table("delegation_tasks").select("*")
         role = current.get("role", "user")
-        if role not in ("admin", "master_admin"):
+        if role not in ("admin", "master_admin", "approver"):
             q = q.eq("assignee_id", auth["id"])
         else:
-            # Admin/Master: default to own tasks; explicit assignee_id = that user; __all__ = all tasks
+            # Admin / Master Admin / Approver: default to own tasks; explicit assignee_id = that user; __all__ = all tasks
             if assignee_id and assignee_id != "__all__":
                 q = q.eq("assignee_id", assignee_id)
             elif not assignee_id:
                 q = q.eq("assignee_id", auth["id"])
-            # else assignee_id == "__all__": no assignee filter
+            # else assignee_id == "__all__": no assignee filter, show all users' tasks
         # Default pending; send status='all' to see all tasks
         if status == "all":
             pass
@@ -6050,6 +6050,12 @@ def list_delegation_tasks(
         for t in tasks:
             t["assignee_name"] = user_map.get(t.get("assignee_id"), "")
             t["submitted_by_name"] = user_map.get(t.get("submitted_by"), "")
+        # When showing all users' tasks: group by Submitted By first, then by due_date
+        tasks.sort(key=lambda t: (
+            (t.get("submitted_by_name") or "").strip().lower(),
+            t.get("due_date") or "",
+            t.get("created_at") or "",
+        ))
         return {"tasks": tasks}
     except Exception as e:
         _log(f"delegation/tasks error: {e}")

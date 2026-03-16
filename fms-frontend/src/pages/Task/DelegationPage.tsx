@@ -333,7 +333,7 @@ export const DelegationPage = () => {
                 allowClear
                 style={{ width: 160 }}
                 value={userFilter ?? '__all__'}
-                onChange={(v) => setUserFilter(v === '__all__' ? undefined : v)}
+                onChange={(v) => setUserFilter(v ?? undefined)}
                 options={[{ value: '__all__', label: 'All' }, ...users.map((u) => ({ value: u.id, label: u.full_name }))]}
               />
             )}
