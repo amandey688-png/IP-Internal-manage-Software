@@ -723,13 +723,14 @@ export const DashboardKPIPage = () => {
               open={!!detailModal}
               onCancel={() => setDetailModal(null)}
               footer={null}
-              width={900}
+              width="min(96vw, 900px)"
               className="kpi-modal"
             >
               {detailModal && (
                 <Table
                   size="small"
                   dataSource={detailModal.items.map((item, i) => ({ ...item, key: i }))}
+                  scroll={{ x: 'max-content' }}
                   columns={[
                     { title: 'Ref', dataIndex: 'reference_no', key: 'reference_no', width: 100 },
                     { title: 'Type', dataIndex: 'type', key: 'type', width: 80 },
