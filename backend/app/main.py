@@ -2092,7 +2092,9 @@ def dashboard_kpi(
         delegation_monthly_pct = 0
         all_tasks = []
         try:
-            q = supabase.table("delegation_tasks").select("*").eq("assignee_id", user_id)
+            # Show delegation tasks where this user is either the assignee or the submitter
+            q = supabase.table("delegation_tasks").select("*")
+            q = q.or_(f"assignee_id.eq.{user_id},submitted_by.eq.{user_id}")
             r = q.execute()
             all_tasks = r.data or []
             week_tasks = [t for t in all_tasks if t.get("due_date") or t.get("delegation_on")]
@@ -2112,13 +2114,16 @@ def dashboard_kpi(
                 return month_start <= d <= month_end
             week_list = [t for t in week_tasks if _in_week(t)]
             month_list = [t for t in all_tasks if _in_month(t)]
+            # Weekly percentage is based on tasks whose due_date/delegation_on falls in the selected week
             total_w = len(week_list)
             done_w = sum(1 for t in week_list if str(t.get("status") or "").lower() == "completed")
             delegation_weekly_pct = round((done_w / total_w) * 100) if total_w else 0
+            # Monthly percentage is based on all tasks in the selected month
             total_m = len(month_list)
             done_m = sum(1 for t in month_list if str(t.get("status") or "").lower() == "completed")
             delegation_monthly_pct = round((done_m / total_m) * 100) if total_m else 0
-            for t in week_list:
+            # Show all delegation tasks for this user in the selected month in the KPI table
+            for t in month_list:
                 delegation_rows.append({
                     "task": t.get("title") or t.get("task") or "",
                     "status": (t.get("status") or "pending").replace("_", " ").title(),
