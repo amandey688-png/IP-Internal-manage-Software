@@ -1965,6 +1965,16 @@ def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple
         return None
 
 
+def _normalize_query_arrival_iso(ts) -> str:
+    """Return ISO timestamp for Query Arrival display; preserve timezone (e.g. Z) so frontend shows correct local time."""
+    if ts is None or ts == "":
+        return ""
+    s = str(ts).strip()
+    if not s:
+        return ""
+    return s
+
+
 def _parse_iso_to_date(value) -> date | None:
     try:
         if isinstance(value, date) and not isinstance(value, datetime):
@@ -2181,7 +2191,7 @@ def dashboard_kpi(
                     "title": (t.get("title") or "").strip() or "—",
                     "description": (t.get("description") or "").strip() or "",
                     "reference_no": ref,
-                    "query_arrival": str(t.get("query_arrival_at") or created)[:19],
+                    "query_arrival": _normalize_query_arrival_iso(t.get("query_arrival_at") or created),
                     "month": month,
                 }
                 # Response delay: same SLA logic as Support Dashboard (30 min from query_arrival to response)
@@ -3011,12 +3021,12 @@ def support_dashboard_stats(auth: dict = Depends(get_current_user)):
 
 
 def _get_ticket_week(t: dict) -> tuple[int, int, int]:
-    """Return (week_num, month, year) for ticket based on created_at."""
-    created = t.get("created_at") or ""
-    if not created:
+    """Return (week_num, month, year) for ticket based on query_arrival_at (or created_at)."""
+    ts = t.get("query_arrival_at") or t.get("created_at") or ""
+    if not ts:
         return 0, 0, 0
     try:
-        dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
         return _week_of_month(dt), dt.month, dt.year
     except Exception:
         return 0, 0, 0
