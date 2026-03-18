@@ -861,18 +861,10 @@ export function ClientPaymentPage() {
             label="Invoice Number"
             rules={[
               { required: true, message: 'Invoice Number is required' },
-              {
-                validator: (_, value) => {
-                  if (value === undefined || value === null || value === '') return Promise.resolve()
-                  const s = String(value).trim()
-                  if (!/^\d+$/.test(s)) return Promise.reject(new Error('Invoice Number must be digits only'))
-                  if (s.length > 11) return Promise.reject(new Error('Max 11 digits allowed'))
-                  return Promise.resolve()
-                },
-              },
+              { max: 50, message: 'Max 50 characters allowed' },
             ]}
           >
-            <Input maxLength={11} />
+            <Input maxLength={50} placeholder="Invoice number (alphanumeric / special characters allowed)" />
           </Form.Item>
 
           <Form.Item

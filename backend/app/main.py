@@ -3542,8 +3542,10 @@ def create_client_payment(payload: dict, auth: dict = Depends(get_current_user))
     payment_received_date = payload.get("payment_received_date")
     if invoice_amount and (not invoice_amount.isdigit() or len(invoice_amount) > 11):
         raise HTTPException(400, "invoice_amount must be digits only, max 11 characters")
-    if invoice_number and (not invoice_number.isdigit() or len(invoice_number) > 11):
-        raise HTTPException(400, "invoice_number must be digits only, max 11 characters")
+    # Invoice numbers can be alphanumeric and may contain special characters (per business usage).
+    # Keep a reasonable max length to prevent accidental huge values.
+    if invoice_number and len(invoice_number) > 50:
+        raise HTTPException(400, "invoice_number max 50 characters")
     if genre not in ("M", "Q", "HY", "Y"):
         raise HTTPException(400, "genre must be one of M, Q, HY, Y")
     try:
@@ -3664,8 +3666,8 @@ def save_client_payment_sent(client_payment_id: str, payload: dict, auth: dict =
         raise HTTPException(400, "Tracking details are required when Courier Sent is Yes")
     if whatsapp_sent and (not whatsapp_number or not whatsapp_number.isdigit() or len(whatsapp_number) != 10):
         raise HTTPException(400, "WhatsApp Number must be 10 digits when WhatsApp Sent is Yes")
-    if invoice_number and not invoice_number.isdigit():
-        raise HTTPException(400, "Invoice Number must be digits only")
+    if invoice_number and len(invoice_number) > 50:
+        raise HTTPException(400, "Invoice Number max 50 characters")
 
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
@@ -4156,8 +4158,10 @@ def save_client_payment_receive(client_payment_id: str, payload: dict, auth: dic
     if not party_name:
         raise HTTPException(400, "party_name is required")
     invoice_number = (data.get("invoice_number") or "").strip()
-    if not invoice_number or not invoice_number.isdigit():
-        raise HTTPException(400, "invoice_number must be digits only")
+        if not invoice_number:
+            raise HTTPException(400, "invoice_number is required")
+        if len(invoice_number) > 50:
+            raise HTTPException(400, "invoice_number max 50 characters")
     amount = data.get("amount")
     if amount is None or (isinstance(amount, (int, float)) and amount < 0):
         raise HTTPException(400, "amount is required and must be >= 0")
