@@ -71,11 +71,30 @@ export function ClientPaymentPage() {
   const [nextFollowupNo, setNextFollowupNo] = useState(1)
   const [followupsItems, setFollowupsItems] = useState<{ followup_no: number; contact_person?: string | null; remarks?: string | null; mail_sent?: boolean; whatsapp_sent?: boolean; created_at?: string; editable_24h?: boolean }[]>([])
   const [interceptSubmitted, setInterceptSubmitted] = useState(false)
+  const [interceptDetails, setInterceptDetails] = useState<{
+    last_remark_user?: string | null
+    usage_last_1_month?: string | null
+    contact_person?: string | null
+    contact_number?: string | null
+    tagged_user_id?: string | null
+    tagged_user_name?: string | null
+    tagged_user_email?: string | null
+  } | null>(null)
+  const [interceptEditable, setInterceptEditable] = useState(true)
   const [interceptModalOpen, setInterceptModalOpen] = useState(false)
   const [interceptForm] = Form.useForm()
   const [discontinuationSubmitted, setDiscontinuationSubmitted] = useState(false)
+  const [discontinuationDetails, setDiscontinuationDetails] = useState<{
+    mail_sent_to?: string | null
+    mail_sent_on?: string | null
+    remarks?: string | null
+  } | null>(null)
   const [discontinuationModalOpen, setDiscontinuationModalOpen] = useState(false)
   const [discontinuationForm] = Form.useForm()
+  const [interceptTagModalOpen, setInterceptTagModalOpen] = useState(false)
+  const [tagUsers, setTagUsers] = useState<{ id: string; full_name: string; email: string }[]>([])
+  const [tagLoading, setTagLoading] = useState(false)
+  const [tagSelectedUserId, setTagSelectedUserId] = useState<string | null>(null)
   const [paymRecModalOpen, setPaymRecModalOpen] = useState(false)
   const [paymRecForm] = Form.useForm()
   const [currentFollowupNo, setCurrentFollowupNo] = useState(1)
@@ -160,12 +179,15 @@ export function ClientPaymentPage() {
     setFollowupsItems([])
     setNextFollowupNo(1)
     setInterceptSubmitted(false)
+    setInterceptDetails(null)
+    setInterceptEditable(true)
     setDiscontinuationSubmitted(false)
+    setDiscontinuationDetails(null)
     Promise.all([
       apiClient.get<{ data: any; editable_24h: boolean; submitted?: boolean }>(`/onboarding/client-payment/${record.id}/sent`),
       apiClient.get<{ items: any[]; next_followup_no: number }>(`/onboarding/client-payment/${record.id}/followups`),
-      apiClient.get<{ submitted?: boolean }>(`/onboarding/client-payment/${record.id}/intercept`),
-      apiClient.get<{ submitted?: boolean }>(`/onboarding/client-payment/${record.id}/discontinuation`),
+      apiClient.get<{ data?: any; submitted?: boolean; editable_24h?: boolean }>(`/onboarding/client-payment/${record.id}/intercept`),
+      apiClient.get<{ data?: any; submitted?: boolean }>(`/onboarding/client-payment/${record.id}/discontinuation`),
     ])
       .then(([sentRes, followupsRes, interceptRes, discontinuationRes]) => {
         const sentData = sentRes.data?.data || {}
@@ -200,7 +222,25 @@ export function ClientPaymentPage() {
           setFollowupEditable(lastFu.editable_24h ?? false)
         }
         setInterceptSubmitted(!!interceptRes.data?.submitted)
+        const i = interceptRes.data?.data || {}
+        setInterceptEditable(interceptRes.data?.editable_24h ?? true)
+        setInterceptDetails({
+          last_remark_user: i.last_remark_user ?? null,
+          usage_last_1_month: i.usage_last_1_month ?? null,
+          contact_person: i.contact_person ?? null,
+          contact_number: i.contact_number ?? null,
+          tagged_user_id: i.tagged_user_id ?? null,
+          tagged_user_name: i.tagged_user_name ?? null,
+          tagged_user_email: i.tagged_user_email ?? null,
+        })
+
         setDiscontinuationSubmitted(!!discontinuationRes.data?.submitted)
+        const d = discontinuationRes.data?.data || {}
+        setDiscontinuationDetails({
+          mail_sent_to: d.mail_sent_to ?? null,
+          mail_sent_on: d.mail_sent_on ?? null,
+          remarks: d.remarks ?? null,
+        })
       })
       .catch(() => message.error('Could not load invoice details'))
       .finally(() => setDrawerStatusLoading(false))
@@ -327,11 +367,65 @@ export function ClientPaymentPage() {
 
   const openIntercept = () => {
     if (!selectedRecord) return
-    apiClient.get<{ data: any }>(`/onboarding/client-payment/${selectedRecord.id}/intercept`).then((res) => {
+    apiClient.get<{ data: any; editable_24h?: boolean; submitted?: boolean }>(`/onboarding/client-payment/${selectedRecord.id}/intercept`).then((res) => {
       const d = res.data?.data || {}
+      setInterceptEditable(res.data?.editable_24h ?? true)
       interceptForm.setFieldsValue({ last_remark_user: d.last_remark_user ?? '', usage_last_1_month: d.usage_last_1_month ?? '', contact_person: d.contact_person ?? '', contact_number: d.contact_number ?? '' })
+      setInterceptDetails({
+        last_remark_user: d.last_remark_user ?? null,
+        usage_last_1_month: d.usage_last_1_month ?? null,
+        contact_person: d.contact_person ?? null,
+        contact_number: d.contact_number ?? null,
+        tagged_user_id: d.tagged_user_id ?? null,
+        tagged_user_name: d.tagged_user_name ?? null,
+        tagged_user_email: d.tagged_user_email ?? null,
+      })
       setInterceptModalOpen(true)
     }).catch(() => message.error('Could not load'))
+  }
+
+  const openInterceptTag = () => {
+    if (!selectedRecord) return
+    setInterceptTagModalOpen(true)
+    setTagSelectedUserId(interceptDetails?.tagged_user_id ?? null)
+    if (tagUsers.length > 0) return
+    setTagLoading(true)
+    apiClient
+      .get<{ items: { id: string; full_name: string; email: string }[] }>('/users/options')
+      .then((res) => setTagUsers(res.data?.items || []))
+      .catch(() => setTagUsers([]))
+      .finally(() => setTagLoading(false))
+  }
+
+  const saveInterceptTag = () => {
+    if (!selectedRecord) return
+    if (!tagSelectedUserId) {
+      message.warning('Select a user to tag')
+      return
+    }
+    const u = tagUsers.find((x) => x.id === tagSelectedUserId)
+    if (!u) return
+    const payload = {
+      last_remark_user: interceptDetails?.last_remark_user ?? null,
+      usage_last_1_month: interceptDetails?.usage_last_1_month ?? null,
+      contact_person: interceptDetails?.contact_person ?? null,
+      contact_number: interceptDetails?.contact_number ?? null,
+      tagged_user_id: u.id,
+      tagged_user_name: u.full_name,
+      tagged_user_email: u.email,
+    }
+    setTagLoading(true)
+    apiClient
+      .post(`/onboarding/client-payment/${selectedRecord.id}/intercept`, { data: payload })
+      .then(() => {
+        message.success('Tagged user saved')
+        setInterceptSubmitted(true)
+        setInterceptDetails(payload)
+        setInterceptTagModalOpen(false)
+        loadDrawerData(selectedRecord)
+      })
+      .catch((e) => message.error(e?.response?.data?.detail || 'Failed to save tag'))
+      .finally(() => setTagLoading(false))
   }
   const handleInterceptSubmit = () => {
     if (!selectedRecord) return
@@ -350,6 +444,11 @@ export function ClientPaymentPage() {
     apiClient.get<{ data: any }>(`/onboarding/client-payment/${selectedRecord.id}/discontinuation`).then((res) => {
       const d = res.data?.data || {}
       discontinuationForm.setFieldsValue({ mail_sent_to: d.mail_sent_to ?? '', mail_sent_on: d.mail_sent_on ? dayjs(d.mail_sent_on) : null, remarks: d.remarks ?? '' })
+      setDiscontinuationDetails({
+        mail_sent_to: d.mail_sent_to ?? null,
+        mail_sent_on: d.mail_sent_on ?? null,
+        remarks: d.remarks ?? null,
+      })
       setDiscontinuationModalOpen(true)
     }).catch(() => message.error('Could not load'))
   }
@@ -591,8 +690,22 @@ export function ClientPaymentPage() {
                     <div style={{ marginBottom: 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                         <Space><CheckCircleOutlined style={{ color: '#52c41a' }} /><span>Intercept Requirements</span></Space>
-                        <Button type="link" size="small" onClick={openIntercept}>View</Button>
+                        <Space size={8}>
+                          <Button size="small" onClick={openInterceptTag}>Tag</Button>
+                          {interceptEditable ? (
+                            <Button type="link" size="small" icon={<EditOutlined />} onClick={openIntercept}>Edit</Button>
+                          ) : (
+                            <Button type="link" size="small" onClick={openIntercept}>View</Button>
+                          )}
+                        </Space>
                       </div>
+                      <Descriptions column={1} size="small" bordered>
+                        <Descriptions.Item label="Last Remark of User">{interceptDetails?.last_remark_user || '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Usage Details (Last 1 Month)">{interceptDetails?.usage_last_1_month || '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Contact Person">{interceptDetails?.contact_person || '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Contact Number">{interceptDetails?.contact_number || '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Tag">{interceptDetails?.tagged_user_name || interceptDetails?.tagged_user_email || '—'}</Descriptions.Item>
+                      </Descriptions>
                     </div>
                   ) : (
                     <Button type="default" block icon={<FormOutlined />} onClick={openIntercept} size="large" style={{ marginBottom: 16 }}>Intercept Requirements</Button>
@@ -605,6 +718,11 @@ export function ClientPaymentPage() {
                         <Space><CheckCircleOutlined style={{ color: '#52c41a' }} /><span>Discontinuation Mail</span></Space>
                         <Button type="link" size="small" onClick={openDiscontinuation}>View</Button>
                       </div>
+                      <Descriptions column={1} size="small" bordered>
+                        <Descriptions.Item label="Mail Sent To">{discontinuationDetails?.mail_sent_to || '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Mail Sent On">{discontinuationDetails?.mail_sent_on ? dayjs(discontinuationDetails.mail_sent_on).format('DD-MMM-YYYY') : '—'}</Descriptions.Item>
+                        <Descriptions.Item label="Remarks">{discontinuationDetails?.remarks || '—'}</Descriptions.Item>
+                      </Descriptions>
                     </div>
                   ) : (
                     <Button type="default" block icon={<FormOutlined />} onClick={openDiscontinuation} size="large" style={{ marginBottom: 16 }}>Discontinuation Mail</Button>
@@ -766,18 +884,50 @@ export function ClientPaymentPage() {
       </Modal>
 
       <Modal title="Intercept Requirements" open={interceptModalOpen} onCancel={() => setInterceptModalOpen(false)} footer={null} destroyOnClose width={520}>
-        <Form form={interceptForm} layout="vertical" style={{ marginTop: 16 }} onFinish={handleInterceptSubmit}>
+        <Form form={interceptForm} layout="vertical" style={{ marginTop: 16 }} onFinish={handleInterceptSubmit} disabled={!interceptEditable}>
           <Form.Item name="last_remark_user" label="Last Remark of User"><Input.TextArea rows={2} placeholder="Last remark of user" /></Form.Item>
           <Form.Item name="usage_last_1_month" label="Usage Details of Last 1 Month"><Input.TextArea rows={2} placeholder="Usage details" /></Form.Item>
           <Form.Item name="contact_person" label="Contact Person"><Input placeholder="Contact person" /></Form.Item>
           <Form.Item name="contact_number" label="Contact Number"><Input placeholder="Contact number" maxLength={15} /></Form.Item>
           <Form.Item style={{ marginBottom: 0 }}>
             <Space>
-              <Button type="primary" htmlType="submit">Save</Button>
+              {interceptEditable && <Button type="primary" htmlType="submit">Save</Button>}
               <Button onClick={() => setInterceptModalOpen(false)}>Cancel</Button>
             </Space>
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title="Tag user (Intercept Requirements)"
+        open={interceptTagModalOpen}
+        onCancel={() => setInterceptTagModalOpen(false)}
+        onOk={saveInterceptTag}
+        okText="Save"
+        confirmLoading={tagLoading}
+        destroyOnClose
+        width={520}
+      >
+        <div style={{ marginTop: 12 }}>
+          <Select
+            showSearch
+            placeholder="Select registered user"
+            loading={tagLoading}
+            value={tagSelectedUserId ?? undefined}
+            onChange={(v) => setTagSelectedUserId(v)}
+            options={tagUsers.map((u) => ({
+              label: `${u.full_name || '(No name)'}${u.email ? ` — ${u.email}` : ''}`,
+              value: u.id,
+            }))}
+            filterOption={(input, option) =>
+              String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+            }
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div style={{ marginTop: 12, color: '#666', fontSize: 12 }}>
+          This will appear in Master Admin dashboard under <b>Payment Action</b>.
+        </div>
       </Modal>
 
       <Modal title="Discontinuation Mail" open={discontinuationModalOpen} onCancel={() => setDiscontinuationModalOpen(false)} footer={null} destroyOnClose width={520}>

@@ -4049,16 +4049,47 @@ def get_client_payment_intercept(client_payment_id: str, auth: dict = Depends(ge
         r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
-            return {"data": {"last_remark_user": None, "usage_last_1_month": None, "contact_person": None, "contact_number": None}, "submitted": False}
+            return {
+                "data": {
+                    "last_remark_user": None,
+                    "usage_last_1_month": None,
+                    "contact_person": None,
+                    "contact_number": None,
+                    "tagged_user_id": None,
+                    "tagged_user_name": None,
+                    "tagged_user_email": None,
+                },
+                "submitted": False,
+                "editable_24h": True,
+            }
+
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
+        editable_24h = True
+        try:
+            editable_until = row.get("editable_until")
+            created_by = row.get("created_by")
+            if not is_admin and editable_until and created_by == auth["id"]:
+                d = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
+                editable_24h = d >= datetime.now(timezone.utc)
+            elif not is_admin and editable_until:
+                # Non-admins can only edit their own within the window
+                editable_24h = False
+        except Exception:
+            editable_24h = False
         return {
             "data": {
                 "last_remark_user": row.get("last_remark_user"),
                 "usage_last_1_month": row.get("usage_last_1_month"),
                 "contact_person": row.get("contact_person"),
                 "contact_number": row.get("contact_number"),
+                "tagged_user_id": row.get("tagged_user_id"),
+                "tagged_user_name": row.get("tagged_user_name"),
+                "tagged_user_email": row.get("tagged_user_email"),
             },
             "submitted": True,
             "created_at": row.get("created_at"),
+            "editable_24h": True if is_admin else editable_24h,
         }
     except Exception as e:
         _log(f"get client payment intercept: {e}")
@@ -4075,25 +4106,131 @@ def save_client_payment_intercept(client_payment_id: str, payload: dict, auth: d
     usage_last_1_month = (data.get("usage_last_1_month") or "").strip() or None
     contact_person = (data.get("contact_person") or "").strip() or None
     contact_number = (data.get("contact_number") or "").strip() or None
-    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    tagged_user_id = (data.get("tagged_user_id") or "").strip() or None
+    tagged_user_name = (data.get("tagged_user_name") or "").strip() or None
+    tagged_user_email = (data.get("tagged_user_email") or "").strip() or None
+
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat().replace("+00:00", "Z")
+    editable_until_iso = (now_dt + timedelta(hours=24)).isoformat().replace("+00:00", "Z")
     try:
-        r = supabase.table("onboarding_client_payment_intercept").select("id").eq("client_payment_id", client_payment_id).limit(1).execute()
+        r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
+
         if row:
+            editable_until = row.get("editable_until")
+            created_by = row.get("created_by")
+            can_edit = False
+            if is_admin:
+                can_edit = True
+            elif created_by == auth["id"] and editable_until:
+                try:
+                    d = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
+                    if d >= now_dt:
+                        can_edit = True
+                except Exception:
+                    can_edit = False
+            if not can_edit:
+                raise HTTPException(403, "Intercept Requirements can only be edited within 24 hours")
+
             supabase.table("onboarding_client_payment_intercept").update({
                 "last_remark_user": last_remark_user, "usage_last_1_month": usage_last_1_month,
                 "contact_person": contact_person, "contact_number": contact_number, "updated_at": now_iso,
+                "tagged_user_id": tagged_user_id,
+                "tagged_user_name": tagged_user_name,
+                "tagged_user_email": tagged_user_email,
             }).eq("id", row["id"]).execute()
         else:
             supabase.table("onboarding_client_payment_intercept").insert({
                 "client_payment_id": client_payment_id, "last_remark_user": last_remark_user,
                 "usage_last_1_month": usage_last_1_month, "contact_person": contact_person, "contact_number": contact_number,
                 "created_by": auth.get("id"), "created_at": now_iso,
+                "editable_until": editable_until_iso,
+                "tagged_user_id": tagged_user_id,
+                "tagged_user_name": tagged_user_name,
+                "tagged_user_email": tagged_user_email,
             }).execute()
-        return {"data": {"last_remark_user": last_remark_user, "usage_last_1_month": usage_last_1_month, "contact_person": contact_person, "contact_number": contact_number}, "created_at": now_iso}
+        return {
+            "data": {
+                "last_remark_user": last_remark_user,
+                "usage_last_1_month": usage_last_1_month,
+                "contact_person": contact_person,
+                "contact_number": contact_number,
+                "tagged_user_id": tagged_user_id,
+                "tagged_user_name": tagged_user_name,
+                "tagged_user_email": tagged_user_email,
+            },
+            "created_at": now_iso,
+            "editable_24h": True if is_admin else True,
+        }
     except Exception as e:
         _log(f"save client payment intercept: {e}")
         raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/users/options")
+def list_user_options(auth: dict = Depends(require_roles(["admin", "master_admin"]))):
+    """Lightweight list of registered users for dropdowns (id, full_name, email)."""
+    try:
+        r = supabase.table("users_view").select("id, full_name, email, is_active, created_at").order("created_at", desc=True).execute()
+        rows = [x for x in (r.data or []) if x and x.get("id") and x.get("is_active", True)]
+        return {
+            "items": [
+                {"id": str(x["id"]), "full_name": x.get("full_name") or "", "email": x.get("email") or ""}
+                for x in rows
+            ]
+        }
+    except Exception as e:
+        _log(f"list user options: {e}")
+        return {"items": []}
+
+
+@api_router.get("/dashboard/payment-actions")
+def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"]))):
+    """Items tagged to the current Master Admin from Client Payment Intercept."""
+    user_id = auth.get("id")
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_intercept")
+            .select("client_payment_id, tagged_user_id, created_at")
+            .eq("tagged_user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        intercept_rows = r.data or []
+        ids = [str(x.get("client_payment_id")) for x in intercept_rows if x.get("client_payment_id")]
+        if not ids:
+            return {"items": []}
+        p = (
+            supabase.table("onboarding_client_payment")
+            .select("id, company_name, invoice_number, reference_no, invoice_date, invoice_amount, genre")
+            .in_("id", ids)
+            .execute()
+        )
+        by_id = {str(x.get("id")): x for x in (p.data or []) if x and x.get("id")}
+        out = []
+        for cid in ids:
+            row = by_id.get(cid)
+            if not row:
+                continue
+            out.append(
+                {
+                    "client_payment_id": cid,
+                    "company_name": row.get("company_name"),
+                    "invoice_number": row.get("invoice_number"),
+                    "reference_no": row.get("reference_no"),
+                    "invoice_date": row.get("invoice_date"),
+                    "invoice_amount": row.get("invoice_amount"),
+                    "genre": row.get("genre"),
+                }
+            )
+        return {"items": out}
+    except Exception as e:
+        _log(f"dashboard payment actions: {e}")
+        return {"items": []}
 
 
 @api_router.get("/onboarding/client-payment/{client_payment_id}/discontinuation")
