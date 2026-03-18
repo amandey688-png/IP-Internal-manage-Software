@@ -4158,10 +4158,10 @@ def save_client_payment_receive(client_payment_id: str, payload: dict, auth: dic
     if not party_name:
         raise HTTPException(400, "party_name is required")
     invoice_number = (data.get("invoice_number") or "").strip()
-        if not invoice_number:
-            raise HTTPException(400, "invoice_number is required")
-        if len(invoice_number) > 50:
-            raise HTTPException(400, "invoice_number max 50 characters")
+    if not invoice_number:
+        raise HTTPException(400, "invoice_number is required")
+    if len(invoice_number) > 50:
+        raise HTTPException(400, "invoice_number max 50 characters")
     amount = data.get("amount")
     if amount is None or (isinstance(amount, (int, float)) and amount < 0):
         raise HTTPException(400, "amount is required and must be >= 0")
