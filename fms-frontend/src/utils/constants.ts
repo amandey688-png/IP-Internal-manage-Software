@@ -37,6 +37,7 @@ export const SECTION_LABELS: Record<string, string> = {
   leads: 'Lead',
   onboarding: 'Onboarding',
   onboarding_payment_status: 'Payment Status',
+  client_payment: 'Client Payment',
   settings: 'Settings',
   users: 'Users',
 }
@@ -68,6 +69,11 @@ export const ROUTES = {
   /** Onboarding module */
   ONBOARDING: '/onboarding',
   ONBOARDING_PAYMENT_STATUS: '/onboarding/payment-status',
+  CLIENT_PAYMENT: '/onboarding/client-payment',
+  /** Client Payment completed sections (moved from Payment Management after Paym-Rec) */
+  CLIENT_PAYMENT_Q_COMP: '/onboarding/client-payment/completed/Q-Comp',
+  CLIENT_PAYMENT_M_COMP: '/onboarding/client-payment/completed/M-Comp',
+  CLIENT_PAYMENT_HF_COMP: '/onboarding/client-payment/completed/HF-Comp',
   /** Training module */
   TRAINING: '/training',
   TRAINING_CLIENT: '/training/client-training',
@@ -121,6 +127,12 @@ export const API_ENDPOINTS = {
     SETUP_CHECKLIST: (id: string) => `/onboarding/payment-status/${id}/setup-checklist`,
     ITEM_STOCK_CHECKLIST: (id: string) => `/onboarding/payment-status/${id}/item-stock-checklist`,
     FINAL_SETUP: (id: string) => `/onboarding/payment-status/${id}/final-setup`,
+  },
+  CLIENT_PAYMENT: {
+    LIST: '/onboarding/client-payment',
+    LIST_OPEN: '/onboarding/client-payment?status=open',
+    LIST_COMPLETED: (section: string) => `/onboarding/client-payment?status=completed&section=${encodeURIComponent(section)}`,
+    CREATE: '/onboarding/client-payment',
   },
   LEADS: {
     LIST: '/leads',

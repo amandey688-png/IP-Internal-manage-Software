@@ -29,6 +29,7 @@ import { LeadListPage } from "./pages/Leads/LeadListPage"
 import { LeadDetailPage } from "./pages/Leads/LeadDetailPage"
 import { LeadImportPage } from "./pages/Leads/LeadImportPage"
 import { PaymentStatusPage } from "./pages/Onboarding/PaymentStatusPage"
+import { ClientPaymentPage } from "./pages/Onboarding/ClientPaymentPage"
 import { ClientTrainingPage } from "./pages/Training/ClientTrainingPage"
 
 import { ROUTES, ROLES, APP_NAME } from "./utils/constants"
@@ -52,6 +53,10 @@ function AppTitle() {
       [ROUTES.LEADS]: "Lead",
       [ROUTES.LEADS_IMPORT]: "Import from sheet",
       [ROUTES.ONBOARDING_PAYMENT_STATUS]: "Onboarding – Payment Status",
+      [ROUTES.CLIENT_PAYMENT]: "Client Payment – Payment Management",
+      [ROUTES.CLIENT_PAYMENT_Q_COMP]: "Client Payment – Q-Comp",
+      [ROUTES.CLIENT_PAYMENT_M_COMP]: "Client Payment – M-Comp",
+      [ROUTES.CLIENT_PAYMENT_HF_COMP]: "Client Payment – HF-Comp",
       [ROUTES.TRAINING_CLIENT]: "Client Training",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
@@ -282,6 +287,21 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route
+              path={ROUTES.CLIENT_PAYMENT}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <ClientPaymentPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route path={ROUTES.CLIENT_PAYMENT_Q_COMP} element={<ProtectedRoute><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
+            <Route path={ROUTES.CLIENT_PAYMENT_M_COMP} element={<ProtectedRoute><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
+            <Route path={ROUTES.CLIENT_PAYMENT_HF_COMP} element={<ProtectedRoute><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
             <Route
               path={ROUTES.TRAINING_CLIENT}
               element={
