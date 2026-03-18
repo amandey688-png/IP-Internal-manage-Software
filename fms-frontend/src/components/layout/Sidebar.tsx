@@ -62,6 +62,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const [clientToLeadOpen, setClientToLeadOpen] = useState(isClientToLeadPage(location.pathname))
   const [onboardingOpen, setOnboardingOpen] = useState(isOnboardingPage(location.pathname))
   const [trainingOpen, setTrainingOpen] = useState(isTrainingPage(location.pathname))
+  const [dbClientOpen, setDbClientOpen] = useState(false)
   const [clientPaymentOpen, setClientPaymentOpen] = useState(isClientPaymentPage(location.pathname))
   useEffect(() => {
     if (isSupportPage(location.pathname)) setSupportOpen(true)
@@ -126,6 +127,10 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const trainingItems: MenuProps['items'] = [
     { key: ROUTES.TRAINING_CLIENT, icon: <ReadOutlined />, label: <Link to={ROUTES.TRAINING_CLIENT} style={linkStyle}>Client Training</Link> },
+  ]
+
+  const dbClientItems: MenuProps['items'] = [
+    { key: ROUTES.DB_CLIENT_CLIENTS, icon: <ReadOutlined />, label: <Link to={ROUTES.DB_CLIENT_CLIENTS} style={linkStyle}>Clients (New)</Link> },
   ]
 
   const clientPaymentItems: MenuProps['items'] = [
@@ -195,6 +200,13 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
       children: clientPaymentItems,
       onTitleClick: () => setClientPaymentOpen(!clientPaymentOpen),
     },
+    {
+      key: 'db-client',
+      icon: <ReadOutlined />,
+      label: 'DB Client',
+      children: dbClientItems,
+      onTitleClick: () => setDbClientOpen(!dbClientOpen),
+    },
     ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: <Link to={ROUTES.USERS} style={linkStyle}>Users</Link> }] : []),
     ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: <Link to={ROUTES.SETTINGS} style={linkStyle}>Settings</Link> }] : []),
     {
@@ -229,6 +241,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     setClientToLeadOpen(keys.includes('client-to-lead'))
     setOnboardingOpen(keys.includes('onboarding'))
     setTrainingOpen(keys.includes('training'))
+    setDbClientOpen(keys.includes('db-client'))
     setClientPaymentOpen(keys.includes('client-payment'))
   }
 

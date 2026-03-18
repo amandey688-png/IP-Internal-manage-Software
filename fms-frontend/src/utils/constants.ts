@@ -38,6 +38,7 @@ export const SECTION_LABELS: Record<string, string> = {
   onboarding: 'Onboarding',
   onboarding_payment_status: 'Payment Status',
   client_payment: 'Client Payment',
+  db_client: 'DB Client',
   settings: 'Settings',
   users: 'Users',
 }
@@ -77,6 +78,8 @@ export const ROUTES = {
   /** Training module */
   TRAINING: '/training',
   TRAINING_CLIENT: '/training/client-training',
+  /** DB Client module */
+  DB_CLIENT_CLIENTS: '/db-client/clients',
   USERS: '/users',
   SETTINGS: '/settings',
 } as const

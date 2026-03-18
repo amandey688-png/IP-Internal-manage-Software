@@ -58,6 +58,7 @@ function AppTitle() {
       [ROUTES.CLIENT_PAYMENT_M_COMP]: "Client Payment – M-Comp",
       [ROUTES.CLIENT_PAYMENT_HF_COMP]: "Client Payment – HF-Comp",
       [ROUTES.TRAINING_CLIENT]: "Client Training",
+      [ROUTES.DB_CLIENT_CLIENTS]: "DB Client – Clients",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
     }
@@ -304,6 +305,18 @@ function App() {
             <Route path={ROUTES.CLIENT_PAYMENT_HF_COMP} element={<ProtectedRoute><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
             <Route
               path={ROUTES.TRAINING_CLIENT}
+              element={
+                <ProtectedRoute>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <ClientTrainingPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={ROUTES.DB_CLIENT_CLIENTS}
               element={
                 <ProtectedRoute>
                   <AppLayout>

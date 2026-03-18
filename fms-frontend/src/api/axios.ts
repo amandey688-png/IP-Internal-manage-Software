@@ -2,27 +2,68 @@ import axios, { AxiosError, InternalAxiosRequestConfig } from "axios"
 import { storage } from "../utils/storage"
 import { ROUTES } from "../utils/constants"
 
+/** Default production backend (Render). Must match your deployed FastAPI URL. */
+export const PRODUCTION_API_FALLBACK = "https://ip-internal-manage-software.onrender.com"
+
+declare global {
+  interface Window {
+    /** Set in index.html to override API base without a new Vite env build */
+    __FMS_API_BASE_URL__?: string
+  }
+}
+
 /**
- * Backend base URL
- * MUST match FastAPI exactly
- *
- * Priority:
- * 1) VITE_API_BASE_URL (preferred)
- * 2) VITE_API_URL      (fallback)
- * 3) http://127.0.0.1:8000 (local dev default)
- *
- * Trailing slash is stripped so Vercel env "https://...onrender.com/" works.
+ * Resolve API base URL.
+ * Fixes: Vercel env often mistakenly set to the frontend URL (industryprime.vercel.app)
+ * → POST /onboarding/... hits the static site → 404 "Not Found". Local uses 127.0.0.1 and works.
  */
-const _raw =
-  import.meta.env.VITE_API_BASE_URL ||
-  import.meta.env.VITE_API_URL ||
-  "http://127.0.0.1:8000"
-export const API_BASE_URL = typeof _raw === "string" ? _raw.replace(/\/+$/, "") : _raw
+function resolveApiBase(): string {
+  const _local = "http://127.0.0.1:8000"
+  const runtime =
+    typeof window !== "undefined" && window.__FMS_API_BASE_URL__?.trim()
+      ? window.__FMS_API_BASE_URL__.trim()
+      : ""
+  const fromVite =
+    (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || "").trim()
+
+  let raw =
+    runtime ||
+    fromVite ||
+    (import.meta.env.DEV ? _local : PRODUCTION_API_FALLBACK)
+  raw = raw.replace(/\/+$/, "")
+
+  if (typeof window !== "undefined" && import.meta.env.PROD) {
+    try {
+      const u = new URL(raw.startsWith("http") ? raw : `https://${raw}`)
+      const path = (u.pathname || "/").replace(/\/+$/, "") || "/"
+      const sameOriginAsPage = u.origin === window.location.origin
+      // Frontend-only URL (no /api path) → API calls go to Vercel SPA → 404
+      if (sameOriginAsPage && path === "/") {
+        console.warn(
+          "[FMS] API base is the same as this website — using Render backend instead:",
+          PRODUCTION_API_FALLBACK
+        )
+        return PRODUCTION_API_FALLBACK.replace(/\/+$/, "")
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  return raw
+}
+
+export const API_BASE_URL = resolveApiBase()
+
+if (import.meta.env.PROD && (API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost"))) {
+  console.error(
+    "[FMS] Production build is using localhost as API. Set VITE_API_BASE_URL on Vercel, window.__FMS_API_BASE_URL__, or fix .env.production."
+  )
+}
 
 export const isLocalBackend =
   API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost")
 
-// Log API base URL for debugging
 console.log("🔗 API Base URL:", API_BASE_URL)
 
 export const apiClient = axios.create({
@@ -33,32 +74,20 @@ export const apiClient = axios.create({
   timeout: 30000,
 })
 
-/**
- * Attach JWT token (if exists) and log requests
- */
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = storage.getToken()
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
     }
-    // For FormData (e.g. file upload), omit Content-Type so browser sets multipart/form-data with boundary
     if (config.data instanceof FormData && config.headers) {
       delete config.headers["Content-Type"]
     }
-    // Log outgoing requests for debugging
-    console.log("📤 API Request:", {
-      method: config.method?.toUpperCase(),
-      url: config.url,
-      baseURL: config.baseURL,
-      fullURL: `${config.baseURL}${config.url}`,
-    })
     return config
   },
   (error) => Promise.reject(error)
 )
 
-/** Track if we're in a refresh attempt to avoid retry loop */
 let isRefreshing = false
 let refreshSubscribers: Array<(token: string) => void> = []
 
@@ -71,13 +100,33 @@ const addRefreshSubscriber = (cb: (token: string) => void) => {
   refreshSubscribers.push(cb)
 }
 
-/**
- * Global response handling - on 401 try token refresh, then retry or redirect
- */
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+    const originalRequest = error.config as InternalAxiosRequestConfig & {
+      _retry?: boolean
+      _api404Retry?: boolean
+    }
+
+    // Render / some hosts only forward /api/* to FastAPI → root /onboarding/* returns 404
+    if (
+      error.response?.status === 404 &&
+      originalRequest &&
+      !originalRequest._api404Retry
+    ) {
+      const raw = originalRequest.url || ""
+      const pathOnly = (raw.split("?")[0] || "").replace(/^\/+/, "/")
+      const normalized = pathOnly.startsWith("/") ? pathOnly : `/${pathOnly}`
+      const qs = raw.includes("?") ? raw.slice(raw.indexOf("?")) : ""
+      if (
+        !normalized.startsWith("/api") &&
+        (normalized.startsWith("/onboarding/") || normalized === "/companies")
+      ) {
+        originalRequest._api404Retry = true
+        originalRequest.url = `/api${normalized}${qs}`
+        return apiClient.request(originalRequest)
+      }
+    }
 
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
       const isRefreshRequest = originalRequest.url?.includes("/auth/refresh")
@@ -128,14 +177,6 @@ apiClient.interceptors.response.use(
       }
     } else if (error.request) {
       console.error("❌ Network error: backend not reachable at", API_BASE_URL)
-      console.error("Request details:", {
-        url: error.config?.url,
-        baseURL: error.config?.baseURL,
-        method: error.config?.method,
-      })
-      console.error("Make sure backend is running on:", API_BASE_URL)
-    } else {
-      console.error("❌ Request setup error:", error.message)
     }
 
     return Promise.reject(error)

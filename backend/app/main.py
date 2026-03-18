@@ -3408,6 +3408,787 @@ def create_onboarding_payment_status(payload: OnboardingPaymentStatusCreate, aut
         raise HTTPException(400, str(e)[:200])
 
 
+def _get_client_payment_ids_with_sent(client_payment_ids: list) -> set:
+    """Return set of client_payment ids that have Invoice Sent details submitted (row in onboarding_client_payment_sent)."""
+    if not client_payment_ids:
+        return set()
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_sent")
+            .select("client_payment_id")
+            .in_("client_payment_id", client_payment_ids)
+            .execute()
+        )
+        return {str(row.get("client_payment_id")) for row in (r.data or []) if row.get("client_payment_id")}
+    except Exception as e:
+        _log(f"client payment sent lookup: {e}")
+        return set()
+
+
+def _get_client_payment_ids_with_followup1(client_payment_ids: list) -> set:
+    """Return set of client_payment ids that have Follow up 1 submitted (legacy onboarding_client_payment_followup1)."""
+    if not client_payment_ids:
+        return set()
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_followup1")
+            .select("client_payment_id")
+            .in_("client_payment_id", client_payment_ids)
+            .execute()
+        )
+        return {str(row.get("client_payment_id")) for row in (r.data or []) if row.get("client_payment_id")}
+    except Exception as e:
+        _log(f"client payment followup1 lookup: {e}")
+        return set()
+
+
+def _get_client_payment_max_followup(client_payment_ids: list) -> dict:
+    """Return dict client_payment_id -> max followup_no (1-10) from onboarding_client_payment_followups. Falls back to 1 if only legacy followup1 exists."""
+    out = {}
+    if not client_payment_ids:
+        return out
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_followups")
+            .select("client_payment_id, followup_no")
+            .in_("client_payment_id", client_payment_ids)
+            .execute()
+        )
+        for row in (r.data or []):
+            cid = str(row.get("client_payment_id")) if row.get("client_payment_id") else None
+            if cid:
+                no = row.get("followup_no")
+                if no is not None:
+                    out[cid] = max(out.get(cid, 0), int(no))
+    except Exception as e:
+        _log(f"client payment max followup lookup: {e}")
+    # Fallback: legacy followup1 counts as 1
+    legacy = _get_client_payment_ids_with_followup1(client_payment_ids)
+    for cid in legacy:
+        if cid and out.get(cid, 0) < 1:
+            out[cid] = 1
+    return out
+
+
+@api_router.get("/onboarding/client-payment")
+def list_client_payment(auth: dict = Depends(get_current_user), status: str = None, section: str = None):
+    """List Raised Invoices. status=open (default): Payment Management (no payment received). status=completed&section=Gener|Q-Comp|M-Comp|HF-Comp: completed by genre."""
+    try:
+        r = supabase.table("onboarding_client_payment").select("*").order("timestamp", desc=True).execute()
+        items = r.data or []
+        # Filter by status/section
+        if status == "completed" and section:
+            # Gener = General (Y or not M/Q/HY); Q-Comp = Q; M-Comp = M; HF-Comp = HY
+            items = [x for x in items if x.get("payment_received_date")]
+            if section == "Gener":
+                items = [x for x in items if (x.get("genre") == "Y" or x.get("genre") not in ("M", "Q", "HY"))]
+            elif section == "Q-Comp":
+                items = [x for x in items if x.get("genre") == "Q"]
+            elif section == "M-Comp":
+                items = [x for x in items if x.get("genre") == "M"]
+            elif section == "HF-Comp":
+                items = [x for x in items if x.get("genre") == "HY"]
+        else:
+            # Default: open (Payment Management) – no payment received
+            items = [x for x in items if not x.get("payment_received_date")]
+        ids = [str(row.get("id")) for row in items if row.get("id")]
+        ids_with_sent = _get_client_payment_ids_with_sent(ids)
+        max_followup = _get_client_payment_max_followup(ids)
+        today = date.today()
+        for row in items:
+            inv_date = row.get("invoice_date")
+            paid_date = row.get("payment_received_date")
+            row["status"] = "Completed" if paid_date else "Pending"
+            aging_days = 0
+            try:
+                if not paid_date and inv_date:
+                    inv_d = date.fromisoformat(str(inv_date)[:10]) if isinstance(inv_date, str) else inv_date
+                    aging_days = max((today - inv_d).days, 0)
+                elif paid_date and inv_date:
+                    inv_d = date.fromisoformat(str(inv_date)[:10]) if isinstance(inv_date, str) else inv_date
+                    paid_d = date.fromisoformat(str(paid_date)[:10]) if isinstance(paid_date, str) else paid_date
+                    aging_days = max((paid_d - inv_d).days, 0)
+            except Exception:
+                aging_days = 0
+            row["aging_days"] = aging_days
+            cp_id = str(row.get("id")) if row.get("id") else None
+            if paid_date:
+                row["stage"] = "Completed"
+            else:
+                n = max_followup.get(cp_id, 0)
+                if n >= 1:
+                    row["stage"] = f"Follow up {n}"
+                elif cp_id in ids_with_sent:
+                    row["stage"] = "Invoice Sent details"
+                else:
+                    row["stage"] = "Invoice Sent details"
+        return {"items": items}
+    except Exception as e:
+        _log(f"client payment list: {e}")
+        return {"items": []}
+
+
+@api_router.post("/onboarding/client-payment")
+def create_client_payment(payload: dict, auth: dict = Depends(get_current_user)):
+    """Create a client payment 'Raised Invoice' entry."""
+    company_name = (payload.get("company_name") or "").strip()
+    if not company_name:
+        raise HTTPException(400, "company_name is required")
+    invoice_date = payload.get("invoice_date")
+    invoice_amount = (payload.get("invoice_amount") or "").strip()
+    invoice_number = (payload.get("invoice_number") or "").strip()
+    genre = (payload.get("genre") or "").strip().upper()
+    stage = (payload.get("stage") or "").strip()
+    payment_received_date = payload.get("payment_received_date")
+    if invoice_amount and (not invoice_amount.isdigit() or len(invoice_amount) > 11):
+        raise HTTPException(400, "invoice_amount must be digits only, max 11 characters")
+    if invoice_number and (not invoice_number.isdigit() or len(invoice_number) > 11):
+        raise HTTPException(400, "invoice_number must be digits only, max 11 characters")
+    if genre not in ("M", "Q", "HY", "Y"):
+        raise HTTPException(400, "genre must be one of M, Q, HY, Y")
+    try:
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        # Generate reference like INV/COMP/0001, 0002, ...
+        ref = "INV/COMP/0001"
+        try:
+            r_existing = supabase.table("onboarding_client_payment").select("reference_no").execute()
+            nums: list[int] = []
+            for row in (r_existing.data or []):
+                ref_val = (row or {}).get("reference_no") or ""
+                if ref_val.startswith("INV/COMP/") and len(ref_val) > len("INV/COMP/"):
+                    suffix = ref_val.split("INV/COMP/")[-1]
+                    if suffix.isdigit():
+                        nums.append(int(suffix))
+            next_num = max(nums, default=0) + 1
+            ref = f"INV/COMP/{next_num:04d}"
+        except Exception as e_ref:
+            _log(f"client payment reference fallback: {e_ref}")
+
+        row = {
+            "timestamp": now,
+            "reference_no": ref,
+            "company_name": company_name,
+            "invoice_date": invoice_date,
+            "invoice_amount": invoice_amount or None,
+            "invoice_number": invoice_number or None,
+            "genre": genre,
+            "stage": stage or None,
+            "payment_received_date": payment_received_date,
+        }
+        r = supabase.table("onboarding_client_payment").insert(row).execute()
+        created = (r.data or [{}])[0]
+        created["timestamp"] = now
+        return created
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"client payment create: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/onboarding/client-payment/{client_payment_id}/sent")
+def get_client_payment_sent(client_payment_id: str, auth: dict = Depends(get_current_user)):
+    """Get Invoice Sent details for a Raised Invoice. Creates empty shell on first access."""
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_sent")
+            .select("*")
+            .eq("client_payment_id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if not row:
+            now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+            editable_until = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat().replace("+00:00", "Z")
+            # Don't insert yet; treat as empty state on UI, create on first save
+            return {
+                "data": {
+                    "email_sent": False,
+                    "email": None,
+                    "courier_sent": False,
+                    "tracking_details": None,
+                    "whatsapp_sent": False,
+                    "whatsapp_number": None,
+                    "invoice_number": None,
+                },
+                "created_at": now,
+                "editable_until": editable_until,
+                "editable_24h": True,
+                "submitted": False,
+            }
+        return {
+            "data": {
+                "email_sent": bool(row.get("email_sent")),
+                "email": row.get("email"),
+                "courier_sent": bool(row.get("courier_sent")),
+                "tracking_details": row.get("tracking_details"),
+                "whatsapp_sent": bool(row.get("whatsapp_sent")),
+                "whatsapp_number": row.get("whatsapp_number"),
+                "invoice_number": row.get("invoice_number"),
+            },
+            "created_at": row.get("created_at"),
+            "editable_until": row.get("editable_until"),
+            "editable_24h": bool(row.get("editable_until") and datetime.fromisoformat(str(row.get("editable_until")).replace("Z", "+00:00")) >= datetime.now(timezone.utc)),
+            "submitted": True,
+        }
+    except Exception as e:
+        _log(f"get client payment sent: {e}")
+        return {
+            "data": {},
+            "created_at": None,
+            "editable_until": None,
+            "editable_24h": False,
+        }
+
+
+@api_router.post("/onboarding/client-payment/{client_payment_id}/sent")
+def save_client_payment_sent(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Invoice Sent details. 24h edit for creator; Master/Admin always allowed."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+
+    email_sent = bool(data.get("email_sent"))
+    email = (data.get("email") or "").strip() or None
+    courier_sent = bool(data.get("courier_sent"))
+    tracking = (data.get("tracking_details") or "").strip() or None
+    whatsapp_sent = bool(data.get("whatsapp_sent"))
+    whatsapp_number = (data.get("whatsapp_number") or "").strip() or None
+    invoice_number = (data.get("invoice_number") or "").strip() or None
+
+    # Basic validations
+    if email_sent and not email:
+        raise HTTPException(400, "Email is required when Email Sent is Yes")
+    if courier_sent and not tracking:
+        raise HTTPException(400, "Tracking details are required when Courier Sent is Yes")
+    if whatsapp_sent and (not whatsapp_number or not whatsapp_number.isdigit() or len(whatsapp_number) != 10):
+        raise HTTPException(400, "WhatsApp Number must be 10 digits when WhatsApp Sent is Yes")
+    if invoice_number and not invoice_number.isdigit():
+        raise HTTPException(400, "Invoice Number must be digits only")
+
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat().replace("+00:00", "Z")
+    editable_until_dt = now_dt + timedelta(hours=48)
+    editable_until_iso = editable_until_dt.isoformat().replace("+00:00", "Z")
+
+    try:
+        existing = (
+            supabase.table("onboarding_client_payment_sent")
+            .select("*")
+            .eq("client_payment_id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        row = (existing.data or [None])[0] if (existing.data and len(existing.data) > 0) else None
+
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
+
+        if row:
+            created_by = row.get("created_by")
+            editable_until = row.get("editable_until")
+            can_edit = False
+            if is_admin:
+                can_edit = True
+            elif created_by == auth["id"] and editable_until:
+                try:
+                    d = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
+                    if d >= now_dt:
+                        can_edit = True
+                except Exception:
+                    can_edit = False
+            if not can_edit:
+                raise HTTPException(403, "Invoice Sent details are no longer editable")
+
+            supabase.table("onboarding_client_payment_sent").update(
+                {
+                    "email_sent": email_sent,
+                    "email": email,
+                    "courier_sent": courier_sent,
+                    "tracking_details": tracking,
+                    "whatsapp_sent": whatsapp_sent,
+                    "whatsapp_number": whatsapp_number,
+                    "invoice_number": invoice_number,
+                    "updated_at": now_iso,
+                }
+            ).eq("id", row.get("id")).execute()
+            return {"data": data, "created_at": row.get("created_at"), "editable_until": editable_until, "editable_24h": True}
+
+        # Create new
+        supabase.table("onboarding_client_payment_sent").insert(
+            {
+                "client_payment_id": client_payment_id,
+                "created_by": auth["id"],
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "editable_until": editable_until_iso,
+                "email_sent": email_sent,
+                "email": email,
+                "courier_sent": courier_sent,
+                "tracking_details": tracking,
+                "whatsapp_sent": whatsapp_sent,
+                "whatsapp_number": whatsapp_number,
+                "invoice_number": invoice_number,
+            }
+        ).execute()
+        return {"data": data, "created_at": now_iso, "editable_until": editable_until_iso, "editable_24h": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save client payment sent: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/onboarding/client-payment/{client_payment_id}/followup1")
+def get_client_payment_followup1(client_payment_id: str, auth: dict = Depends(get_current_user)):
+    """Get Follow up 1 details for a Raised Invoice. Creates empty shell on first access."""
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_followup1")
+            .select("*")
+            .eq("client_payment_id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        now_dt = datetime.now(timezone.utc)
+        now_iso = now_dt.isoformat().replace("+00:00", "Z")
+        if not row:
+            editable_until_iso = (now_dt + timedelta(hours=24)).isoformat().replace("+00:00", "Z")
+            return {
+                "data": {
+                    "contact_person": None,
+                    "remarks": None,
+                    "mail_sent": False,
+                    "whatsapp_sent": False,
+                },
+                "created_at": now_iso,
+                "editable_until": editable_until_iso,
+                "editable_24h": True,
+                "submitted": False,
+            }
+        editable_until = row.get("editable_until")
+        editable_24h = False
+        if editable_until:
+            try:
+                editable_dt = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
+                editable_24h = editable_dt >= now_dt
+            except Exception:
+                editable_24h = False
+        return {
+            "data": {
+                "contact_person": row.get("contact_person"),
+                "remarks": row.get("remarks"),
+                "mail_sent": bool(row.get("mail_sent")),
+                "whatsapp_sent": bool(row.get("whatsapp_sent")),
+            },
+            "created_at": row.get("created_at") or now_iso,
+            "editable_until": editable_until,
+            "editable_24h": editable_24h,
+            "submitted": True,
+        }
+    except Exception as e:
+        _log(f"get client payment followup1: {e}")
+        return {
+            "data": {},
+            "created_at": None,
+            "editable_until": None,
+            "editable_24h": False,
+        }
+
+
+@api_router.post("/onboarding/client-payment/{client_payment_id}/followup1")
+def save_client_payment_followup1(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Follow up 1 details. 24h edit for creator; Master/Admin always allowed."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+
+    contact_person = (data.get("contact_person") or "").strip() or None
+    remarks = (data.get("remarks") or "").strip() or None
+    mail_sent = bool(data.get("mail_sent"))
+    whatsapp_sent = bool(data.get("whatsapp_sent"))
+
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat().replace("+00:00", "Z")
+    editable_until_dt = now_dt + timedelta(hours=24)
+    editable_until_iso = editable_until_dt.isoformat().replace("+00:00", "Z")
+
+    try:
+        existing = (
+            supabase.table("onboarding_client_payment_followup1")
+            .select("*")
+            .eq("client_payment_id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        row = (existing.data or [None])[0] if (existing.data and len(existing.data) > 0) else None
+
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
+
+        if row:
+            editable_until = row.get("editable_until")
+            if not is_admin and editable_until:
+                try:
+                    editable_dt = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
+                    if editable_dt < now_dt:
+                        raise HTTPException(400, "Follow up 1 can only be edited within 24 hours")
+                except HTTPException:
+                    raise
+                except Exception:
+                    raise HTTPException(400, "Follow up 1 is no longer editable")
+
+            update_data = {
+                "contact_person": contact_person,
+                "remarks": remarks,
+                "mail_sent": mail_sent,
+                "whatsapp_sent": whatsapp_sent,
+                "updated_at": now_iso,
+            }
+            supabase.table("onboarding_client_payment_followup1").update(update_data).eq("client_payment_id", client_payment_id).execute()
+        else:
+            insert_data = {
+                "client_payment_id": client_payment_id,
+                "contact_person": contact_person,
+                "remarks": remarks,
+                "mail_sent": mail_sent,
+                "whatsapp_sent": whatsapp_sent,
+                "created_by": auth.get("id"),
+                "created_at": now_iso,
+                "editable_until": editable_until_iso,
+            }
+            supabase.table("onboarding_client_payment_followup1").insert(insert_data).execute()
+
+        return {
+            "data": {
+                "contact_person": contact_person,
+                "remarks": remarks,
+                "mail_sent": mail_sent,
+                "whatsapp_sent": whatsapp_sent,
+            },
+            "created_at": row.get("created_at") if row else now_iso,
+            "editable_until": row.get("editable_until") if row else editable_until_iso,
+            "editable_24h": True,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save client payment followup1: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+# ---------- Client Payment: Follow-ups 1-10, Intercept, Discontinuation, Payment Receive ----------
+@api_router.get("/onboarding/client-payment/{client_payment_id}/followups")
+def list_client_payment_followups(client_payment_id: str, auth: dict = Depends(get_current_user)):
+    """List submitted follow-ups (1-10) and return next_followup_no (1-10 or 11 if all done)."""
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_followups")
+            .select("*")
+            .eq("client_payment_id", client_payment_id)
+            .order("followup_no", desc=False)
+            .execute()
+        )
+        rows = r.data or []
+        now_dt = datetime.now(timezone.utc)
+        items = []
+        for row in rows:
+            editable_until = row.get("editable_until")
+            editable_24h = False
+            if editable_until:
+                try:
+                    editable_24h = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00")) >= now_dt
+                except Exception:
+                    pass
+            items.append({
+                "followup_no": row.get("followup_no"),
+                "contact_person": row.get("contact_person"),
+                "remarks": row.get("remarks"),
+                "mail_sent": bool(row.get("mail_sent")),
+                "whatsapp_sent": bool(row.get("whatsapp_sent")),
+                "created_at": row.get("created_at"),
+                "editable_24h": editable_24h,
+            })
+        # Legacy: if old followup1 table has a row, treat as followup 1
+        try:
+            r1 = supabase.table("onboarding_client_payment_followup1").select("created_at, editable_until").eq("client_payment_id", client_payment_id).limit(1).execute()
+            if r1.data and len(r1.data) > 0 and not any(x.get("followup_no") == 1 for x in rows):
+                leg = r1.data[0]
+                editable_24h = False
+                if leg.get("editable_until"):
+                    try:
+                        editable_24h = datetime.fromisoformat(str(leg["editable_until"]).replace("Z", "+00:00")) >= now_dt
+                    except Exception:
+                        pass
+                items.append({"followup_no": 1, "contact_person": None, "remarks": None, "mail_sent": False, "whatsapp_sent": False, "created_at": leg.get("created_at"), "editable_24h": editable_24h})
+                items.sort(key=lambda x: x["followup_no"])
+        except Exception:
+            pass
+        max_no = max([x["followup_no"] for x in items], default=0)
+        next_followup_no = min(max_no + 1, 11)  # 11 = all done
+        return {"items": items, "next_followup_no": next_followup_no}
+    except Exception as e:
+        _log(f"list client payment followups: {e}")
+        return {"items": [], "next_followup_no": 1}
+
+
+@api_router.get("/onboarding/client-payment/{client_payment_id}/followups/{followup_no}")
+def get_client_payment_followup(client_payment_id: str, followup_no: int, auth: dict = Depends(get_current_user)):
+    """Get one follow-up (1-10) for edit/view. 24h edit."""
+    if followup_no < 1 or followup_no > 10:
+        raise HTTPException(400, "followup_no must be 1-10")
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_followups")
+            .select("*")
+            .eq("client_payment_id", client_payment_id)
+            .eq("followup_no", followup_no)
+            .limit(1)
+            .execute()
+        )
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if not row:
+            if followup_no == 1:
+                r1 = supabase.table("onboarding_client_payment_followup1").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
+                row = (r1.data or [None])[0] if (r1.data and len(r1.data) > 0) else None
+                if row:
+                    row["followup_no"] = 1
+            if not row:
+                return {"data": {"contact_person": None, "remarks": None, "mail_sent": False, "whatsapp_sent": False}, "submitted": False, "editable_24h": True}
+        now_dt = datetime.now(timezone.utc)
+        editable_24h = False
+        if row and row.get("editable_until"):
+            try:
+                editable_24h = datetime.fromisoformat(str(row["editable_until"]).replace("Z", "+00:00")) >= now_dt
+            except Exception:
+                pass
+        return {
+            "data": {
+                "contact_person": row.get("contact_person") if row else None,
+                "remarks": row.get("remarks") if row else None,
+                "mail_sent": bool(row.get("mail_sent")) if row else False,
+                "whatsapp_sent": bool(row.get("whatsapp_sent")) if row else False,
+            },
+            "submitted": bool(row),
+            "editable_24h": editable_24h,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get client payment followup: {e}")
+        return {"data": {}, "submitted": False, "editable_24h": True}
+
+
+@api_router.post("/onboarding/client-payment/{client_payment_id}/followups")
+def save_client_payment_followup(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update follow-up N (1-10). 24h edit. Auto timestamp on create."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    followup_no = data.get("followup_no") or payload.get("followup_no")
+    if followup_no is None:
+        raise HTTPException(400, "followup_no is required")
+    followup_no = int(followup_no)
+    if followup_no < 1 or followup_no > 10:
+        raise HTTPException(400, "followup_no must be 1-10")
+    contact_person = (data.get("contact_person") or "").strip() or None
+    remarks = (data.get("remarks") or "").strip() or None
+    mail_sent = bool(data.get("mail_sent"))
+    whatsapp_sent = bool(data.get("whatsapp_sent"))
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat().replace("+00:00", "Z")
+    editable_until_dt = now_dt + timedelta(hours=24)
+    editable_until_iso = editable_until_dt.isoformat().replace("+00:00", "Z")
+    try:
+        existing = (
+            supabase.table("onboarding_client_payment_followups")
+            .select("*")
+            .eq("client_payment_id", client_payment_id)
+            .eq("followup_no", followup_no)
+            .limit(1)
+            .execute()
+        )
+        row = (existing.data or [None])[0] if (existing.data and len(existing.data) > 0) else None
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
+        if row:
+            if not is_admin and row.get("editable_until"):
+                try:
+                    if datetime.fromisoformat(str(row["editable_until"]).replace("Z", "+00:00")) < now_dt:
+                        raise HTTPException(400, "Follow-up can only be edited within 24 hours")
+                except HTTPException:
+                    raise
+                except Exception:
+                    raise HTTPException(400, "No longer editable")
+            supabase.table("onboarding_client_payment_followups").update({
+                "contact_person": contact_person, "remarks": remarks, "mail_sent": mail_sent, "whatsapp_sent": whatsapp_sent,
+                "updated_at": now_iso,
+            }).eq("id", row["id"]).execute()
+        else:
+            supabase.table("onboarding_client_payment_followups").insert({
+                "client_payment_id": client_payment_id, "followup_no": followup_no,
+                "contact_person": contact_person, "remarks": remarks, "mail_sent": mail_sent, "whatsapp_sent": whatsapp_sent,
+                "created_by": auth.get("id"), "created_at": now_iso, "editable_until": editable_until_iso,
+            }).execute()
+        return {"data": {"followup_no": followup_no, "contact_person": contact_person, "remarks": remarks, "mail_sent": mail_sent, "whatsapp_sent": whatsapp_sent}, "created_at": now_iso, "editable_24h": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"save client payment followup: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/onboarding/client-payment/{client_payment_id}/intercept")
+def get_client_payment_intercept(client_payment_id: str, auth: dict = Depends(get_current_user)):
+    """Get Intercept Requirements for this invoice. One record per invoice."""
+    try:
+        r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if not row:
+            return {"data": {"last_remark_user": None, "usage_last_1_month": None, "contact_person": None, "contact_number": None}, "submitted": False}
+        return {
+            "data": {
+                "last_remark_user": row.get("last_remark_user"),
+                "usage_last_1_month": row.get("usage_last_1_month"),
+                "contact_person": row.get("contact_person"),
+                "contact_number": row.get("contact_number"),
+            },
+            "submitted": True,
+            "created_at": row.get("created_at"),
+        }
+    except Exception as e:
+        _log(f"get client payment intercept: {e}")
+        return {"data": {}, "submitted": False}
+
+
+@api_router.post("/onboarding/client-payment/{client_payment_id}/intercept")
+def save_client_payment_intercept(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Intercept Requirements. Auto timestamp."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    last_remark_user = (data.get("last_remark_user") or "").strip() or None
+    usage_last_1_month = (data.get("usage_last_1_month") or "").strip() or None
+    contact_person = (data.get("contact_person") or "").strip() or None
+    contact_number = (data.get("contact_number") or "").strip() or None
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        r = supabase.table("onboarding_client_payment_intercept").select("id").eq("client_payment_id", client_payment_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if row:
+            supabase.table("onboarding_client_payment_intercept").update({
+                "last_remark_user": last_remark_user, "usage_last_1_month": usage_last_1_month,
+                "contact_person": contact_person, "contact_number": contact_number, "updated_at": now_iso,
+            }).eq("id", row["id"]).execute()
+        else:
+            supabase.table("onboarding_client_payment_intercept").insert({
+                "client_payment_id": client_payment_id, "last_remark_user": last_remark_user,
+                "usage_last_1_month": usage_last_1_month, "contact_person": contact_person, "contact_number": contact_number,
+                "created_by": auth.get("id"), "created_at": now_iso,
+            }).execute()
+        return {"data": {"last_remark_user": last_remark_user, "usage_last_1_month": usage_last_1_month, "contact_person": contact_person, "contact_number": contact_number}, "created_at": now_iso}
+    except Exception as e:
+        _log(f"save client payment intercept: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/onboarding/client-payment/{client_payment_id}/discontinuation")
+def get_client_payment_discontinuation(client_payment_id: str, auth: dict = Depends(get_current_user)):
+    """Get Discontinuation Mail for this invoice."""
+    try:
+        r = supabase.table("onboarding_client_payment_discontinuation").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if not row:
+            return {"data": {"mail_sent_to": None, "mail_sent_on": None, "remarks": None}, "submitted": False}
+        return {
+            "data": {
+                "mail_sent_to": row.get("mail_sent_to"),
+                "mail_sent_on": row.get("mail_sent_on"),
+                "remarks": row.get("remarks"),
+            },
+            "submitted": True,
+            "created_at": row.get("created_at"),
+        }
+    except Exception as e:
+        _log(f"get client payment discontinuation: {e}")
+        return {"data": {}, "submitted": False}
+
+
+@api_router.post("/onboarding/client-payment/{client_payment_id}/discontinuation")
+def save_client_payment_discontinuation(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Create or update Discontinuation Mail. Auto timestamp."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    mail_sent_to = (data.get("mail_sent_to") or "").strip() or None
+    mail_sent_on = data.get("mail_sent_on")  # date YYYY-MM-DD
+    remarks = (data.get("remarks") or "").strip() or None
+    if mail_sent_on and isinstance(mail_sent_on, str):
+        mail_sent_on = mail_sent_on[:10]
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        r = supabase.table("onboarding_client_payment_discontinuation").select("id").eq("client_payment_id", client_payment_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if row:
+            supabase.table("onboarding_client_payment_discontinuation").update({
+                "mail_sent_to": mail_sent_to, "mail_sent_on": mail_sent_on, "remarks": remarks, "updated_at": now_iso,
+            }).eq("id", row["id"]).execute()
+        else:
+            supabase.table("onboarding_client_payment_discontinuation").insert({
+                "client_payment_id": client_payment_id, "mail_sent_to": mail_sent_to, "mail_sent_on": mail_sent_on, "remarks": remarks,
+                "created_by": auth.get("id"), "created_at": now_iso,
+            }).execute()
+        return {"data": {"mail_sent_to": mail_sent_to, "mail_sent_on": mail_sent_on, "remarks": remarks}, "created_at": now_iso}
+    except Exception as e:
+        _log(f"save client payment discontinuation: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.post("/onboarding/client-payment/{client_payment_id}/payment-receive")
+def save_client_payment_receive(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Payment Receive Details (Paym-Rec). Marks invoice completed; no further follow-ups."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    party_name = (data.get("party_name") or "").strip()
+    if not party_name:
+        raise HTTPException(400, "party_name is required")
+    invoice_number = (data.get("invoice_number") or "").strip()
+    if not invoice_number or not invoice_number.isdigit():
+        raise HTTPException(400, "invoice_number must be digits only")
+    amount = data.get("amount")
+    if amount is None or (isinstance(amount, (int, float)) and amount < 0):
+        raise HTTPException(400, "amount is required and must be >= 0")
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        raise HTTPException(400, "amount must be a number")
+    payment_date = data.get("payment_date")
+    if not payment_date:
+        raise HTTPException(400, "payment_date is required")
+    if isinstance(payment_date, str):
+        payment_date = payment_date[:10]
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        r = supabase.table("onboarding_client_payment_receive").select("id").eq("client_payment_id", client_payment_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if row:
+            supabase.table("onboarding_client_payment_receive").update({
+                "party_name": party_name, "invoice_number": invoice_number, "amount": amount, "payment_date": payment_date, "updated_at": now_iso,
+            }).eq("client_payment_id", client_payment_id).execute()
+        else:
+            supabase.table("onboarding_client_payment_receive").insert({
+                "client_payment_id": client_payment_id, "party_name": party_name, "invoice_number": invoice_number,
+                "amount": amount, "payment_date": payment_date, "created_by": auth.get("id"), "created_at": now_iso,
+            }).execute()
+    except Exception as e:
+        _log(f"payment receive: {e}")
+        raise HTTPException(400, str(e)[:200])
+    supabase.table("onboarding_client_payment").update({"payment_received_date": payment_date}).eq("id", client_payment_id).execute()
+    return {"data": {"party_name": party_name, "invoice_number": invoice_number, "amount": amount, "payment_date": payment_date}, "created_at": now_iso}
+
 # ---------- Training: Expected Day 0 = timestamp + 24h; Status = Pending / Done in X / Done, X delay ----------
 def _parse_iso_ts(s) -> Optional[datetime]:
     """Parse ISO timestamp string to timezone-aware datetime."""
