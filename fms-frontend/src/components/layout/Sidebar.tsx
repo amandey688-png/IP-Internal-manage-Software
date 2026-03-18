@@ -43,6 +43,9 @@ const isOnboardingPage = (pathname: string) =>
 const isTrainingPage = (pathname: string) =>
   pathname.startsWith(ROUTES.TRAINING)
 
+const isClientPaymentPage = (pathname: string) =>
+  pathname === ROUTES.CLIENT_PAYMENT || pathname.startsWith(ROUTES.CLIENT_PAYMENT + '/')
+
 interface SidebarProps {
   className?: string
   open?: boolean
@@ -59,8 +62,12 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const [clientToLeadOpen, setClientToLeadOpen] = useState(isClientToLeadPage(location.pathname))
   const [onboardingOpen, setOnboardingOpen] = useState(isOnboardingPage(location.pathname))
   const [trainingOpen, setTrainingOpen] = useState(isTrainingPage(location.pathname))
+  const [clientPaymentOpen, setClientPaymentOpen] = useState(isClientPaymentPage(location.pathname))
   useEffect(() => {
     if (isSupportPage(location.pathname)) setSupportOpen(true)
+  }, [location.pathname])
+  useEffect(() => {
+    if (isClientPaymentPage(location.pathname)) setClientPaymentOpen(true)
   }, [location.pathname])
   useEffect(() => {
     if (isTaskPage(location.pathname)) setTaskOpen(true)
@@ -121,6 +128,13 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     { key: ROUTES.TRAINING_CLIENT, icon: <ReadOutlined />, label: <Link to={ROUTES.TRAINING_CLIENT} style={linkStyle}>Client Training</Link> },
   ]
 
+  const clientPaymentItems: MenuProps['items'] = [
+    { key: ROUTES.CLIENT_PAYMENT, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT} style={linkStyle}>Payment Management</Link> },
+    { key: ROUTES.CLIENT_PAYMENT_Q_COMP, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_Q_COMP} style={linkStyle}>Q-Comp</Link> },
+    { key: ROUTES.CLIENT_PAYMENT_M_COMP, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_M_COMP} style={linkStyle}>M-Comp</Link> },
+    { key: ROUTES.CLIENT_PAYMENT_HF_COMP, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_HF_COMP} style={linkStyle}>HF-Comp</Link> },
+  ]
+
   const leadItems: MenuProps['items'] = [
     { key: ROUTES.LEADS, icon: <UserAddOutlined />, label: <Link to={ROUTES.LEADS} style={linkStyle}>Lead</Link> },
     { key: ROUTES.LEADS_CLOSED, icon: <UserAddOutlined />, label: <Link to={ROUTES.LEADS_CLOSED} style={linkStyle}>Closed Leads</Link> },
@@ -174,6 +188,13 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
       children: trainingItems,
       onTitleClick: () => setTrainingOpen(!trainingOpen),
     },
+    {
+      key: 'client-payment',
+      icon: <FileTextOutlined />,
+      label: 'Client Payment',
+      children: clientPaymentItems,
+      onTitleClick: () => setClientPaymentOpen(!clientPaymentOpen),
+    },
     ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: <Link to={ROUTES.USERS} style={linkStyle}>Users</Link> }] : []),
     ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: <Link to={ROUTES.SETTINGS} style={linkStyle}>Settings</Link> }] : []),
     {
@@ -198,6 +219,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     ...(clientToLeadOpen ? ['client-to-lead'] : []),
     ...(onboardingOpen ? ['onboarding'] : []),
     ...(trainingOpen ? ['training'] : []),
+    ...(clientPaymentOpen ? ['client-payment'] : []),
   ]
 
   const handleOpenChange = (keys: string[]) => {
@@ -207,6 +229,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     setClientToLeadOpen(keys.includes('client-to-lead'))
     setOnboardingOpen(keys.includes('onboarding'))
     setTrainingOpen(keys.includes('training'))
+    setClientPaymentOpen(keys.includes('client-payment'))
   }
 
   const menuContent = (
