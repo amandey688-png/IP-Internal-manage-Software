@@ -130,8 +130,17 @@ export function ClientPaymentPage() {
           loadData()
         })
         .catch((err) => {
-          const detail = err?.response?.data?.detail || 'Failed to save Raised Invoice'
-          message.error(detail)
+          const status = err?.response?.status
+          const raw = err?.response?.data?.detail
+          const detail =
+            typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0]?.msg : raw?.message || 'Failed to save Raised Invoice'
+          if (status === 404 || (typeof detail === 'string' && detail.toLowerCase().includes('not found'))) {
+            message.error(
+              'Server has no Client Payment API (404). Redeploy the latest backend (Render) with onboarding/client-payment routes. See docs/CLIENT_PAYMENT_PRODUCTION.md'
+            )
+          } else {
+            message.error(detail)
+          }
         })
         .finally(() => setSubmitLoading(false))
     }).catch(() => {
