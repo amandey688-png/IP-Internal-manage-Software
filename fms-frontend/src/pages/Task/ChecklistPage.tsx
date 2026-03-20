@@ -56,27 +56,30 @@ export const ChecklistPage = () => {
 
   const refNoParam = referenceNoFilter && referenceNoFilter !== '__all__' ? referenceNoFilter : undefined
 
+  const effectiveUserId = selectedUserId ?? user?.id
+
   const loadChecklistData = useCallback(() => {
     setLoading(true)
+    const uid = selectedUserId ?? user?.id
     Promise.all([
-      checklistApi.getTasks(selectedUserId, refNoParam),
-      checklistApi.getOccurrences(filter, selectedUserId, refNoParam),
+      checklistApi.getTasks(uid, refNoParam),
+      checklistApi.getOccurrences(filter, uid, refNoParam),
+      checklistApi.getDepartments(),
+      isAdmin ? checklistApi.getUsers() : Promise.resolve({ users: [] as { id: string; full_name: string }[] }),
     ])
-      .then(([tasksRes, occRes]) => {
+      .then(([tasksRes, occRes, deptRes, usersRes]) => {
         setTasks(tasksRes.tasks || [])
         setOccurrences(occRes.occurrences || [])
+        setDepartments(deptRes.departments || [])
+        setUsers(usersRes.users || [])
       })
       .catch(() => message.error('Failed to load checklist'))
       .finally(() => setLoading(false))
-  }, [selectedUserId, refNoParam, filter])
+  }, [selectedUserId, user?.id, refNoParam, filter, isAdmin])
 
   useEffect(() => {
     setReferenceNoFilter('__all__')
   }, [selectedUserId])
-
-  useEffect(() => {
-    loadChecklistData()
-  }, [loadChecklistData])
 
   // Default user filter to logged-in user (admins see their tasks first; can change to another user)
   useEffect(() => {
@@ -86,16 +89,11 @@ export const ChecklistPage = () => {
     }
   }, [user?.id])
 
-  // Load departments and users in parallel on mount (non-blocking for table)
+  // Single batch load when we have an effective user (avoids double load; ~1s target)
   useEffect(() => {
-    const promises: Promise<void>[] = [
-      checklistApi.getDepartments().then((r) => setDepartments(r.departments || [])).catch(() => setDepartments([])),
-    ]
-    if (isAdmin) {
-      promises.push(checklistApi.getUsers().then((r) => setUsers(r.users || [])).catch(() => setUsers([])))
-    }
-    promises.forEach((p) => p.catch(() => {}))
-  }, [isAdmin])
+    if (!effectiveUserId) return
+    loadChecklistData()
+  }, [effectiveUserId, loadChecklistData])
 
   const referenceNoOptions = [
     { label: 'All', value: '__all__' },

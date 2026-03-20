@@ -47,4 +47,8 @@ export const dashboardApi = {
     const r = await apiClient.get<{ count: number }>('/activity/count')
     return r.data?.count ?? 0
   },
+  getPaymentActions: async (): Promise<{ items: Array<{ client_payment_id: string; company_name?: string; invoice_number?: string; reference_no?: string; invoice_date?: string | null; invoice_amount?: string | null; genre?: string | null }> }> => {
+    const r = await apiClient.get<{ items: Array<{ client_payment_id: string; company_name?: string; invoice_number?: string; reference_no?: string; invoice_date?: string | null; invoice_amount?: string | null; genre?: string | null }> }>('/dashboard/payment-actions')
+    return r.data
+  },
 }

@@ -46,17 +46,68 @@ def _normalize_role(name: str | None) -> str:
     return "user"
 
 
+# Role resolution: Admin/Master Admin pages fire many parallel API calls; each used 2 DB round-trips.
+# TTL cache + per-user lock (singleflight) keeps ~1s load when opening Checklist/Delegation/Dashboard.
+_ROLE_CACHE_TTL_SEC = float(os.getenv("ROLE_CACHE_TTL_SEC", "120"))
+_role_cache: dict[str, tuple[str, float]] = {}
+_role_cache_lock = threading.Lock()
+_role_fetch_locks: dict[str, threading.Lock] = {}
+_role_fetch_master = threading.Lock()
+
+
+def _role_fetch_lock(user_id: str) -> threading.Lock:
+    with _role_fetch_master:
+        if user_id not in _role_fetch_locks:
+            _role_fetch_locks[user_id] = threading.Lock()
+        return _role_fetch_locks[user_id]
+
+
 def _get_role_from_profile(user_id: str) -> str:
-    """Fetch user profile and return frontend role name (master_admin, admin, approver, user)."""
-    try:
-        profile = supabase.table("user_profiles").select("role_id").eq("id", user_id).single().execute()
-        if not profile.data:
-            return "user"
-        role_row = supabase.table("roles").select("name").eq("id", profile.data["role_id"]).single().execute()
-        role_name = role_row.data["name"] if role_row.data else "user"
-        return _normalize_role(role_name)
-    except Exception:
-        return "user"
+    """Resolve frontend role with TTL cache and singleflight; prefer one PostgREST embed when FK exists."""
+    now = time.monotonic()
+    ttl = _ROLE_CACHE_TTL_SEC
+    with _role_cache_lock:
+        hit = _role_cache.get(user_id)
+        if hit and now < hit[1]:
+            return hit[0]
+
+    lock = _role_fetch_lock(user_id)
+    with lock:
+        now = time.monotonic()
+        with _role_cache_lock:
+            hit = _role_cache.get(user_id)
+            if hit and now < hit[1]:
+                return hit[0]
+
+        role = "user"
+        try:
+            r = supabase.table("user_profiles").select("roles(name)").eq("id", user_id).single().execute()
+            if r.data:
+                roles_obj = r.data.get("roles")
+                role_name = None
+                if isinstance(roles_obj, dict):
+                    role_name = roles_obj.get("name")
+                elif isinstance(roles_obj, list) and roles_obj:
+                    role_name = (roles_obj[0] or {}).get("name")
+                role = _normalize_role(role_name)
+            else:
+                role = "user"
+        except Exception:
+            try:
+                profile = supabase.table("user_profiles").select("role_id").eq("id", user_id).single().execute()
+                if not profile.data:
+                    role = "user"
+                else:
+                    role_row = supabase.table("roles").select("name").eq("id", profile.data["role_id"]).single().execute()
+                    role_name = role_row.data["name"] if role_row.data else "user"
+                    role = _normalize_role(role_name)
+            except Exception:
+                role = "user"
+
+        expires = time.monotonic() + ttl
+        with _role_cache_lock:
+            _role_cache[user_id] = (role, expires)
+        return role
 
 
 async def get_current_user_with_role(auth: dict = Depends(get_current_user)) -> dict:
@@ -3470,27 +3521,32 @@ def _get_client_payment_max_followup(client_payment_ids: list) -> dict:
     return out
 
 
+# Columns needed for list (avoid SELECT *)
+_OCP_LIST_COLUMNS = "id,timestamp,reference_no,company_name,invoice_date,invoice_amount,invoice_number,genre,stage,payment_received_date"
+_LIST_CLIENT_PAYMENT_LIMIT = 500
+
+
 @api_router.get("/onboarding/client-payment")
 def list_client_payment(auth: dict = Depends(get_current_user), status: str = None, section: str = None):
     """List Raised Invoices. status=open (default): Payment Management (no payment received). status=completed&section=Gener|Q-Comp|M-Comp|HF-Comp: completed by genre."""
     try:
-        r = supabase.table("onboarding_client_payment").select("*").order("timestamp", desc=True).execute()
-        items = r.data or []
-        # Filter by status/section
+        q = supabase.table("onboarding_client_payment").select(_OCP_LIST_COLUMNS).order("timestamp", desc=True)
         if status == "completed" and section:
-            # Gener = General (Y or not M/Q/HY); Q-Comp = Q; M-Comp = M; HF-Comp = HY
-            items = [x for x in items if x.get("payment_received_date")]
-            if section == "Gener":
-                items = [x for x in items if (x.get("genre") == "Y" or x.get("genre") not in ("M", "Q", "HY"))]
-            elif section == "Q-Comp":
-                items = [x for x in items if x.get("genre") == "Q"]
+            q = q.not_.is_("payment_received_date", "null")
+            if section == "Q-Comp":
+                q = q.eq("genre", "Q")
             elif section == "M-Comp":
-                items = [x for x in items if x.get("genre") == "M"]
+                q = q.eq("genre", "M")
             elif section == "HF-Comp":
-                items = [x for x in items if x.get("genre") == "HY"]
+                q = q.eq("genre", "HY")
+            # Gener = General (Y or not M/Q/HY): filter in Python
         else:
-            # Default: open (Payment Management) – no payment received
-            items = [x for x in items if not x.get("payment_received_date")]
+            q = q.is_("payment_received_date", "null")
+        q = q.limit(_LIST_CLIENT_PAYMENT_LIMIT)
+        r = q.execute()
+        items = r.data or []
+        if status == "completed" and section and section == "Gener":
+            items = [x for x in items if (x.get("genre") == "Y" or x.get("genre") not in ("M", "Q", "HY"))]
         ids = [str(row.get("id")) for row in items if row.get("id")]
         ids_with_sent = _get_client_payment_ids_with_sent(ids)
         max_followup = _get_client_payment_max_followup(ids)
@@ -4049,16 +4105,47 @@ def get_client_payment_intercept(client_payment_id: str, auth: dict = Depends(ge
         r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
-            return {"data": {"last_remark_user": None, "usage_last_1_month": None, "contact_person": None, "contact_number": None}, "submitted": False}
+            return {
+                "data": {
+                    "last_remark_user": None,
+                    "usage_last_1_month": None,
+                    "contact_person": None,
+                    "contact_number": None,
+                    "tagged_user_id": None,
+                    "tagged_user_name": None,
+                    "tagged_user_email": None,
+                },
+                "submitted": False,
+                "editable_24h": True,
+            }
+
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
+        editable_24h = True
+        try:
+            editable_until = row.get("editable_until")
+            created_by = row.get("created_by")
+            if not is_admin and editable_until and created_by == auth["id"]:
+                d = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
+                editable_24h = d >= datetime.now(timezone.utc)
+            elif not is_admin and editable_until:
+                # Non-admins can only edit their own within the window
+                editable_24h = False
+        except Exception:
+            editable_24h = False
         return {
             "data": {
                 "last_remark_user": row.get("last_remark_user"),
                 "usage_last_1_month": row.get("usage_last_1_month"),
                 "contact_person": row.get("contact_person"),
                 "contact_number": row.get("contact_number"),
+                "tagged_user_id": row.get("tagged_user_id"),
+                "tagged_user_name": row.get("tagged_user_name"),
+                "tagged_user_email": row.get("tagged_user_email"),
             },
             "submitted": True,
             "created_at": row.get("created_at"),
+            "editable_24h": True if is_admin else editable_24h,
         }
     except Exception as e:
         _log(f"get client payment intercept: {e}")
@@ -4075,25 +4162,131 @@ def save_client_payment_intercept(client_payment_id: str, payload: dict, auth: d
     usage_last_1_month = (data.get("usage_last_1_month") or "").strip() or None
     contact_person = (data.get("contact_person") or "").strip() or None
     contact_number = (data.get("contact_number") or "").strip() or None
-    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    tagged_user_id = (data.get("tagged_user_id") or "").strip() or None
+    tagged_user_name = (data.get("tagged_user_name") or "").strip() or None
+    tagged_user_email = (data.get("tagged_user_email") or "").strip() or None
+
+    now_dt = datetime.now(timezone.utc)
+    now_iso = now_dt.isoformat().replace("+00:00", "Z")
+    editable_until_iso = (now_dt + timedelta(hours=24)).isoformat().replace("+00:00", "Z")
     try:
-        r = supabase.table("onboarding_client_payment_intercept").select("id").eq("client_payment_id", client_payment_id).limit(1).execute()
+        r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
+
         if row:
+            editable_until = row.get("editable_until")
+            created_by = row.get("created_by")
+            can_edit = False
+            if is_admin:
+                can_edit = True
+            elif created_by == auth["id"] and editable_until:
+                try:
+                    d = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
+                    if d >= now_dt:
+                        can_edit = True
+                except Exception:
+                    can_edit = False
+            if not can_edit:
+                raise HTTPException(403, "Intercept Requirements can only be edited within 24 hours")
+
             supabase.table("onboarding_client_payment_intercept").update({
                 "last_remark_user": last_remark_user, "usage_last_1_month": usage_last_1_month,
                 "contact_person": contact_person, "contact_number": contact_number, "updated_at": now_iso,
+                "tagged_user_id": tagged_user_id,
+                "tagged_user_name": tagged_user_name,
+                "tagged_user_email": tagged_user_email,
             }).eq("id", row["id"]).execute()
         else:
             supabase.table("onboarding_client_payment_intercept").insert({
                 "client_payment_id": client_payment_id, "last_remark_user": last_remark_user,
                 "usage_last_1_month": usage_last_1_month, "contact_person": contact_person, "contact_number": contact_number,
                 "created_by": auth.get("id"), "created_at": now_iso,
+                "editable_until": editable_until_iso,
+                "tagged_user_id": tagged_user_id,
+                "tagged_user_name": tagged_user_name,
+                "tagged_user_email": tagged_user_email,
             }).execute()
-        return {"data": {"last_remark_user": last_remark_user, "usage_last_1_month": usage_last_1_month, "contact_person": contact_person, "contact_number": contact_number}, "created_at": now_iso}
+        return {
+            "data": {
+                "last_remark_user": last_remark_user,
+                "usage_last_1_month": usage_last_1_month,
+                "contact_person": contact_person,
+                "contact_number": contact_number,
+                "tagged_user_id": tagged_user_id,
+                "tagged_user_name": tagged_user_name,
+                "tagged_user_email": tagged_user_email,
+            },
+            "created_at": now_iso,
+            "editable_24h": True if is_admin else True,
+        }
     except Exception as e:
         _log(f"save client payment intercept: {e}")
         raise HTTPException(400, str(e)[:200])
+
+
+@api_router.get("/users/options")
+def list_user_options(auth: dict = Depends(require_roles(["admin", "master_admin"]))):
+    """Lightweight list of registered users for dropdowns (id, full_name, email)."""
+    try:
+        r = supabase.table("users_view").select("id, full_name, email, is_active, created_at").order("created_at", desc=True).execute()
+        rows = [x for x in (r.data or []) if x and x.get("id") and x.get("is_active", True)]
+        return {
+            "items": [
+                {"id": str(x["id"]), "full_name": x.get("full_name") or "", "email": x.get("email") or ""}
+                for x in rows
+            ]
+        }
+    except Exception as e:
+        _log(f"list user options: {e}")
+        return {"items": []}
+
+
+@api_router.get("/dashboard/payment-actions")
+def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"]))):
+    """Items tagged to the current Master Admin from Client Payment Intercept."""
+    user_id = auth.get("id")
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_intercept")
+            .select("client_payment_id, tagged_user_id, created_at")
+            .eq("tagged_user_id", user_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        intercept_rows = r.data or []
+        ids = [str(x.get("client_payment_id")) for x in intercept_rows if x.get("client_payment_id")]
+        if not ids:
+            return {"items": []}
+        p = (
+            supabase.table("onboarding_client_payment")
+            .select("id, company_name, invoice_number, reference_no, invoice_date, invoice_amount, genre")
+            .in_("id", ids)
+            .execute()
+        )
+        by_id = {str(x.get("id")): x for x in (p.data or []) if x and x.get("id")}
+        out = []
+        for cid in ids:
+            row = by_id.get(cid)
+            if not row:
+                continue
+            out.append(
+                {
+                    "client_payment_id": cid,
+                    "company_name": row.get("company_name"),
+                    "invoice_number": row.get("invoice_number"),
+                    "reference_no": row.get("reference_no"),
+                    "invoice_date": row.get("invoice_date"),
+                    "invoice_amount": row.get("invoice_amount"),
+                    "genre": row.get("genre"),
+                }
+            )
+        return {"items": out}
+    except Exception as e:
+        _log(f"dashboard payment actions: {e}")
+        return {"items": []}
 
 
 @api_router.get("/onboarding/client-payment/{client_payment_id}/discontinuation")
@@ -4116,6 +4309,93 @@ def get_client_payment_discontinuation(client_payment_id: str, auth: dict = Depe
     except Exception as e:
         _log(f"get client payment discontinuation: {e}")
         return {"data": {}, "submitted": False}
+
+
+@api_router.get("/onboarding/client-payment/{client_payment_id}/drawer")
+def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_current_user)):
+    """Batch load sent, followups, intercept, discontinuation in one request (reduces 4 round-trips to 1)."""
+    now_dt = datetime.now(timezone.utc)
+    out = {"sent": None, "followups": None, "intercept": None, "discontinuation": None}
+
+    # 1) Sent
+    try:
+        r = supabase.table("onboarding_client_payment_sent").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if not row:
+            now_iso = now_dt.isoformat().replace("+00:00", "Z")
+            editable_until = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat().replace("+00:00", "Z")
+            out["sent"] = {"data": {"email_sent": False, "email": None, "courier_sent": False, "tracking_details": None, "whatsapp_sent": False, "whatsapp_number": None, "invoice_number": None}, "created_at": now_iso, "editable_until": editable_until, "editable_24h": True, "submitted": False}
+        else:
+            out["sent"] = {
+                "data": {"email_sent": bool(row.get("email_sent")), "email": row.get("email"), "courier_sent": bool(row.get("courier_sent")), "tracking_details": row.get("tracking_details"), "whatsapp_sent": bool(row.get("whatsapp_sent")), "whatsapp_number": row.get("whatsapp_number"), "invoice_number": row.get("invoice_number")},
+                "created_at": row.get("created_at"), "editable_until": row.get("editable_until"),
+                "editable_24h": bool(row.get("editable_until") and datetime.fromisoformat(str(row.get("editable_until")).replace("Z", "+00:00")) >= now_dt),
+                "submitted": True,
+            }
+    except Exception as e:
+        _log(f"drawer sent: {e}")
+        out["sent"] = {"data": {}, "created_at": None, "editable_until": None, "editable_24h": False, "submitted": False}
+
+    # 2) Followups
+    try:
+        r = supabase.table("onboarding_client_payment_followups").select("*").eq("client_payment_id", client_payment_id).order("followup_no", desc=False).execute()
+        rows = r.data or []
+        items = []
+        for row in rows:
+            editable_24h = False
+            if row.get("editable_until"):
+                try:
+                    editable_24h = datetime.fromisoformat(str(row["editable_until"]).replace("Z", "+00:00")) >= now_dt
+                except Exception:
+                    pass
+            items.append({"followup_no": row.get("followup_no"), "contact_person": row.get("contact_person"), "remarks": row.get("remarks"), "mail_sent": bool(row.get("mail_sent")), "whatsapp_sent": bool(row.get("whatsapp_sent")), "created_at": row.get("created_at"), "editable_24h": editable_24h})
+        r1 = supabase.table("onboarding_client_payment_followup1").select("created_at, editable_until").eq("client_payment_id", client_payment_id).limit(1).execute()
+        if r1.data and len(r1.data) > 0 and not any(x.get("followup_no") == 1 for x in rows):
+            leg = r1.data[0]
+            editable_24h = bool(leg.get("editable_until") and datetime.fromisoformat(str(leg["editable_until"]).replace("Z", "+00:00")) >= now_dt)
+            items.append({"followup_no": 1, "contact_person": None, "remarks": None, "mail_sent": False, "whatsapp_sent": False, "created_at": leg.get("created_at"), "editable_24h": editable_24h})
+            items.sort(key=lambda x: x["followup_no"])
+        max_no = max([x["followup_no"] for x in items], default=0)
+        out["followups"] = {"items": items, "next_followup_no": min(max_no + 1, 11)}
+    except Exception as e:
+        _log(f"drawer followups: {e}")
+        out["followups"] = {"items": [], "next_followup_no": 1}
+
+    # 3) Intercept
+    try:
+        r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if not row:
+            out["intercept"] = {"data": {"last_remark_user": None, "usage_last_1_month": None, "contact_person": None, "contact_number": None, "tagged_user_id": None, "tagged_user_name": None, "tagged_user_email": None}, "submitted": False, "editable_24h": True}
+        else:
+            role = _get_role_from_profile(auth["id"])
+            is_admin = role in ("admin", "master_admin")
+            editable_24h = True
+            if not is_admin and row.get("editable_until") and row.get("created_by") == auth["id"]:
+                try:
+                    editable_24h = datetime.fromisoformat(str(row["editable_until"]).replace("Z", "+00:00")) >= now_dt
+                except Exception:
+                    editable_24h = False
+            elif not is_admin and row.get("editable_until"):
+                editable_24h = False
+            out["intercept"] = {"data": {"last_remark_user": row.get("last_remark_user"), "usage_last_1_month": row.get("usage_last_1_month"), "contact_person": row.get("contact_person"), "contact_number": row.get("contact_number"), "tagged_user_id": row.get("tagged_user_id"), "tagged_user_name": row.get("tagged_user_name"), "tagged_user_email": row.get("tagged_user_email")}, "submitted": True, "created_at": row.get("created_at"), "editable_24h": True if is_admin else editable_24h}
+    except Exception as e:
+        _log(f"drawer intercept: {e}")
+        out["intercept"] = {"data": {}, "submitted": False, "editable_24h": True}
+
+    # 4) Discontinuation
+    try:
+        r = supabase.table("onboarding_client_payment_discontinuation").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if not row:
+            out["discontinuation"] = {"data": {"mail_sent_to": None, "mail_sent_on": None, "remarks": None}, "submitted": False}
+        else:
+            out["discontinuation"] = {"data": {"mail_sent_to": row.get("mail_sent_to"), "mail_sent_on": row.get("mail_sent_on"), "remarks": row.get("remarks")}, "submitted": True, "created_at": row.get("created_at")}
+    except Exception as e:
+        _log(f"drawer discontinuation: {e}")
+        out["discontinuation"] = {"data": {}, "submitted": False}
+
+    return out
 
 
 @api_router.post("/onboarding/client-payment/{client_payment_id}/discontinuation")
@@ -6624,12 +6904,13 @@ def list_checklist_tasks(
             user_id = auth["id"]
         elif user_id is None:
             user_id = auth["id"]  # default to own tasks for admins too
-        q = supabase.table("checklist_tasks").select("*")
+        cols = "id, task_name, doer_id, department, frequency, start_date, created_by, created_at, reference_no"
+        q = supabase.table("checklist_tasks").select(cols)
         if user_id:
             q = q.eq("doer_id", user_id)
         if reference_no:
             q = q.eq("reference_no", reference_no)
-        r = q.order("created_at", desc=True).execute()
+        r = q.order("created_at", desc=True).limit(500).execute()
         tasks = r.data or []
         doer_ids = list({t["doer_id"] for t in tasks if t.get("doer_id")})
         doer_map = {}
@@ -6666,19 +6947,22 @@ def list_checklist_occurrences(
             user_id = auth["id"]
         elif user_id is None:
             user_id = auth["id"]  # default to own tasks for admins too
-        q = supabase.table("checklist_tasks").select("*")
+        cols = "id, task_name, doer_id, department, frequency, start_date, reference_no"
+        q = supabase.table("checklist_tasks").select(cols)
         if user_id:
             q = q.eq("doer_id", user_id)
         if reference_no:
             q = q.eq("reference_no", reference_no)
         r = q.execute()
         tasks = r.data or []
+        doer_ids = list({t.get("doer_id") for t in tasks if t.get("doer_id")})
         doer_map = {}
-        try:
-            prof = supabase.table("user_profiles").select("id, full_name").execute()
-            doer_map = {p["id"]: p.get("full_name", "") for p in (prof.data or [])}
-        except Exception:
-            pass
+        if doer_ids:
+            try:
+                prof = supabase.table("user_profiles").select("id, full_name").in_("id", doer_ids).execute()
+                doer_map = {p["id"]: p.get("full_name", "") for p in (prof.data or [])}
+            except Exception:
+                pass
         today = date.today()
         today_str = today.isoformat()
         # Only generate occurrence dates in the range needed for this filter (fast load)
@@ -6734,6 +7018,9 @@ def list_checklist_occurrences(
             occurrences = [o for o in occurrences if not o.get("completed_at")]
         elif filter_type == "upcoming":
             occurrences = [o for o in occurrences if not o.get("completed_at")]
+        # Cap response size for fast load (~1s target)
+        if len(occurrences) > 1000:
+            occurrences = occurrences[:1000]
         return {"occurrences": occurrences}
     except Exception as e:
         _log(f"checklist/occurrences error: {e}")
@@ -6775,7 +7062,14 @@ def list_checklist_users(auth: dict = Depends(get_current_user), current: dict =
     if current.get("role") not in ("admin", "master_admin"):
         return {"users": []}
     try:
-        r = supabase.table("user_profiles").select("id, full_name").eq("is_active", True).order("full_name").execute()
+        r = (
+            supabase.table("user_profiles")
+            .select("id, full_name")
+            .eq("is_active", True)
+            .order("full_name")
+            .limit(500)
+            .execute()
+        )
         return {"users": r.data or []}
     except Exception:
         return {"users": []}
@@ -6801,7 +7095,14 @@ def list_delegation_users(auth: dict = Depends(get_current_user), current: dict 
     if current.get("role") not in ("admin", "master_admin", "approver"):
         return {"users": []}
     try:
-        r = supabase.table("user_profiles").select("id, full_name").eq("is_active", True).order("full_name").execute()
+        r = (
+            supabase.table("user_profiles")
+            .select("id, full_name")
+            .eq("is_active", True)
+            .order("full_name")
+            .limit(500)
+            .execute()
+        )
         return {"users": r.data or []}
     except Exception:
         return {"users": []}
@@ -6817,7 +7118,8 @@ def list_delegation_tasks(
 ):
     """List delegation tasks. Default status=pending. By default show logged-in user's tasks; Admin/Master can choose another user or All."""
     try:
-        q = supabase.table("delegation_tasks").select("*")
+        cols = "id, title, assignee_id, due_date, status, created_at, delegation_on, submission_date, has_document, document_url, submitted_by, reference_no, completed_at"
+        q = supabase.table("delegation_tasks").select(cols)
         role = current.get("role", "user")
         if role not in ("admin", "master_admin", "approver"):
             q = q.eq("assignee_id", auth["id"])
@@ -6835,7 +7137,7 @@ def list_delegation_tasks(
             q = q.eq("status", status or "pending")
         if reference_no:
             q = q.eq("reference_no", reference_no)
-        r = q.order("due_date", desc=False).execute()
+        r = q.order("due_date", desc=False).limit(500).execute()
         tasks = r.data or []
         assignee_ids = {t["assignee_id"] for t in tasks if t.get("assignee_id")}
         submitted_by_ids = {t["submitted_by"] for t in tasks if t.get("submitted_by")}

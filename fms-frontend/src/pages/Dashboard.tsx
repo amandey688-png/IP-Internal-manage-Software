@@ -15,6 +15,7 @@ import { LoadingSpinner } from '../components/common/LoadingSpinner'
 import { PrintExport } from '../components/common/PrintExport'
 import { TICKET_EXPORT_COLUMNS, buildTicketExportRow, getChoresBugsCurrentStage } from '../utils/helpers'
 import { ROUTES } from '../utils/constants'
+import { useAuth } from '../hooks/useAuth'
 import type { Ticket } from '../api/tickets'
 import type { DashboardMetrics } from '../api/dashboard'
 
@@ -52,6 +53,7 @@ const metricCardColors = [
 
 export const Dashboard = () => {
   const navigate = useNavigate()
+  const { user } = useAuth()
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
   const [allFetchedTickets, setAllFetchedTickets] = useState<Ticket[]>([])
@@ -63,17 +65,31 @@ export const Dashboard = () => {
   const [detailLoading, setDetailLoading] = useState(false)
   const [activeLeads, setActiveLeads] = useState<ActiveLeadRow[]>([])
   const [activeLeadsLoading, setActiveLeadsLoading] = useState(false)
+  const [paymentActions, setPaymentActions] = useState<Array<{ client_payment_id: string; company_name?: string; invoice_number?: string; reference_no?: string }>>([])
+  const [paymentActionsLoading, setPaymentActionsLoading] = useState(false)
 
   useEffect(() => {
     fetchData()
   }, [])
 
   useEffect(() => {
+    setPaymentActionsLoading(true)
     setActiveLeadsLoading(true)
-    leadsApi.listActive().then((res) => {
-      setActiveLeads(res.leads || [])
-    }).catch(() => setActiveLeads([])).finally(() => setActiveLeadsLoading(false))
-  }, [])
+    const isMasterAdmin = user?.role === 'master_admin'
+    const isSk = (user?.email || '').toLowerCase() === 'sk@industryprime.com'
+    const promises: Promise<void>[] = [
+      leadsApi.listActive().then((res) => setActiveLeads(res.leads || [])).catch(() => setActiveLeads([])),
+    ]
+    if (isMasterAdmin || isSk) {
+      promises.push(
+        dashboardApi.getPaymentActions().then((res) => setPaymentActions(res.items || [])).catch(() => setPaymentActions([]))
+      )
+    }
+    Promise.all(promises).finally(() => {
+      setPaymentActionsLoading(false)
+      setActiveLeadsLoading(false)
+    })
+  }, [user?.role, user?.email])
 
   const fetchData = async () => {
     setLoading(true)
@@ -256,6 +272,41 @@ export const Dashboard = () => {
           </Col>
         ))}
       </Row>
+
+      {(user?.role === 'master_admin' || (user?.email || '').toLowerCase() === 'sk@industryprime.com') && (
+        <>
+          <Title level={4} style={{ marginBottom: 16, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>
+            Payment Action
+          </Title>
+          <Card
+            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff', marginBottom: 28 }}
+            bodyStyle={{ padding: 16 }}
+          >
+            <Table
+              size="small"
+              loading={paymentActionsLoading}
+              dataSource={paymentActions}
+              rowKey="client_payment_id"
+              pagination={false}
+              columns={[
+                { title: 'Company', dataIndex: 'company_name', key: 'company_name', render: (v: string) => v || '—' },
+                { title: 'Invoice Number', dataIndex: 'invoice_number', key: 'invoice_number', render: (v: string) => v || '—' },
+                { title: 'Reference', dataIndex: 'reference_no', key: 'reference_no', render: (v: string) => v || '—' },
+                {
+                  title: 'Action',
+                  key: 'action',
+                  render: () => (
+                    <Button size="small" type="link" onClick={() => navigate(ROUTES.CLIENT_PAYMENT)}>
+                      Open Client Payment
+                    </Button>
+                  ),
+                },
+              ]}
+              locale={{ emptyText: 'No tagged intercept actions.' }}
+            />
+          </Card>
+        </>
+      )}
 
       {/* Trends row */}
       <Row gutter={[20, 20]}>

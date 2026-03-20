@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Card,
   Typography,
@@ -50,18 +50,6 @@ export const DelegationPage = () => {
   const [uploadingDoc, setUploadingDoc] = useState(false)
   const [editModalTask, setEditModalTask] = useState<DelegationTask | null>(null)
 
-  useEffect(() => {
-    loadTasks()
-  }, [statusFilter, userFilter])
-
-  useEffect(() => {
-    if (canManage) {
-      delegationApi.getUsers().then((r) => setUsers(r.users || [])).catch(() => setUsers([]))
-    } else if (user?.id) {
-      setUsers([{ id: user.id, full_name: user.full_name || user.email || 'You' }])
-    }
-  }, [canManage, user?.id, user?.full_name, user?.email])
-
   // Default task filter to logged-in user (so first load shows "my tasks"); admins can change to another user or All
   useEffect(() => {
     if (canManage && user?.id && !initialUserFilterSet.current) {
@@ -70,21 +58,31 @@ export const DelegationPage = () => {
     }
   }, [canManage, user?.id])
 
-  const loadTasks = () => {
+  const loadTasks = useCallback(() => {
     setLoading(true)
     const params: { status?: string; assignee_id?: string } = {}
     params.status = statusFilter
     if (canManage) {
       if (userFilter === '__all__') params.assignee_id = '__all__'
       else if (userFilter) params.assignee_id = userFilter
-      // else no assignee_id: backend defaults to logged-in user's tasks
     }
-    delegationApi
-      .getTasks(params)
-      .then((r) => setTasks(r.tasks || []))
+    const tasksPromise = delegationApi.getTasks(params)
+    const usersPromise = canManage
+      ? delegationApi.getUsers()
+      : Promise.resolve({ users: [] as { id: string; full_name: string }[] })
+    Promise.all([tasksPromise, usersPromise])
+      .then(([tasksRes, usersRes]) => {
+        setTasks(tasksRes.tasks || [])
+        if (canManage) setUsers(usersRes.users || [])
+        else if (user?.id) setUsers([{ id: user.id, full_name: user.full_name || user.email || 'You' }])
+      })
       .catch(() => message.error('Failed to load delegation tasks'))
       .finally(() => setLoading(false))
-  }
+  }, [statusFilter, userFilter, canManage, user?.id, user?.full_name, user?.email])
+
+  useEffect(() => {
+    if (!canManage || userFilter !== undefined) loadTasks()
+  }, [loadTasks, canManage, userFilter])
 
   const displayTasks = referenceNoFilter && referenceNoFilter !== '__all__'
     ? tasks.filter((t) => t.reference_no === referenceNoFilter)
