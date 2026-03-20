@@ -79,6 +79,9 @@ export function ClientPaymentPage() {
     tagged_user_id?: string | null
     tagged_user_name?: string | null
     tagged_user_email?: string | null
+    payment_action_person?: string | null
+    payment_action_remarks?: string | null
+    payment_action_submitted_at?: string | null
   } | null>(null)
   const [interceptEditable, setInterceptEditable] = useState(true)
   const [interceptModalOpen, setInterceptModalOpen] = useState(false)
@@ -239,6 +242,9 @@ export function ClientPaymentPage() {
           tagged_user_id: i.tagged_user_id ?? null,
           tagged_user_name: i.tagged_user_name ?? null,
           tagged_user_email: i.tagged_user_email ?? null,
+          payment_action_person: i.payment_action_person ?? null,
+          payment_action_remarks: i.payment_action_remarks ?? null,
+          payment_action_submitted_at: i.payment_action_submitted_at ?? null,
         })
         setDiscontinuationSubmitted(!!discontinuationRes?.submitted)
         const d = discontinuationRes?.data || {}
@@ -692,30 +698,47 @@ export function ClientPaymentPage() {
                   </Button>
                 )}
                 {sentSubmitted && !isCompleted && (nextFollowupNo > 3 || showInterceptByDate) && (
-                  interceptSubmitted ? (
-                    <div style={{ marginBottom: 16 }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                        <Space><CheckCircleOutlined style={{ color: '#52c41a' }} /><span>Intercept Requirements</span></Space>
-                        <Space size={8}>
-                          <Button size="small" onClick={openInterceptTag}>Tag</Button>
-                          {interceptEditable ? (
-                            <Button type="link" size="small" icon={<EditOutlined />} onClick={openIntercept}>Edit</Button>
-                          ) : (
-                            <Button type="link" size="small" onClick={openIntercept}>View</Button>
-                          )}
-                        </Space>
+                  <>
+                    {interceptSubmitted ? (
+                      <div style={{ marginBottom: 16 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                          <Space><CheckCircleOutlined style={{ color: '#52c41a' }} /><span>Intercept Requirements</span></Space>
+                          <Space size={8}>
+                            <Button size="small" onClick={openInterceptTag}>Tag</Button>
+                            {interceptEditable ? (
+                              <Button type="link" size="small" icon={<EditOutlined />} onClick={openIntercept}>Edit</Button>
+                            ) : (
+                              <Button type="link" size="small" onClick={openIntercept}>View</Button>
+                            )}
+                          </Space>
+                        </div>
+                        <Descriptions column={1} size="small" bordered>
+                          <Descriptions.Item label="Last Remark of User">{interceptDetails?.last_remark_user || '—'}</Descriptions.Item>
+                          <Descriptions.Item label="Usage Details (Last 1 Month)">{interceptDetails?.usage_last_1_month || '—'}</Descriptions.Item>
+                          <Descriptions.Item label="Contact Person">{interceptDetails?.contact_person || '—'}</Descriptions.Item>
+                          <Descriptions.Item label="Contact Number">{interceptDetails?.contact_number || '—'}</Descriptions.Item>
+                          <Descriptions.Item label="Tag">{interceptDetails?.tagged_user_name || interceptDetails?.tagged_user_email || '—'}</Descriptions.Item>
+                        </Descriptions>
                       </div>
-                      <Descriptions column={1} size="small" bordered>
-                        <Descriptions.Item label="Last Remark of User">{interceptDetails?.last_remark_user || '—'}</Descriptions.Item>
-                        <Descriptions.Item label="Usage Details (Last 1 Month)">{interceptDetails?.usage_last_1_month || '—'}</Descriptions.Item>
-                        <Descriptions.Item label="Contact Person">{interceptDetails?.contact_person || '—'}</Descriptions.Item>
-                        <Descriptions.Item label="Contact Number">{interceptDetails?.contact_number || '—'}</Descriptions.Item>
-                        <Descriptions.Item label="Tag">{interceptDetails?.tagged_user_name || interceptDetails?.tagged_user_email || '—'}</Descriptions.Item>
-                      </Descriptions>
-                    </div>
-                  ) : (
-                    <Button type="default" block icon={<FormOutlined />} onClick={openIntercept} size="large" style={{ marginBottom: 16 }}>Intercept Requirements</Button>
-                  )
+                    ) : (
+                      <Button type="default" block icon={<FormOutlined />} onClick={openIntercept} size="large" style={{ marginBottom: 16 }}>Intercept Requirements</Button>
+                    )}
+                    {interceptSubmitted &&
+                      !!(interceptDetails?.tagged_user_id || interceptDetails?.tagged_user_name || interceptDetails?.tagged_user_email) && (
+                        <div style={{ marginBottom: 16 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                            <Space><CheckCircleOutlined style={{ color: '#52c41a' }} /><span>Client Payment</span></Space>
+                          </div>
+                          <Descriptions column={1} size="small" bordered>
+                            <Descriptions.Item label="Tag (user)">
+                              {interceptDetails?.tagged_user_name || interceptDetails?.tagged_user_email || '—'}
+                            </Descriptions.Item>
+                            <Descriptions.Item label="Person">{interceptDetails?.payment_action_person || '—'}</Descriptions.Item>
+                            <Descriptions.Item label="Remarks">{interceptDetails?.payment_action_remarks || '—'}</Descriptions.Item>
+                          </Descriptions>
+                        </div>
+                      )}
+                  </>
                 )}
                 {sentSubmitted && !isCompleted && (nextFollowupNo > 3 || showDiscontinuationByDate) && (
                   discontinuationSubmitted ? (
