@@ -183,14 +183,20 @@ export function ClientPaymentPage() {
     setInterceptEditable(true)
     setDiscontinuationSubmitted(false)
     setDiscontinuationDetails(null)
-    Promise.all([
-      apiClient.get<{ data: any; editable_24h: boolean; submitted?: boolean }>(`/onboarding/client-payment/${record.id}/sent`),
-      apiClient.get<{ items: any[]; next_followup_no: number }>(`/onboarding/client-payment/${record.id}/followups`),
-      apiClient.get<{ data?: any; submitted?: boolean; editable_24h?: boolean }>(`/onboarding/client-payment/${record.id}/intercept`),
-      apiClient.get<{ data?: any; submitted?: boolean }>(`/onboarding/client-payment/${record.id}/discontinuation`),
-    ])
-      .then(([sentRes, followupsRes, interceptRes, discontinuationRes]) => {
-        const sentData = sentRes.data?.data || {}
+    type DrawerRes = {
+      sent?: { data?: any; editable_24h?: boolean; submitted?: boolean }
+      followups?: { items?: any[]; next_followup_no?: number }
+      intercept?: { data?: any; submitted?: boolean; editable_24h?: boolean }
+      discontinuation?: { data?: any; submitted?: boolean }
+    }
+    apiClient
+      .get<DrawerRes>(`/onboarding/client-payment/${record.id}/drawer`)
+      .then((res) => {
+        const sentRes = res.data?.sent
+        const followupsRes = res.data?.followups
+        const interceptRes = res.data?.intercept
+        const discontinuationRes = res.data?.discontinuation
+        const sentData = sentRes?.data || {}
         setSentSummary({
           email_sent: !!sentData.email_sent,
           courier_sent: !!sentData.courier_sent,
@@ -201,8 +207,8 @@ export function ClientPaymentPage() {
           tracking_details: sentData.tracking_details ?? null,
           whatsapp_number: sentData.whatsapp_number ?? null,
         })
-        setSentSubmitted(!!sentRes.data?.submitted)
-        setSentEditable(sentRes.data?.editable_24h ?? true)
+        setSentSubmitted(!!sentRes?.submitted)
+        setSentEditable(sentRes?.editable_24h ?? true)
         sentForm.setFieldsValue({
           email_sent: sentData.email_sent ?? false,
           email: sentData.email ?? '',
@@ -212,18 +218,19 @@ export function ClientPaymentPage() {
           whatsapp_number: sentData.whatsapp_number ?? '',
           invoice_number: record.invoice_number ?? sentData.invoice_number ?? '',
         })
-        setFollowupsItems(followupsRes.data?.items || [])
-        setNextFollowupNo(Math.min(followupsRes.data?.next_followup_no ?? 1, 11))
-        setFollowupSubmitted((followupsRes.data?.items?.length ?? 0) > 0)
-        const lastFu = (followupsRes.data?.items || []).slice(-1)[0]
+        const items = followupsRes?.items || []
+        setFollowupsItems(items)
+        setNextFollowupNo(Math.min(followupsRes?.next_followup_no ?? 1, 11))
+        setFollowupSubmitted(items.length > 0)
+        const lastFu = items.slice(-1)[0]
         if (lastFu) {
           setFollowupSummary({ contact_person: lastFu.contact_person ?? null, mail_sent: !!lastFu.mail_sent, whatsapp_sent: !!lastFu.whatsapp_sent })
           setFollowupDetails({ remarks: lastFu.remarks ?? null })
           setFollowupEditable(lastFu.editable_24h ?? false)
         }
-        setInterceptSubmitted(!!interceptRes.data?.submitted)
-        const i = interceptRes.data?.data || {}
-        setInterceptEditable(interceptRes.data?.editable_24h ?? true)
+        setInterceptSubmitted(!!interceptRes?.submitted)
+        const i = interceptRes?.data || {}
+        setInterceptEditable(interceptRes?.editable_24h ?? true)
         setInterceptDetails({
           last_remark_user: i.last_remark_user ?? null,
           usage_last_1_month: i.usage_last_1_month ?? null,
@@ -233,9 +240,8 @@ export function ClientPaymentPage() {
           tagged_user_name: i.tagged_user_name ?? null,
           tagged_user_email: i.tagged_user_email ?? null,
         })
-
-        setDiscontinuationSubmitted(!!discontinuationRes.data?.submitted)
-        const d = discontinuationRes.data?.data || {}
+        setDiscontinuationSubmitted(!!discontinuationRes?.submitted)
+        const d = discontinuationRes?.data || {}
         setDiscontinuationDetails({
           mail_sent_to: d.mail_sent_to ?? null,
           mail_sent_on: d.mail_sent_on ?? null,

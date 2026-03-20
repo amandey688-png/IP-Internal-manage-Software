@@ -73,22 +73,23 @@ export const Dashboard = () => {
   }, [])
 
   useEffect(() => {
+    setPaymentActionsLoading(true)
+    setActiveLeadsLoading(true)
     const isMasterAdmin = user?.role === 'master_admin'
     const isSk = (user?.email || '').toLowerCase() === 'sk@industryprime.com'
-    if (!isMasterAdmin && !isSk) return
-    setPaymentActionsLoading(true)
-    dashboardApi.getPaymentActions()
-      .then((res) => setPaymentActions(res.items || []))
-      .catch(() => setPaymentActions([]))
-      .finally(() => setPaymentActionsLoading(false))
+    const promises: Promise<void>[] = [
+      leadsApi.listActive().then((res) => setActiveLeads(res.leads || [])).catch(() => setActiveLeads([])),
+    ]
+    if (isMasterAdmin || isSk) {
+      promises.push(
+        dashboardApi.getPaymentActions().then((res) => setPaymentActions(res.items || [])).catch(() => setPaymentActions([]))
+      )
+    }
+    Promise.all(promises).finally(() => {
+      setPaymentActionsLoading(false)
+      setActiveLeadsLoading(false)
+    })
   }, [user?.role, user?.email])
-
-  useEffect(() => {
-    setActiveLeadsLoading(true)
-    leadsApi.listActive().then((res) => {
-      setActiveLeads(res.leads || [])
-    }).catch(() => setActiveLeads([])).finally(() => setActiveLeadsLoading(false))
-  }, [])
 
   const fetchData = async () => {
     setLoading(true)
