@@ -47,8 +47,38 @@ export const dashboardApi = {
     const r = await apiClient.get<{ count: number }>('/activity/count')
     return r.data?.count ?? 0
   },
-  getPaymentActions: async (): Promise<{ items: Array<{ client_payment_id: string; company_name?: string; invoice_number?: string; reference_no?: string; invoice_date?: string | null; invoice_amount?: string | null; genre?: string | null }> }> => {
-    const r = await apiClient.get<{ items: Array<{ client_payment_id: string; company_name?: string; invoice_number?: string; reference_no?: string; invoice_date?: string | null; invoice_amount?: string | null; genre?: string | null }> }>('/dashboard/payment-actions')
+  getPaymentActions: async (): Promise<{
+    items: Array<{
+      client_payment_id: string
+      company_name?: string
+      invoice_number?: string
+      reference_no?: string
+      invoice_date?: string | null
+      invoice_amount?: string | null
+      genre?: string | null
+      tagged_user_id?: string | null
+      tagged_user_name?: string | null
+      tagged_user_email?: string | null
+    }>
+  }> => {
+    const r = await apiClient.get<{
+      items: Array<{
+        client_payment_id: string
+        company_name?: string
+        invoice_number?: string
+        reference_no?: string
+        invoice_date?: string | null
+        invoice_amount?: string | null
+        genre?: string | null
+        tagged_user_id?: string | null
+        tagged_user_name?: string | null
+        tagged_user_email?: string | null
+      }>
+    }>('/dashboard/payment-actions')
+    return r.data
+  },
+  submitPaymentAction: async (body: { client_payment_id: string; person: string; remarks: string }): Promise<{ success: boolean }> => {
+    const r = await apiClient.post<{ success: boolean }>('/dashboard/payment-actions/submit', body)
     return r.data
   },
 }

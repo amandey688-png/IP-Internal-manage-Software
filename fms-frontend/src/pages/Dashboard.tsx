@@ -1,4 +1,4 @@
-import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Spin, Tag } from 'antd'
+import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Spin, Tag, Form, Input, message } from 'antd'
 import {
   FileTextOutlined,
   ClockCircleOutlined,
@@ -65,8 +65,25 @@ export const Dashboard = () => {
   const [detailLoading, setDetailLoading] = useState(false)
   const [activeLeads, setActiveLeads] = useState<ActiveLeadRow[]>([])
   const [activeLeadsLoading, setActiveLeadsLoading] = useState(false)
-  const [paymentActions, setPaymentActions] = useState<Array<{ client_payment_id: string; company_name?: string; invoice_number?: string; reference_no?: string }>>([])
+  const [paymentActions, setPaymentActions] = useState<
+    Array<{
+      client_payment_id: string
+      company_name?: string
+      invoice_number?: string
+      reference_no?: string
+      tagged_user_name?: string | null
+      tagged_user_email?: string | null
+    }>
+  >([])
   const [paymentActionsLoading, setPaymentActionsLoading] = useState(false)
+  const [paymentActionModalOpen, setPaymentActionModalOpen] = useState(false)
+  const [paymentActionRow, setPaymentActionRow] = useState<{
+    client_payment_id: string
+    company_name?: string
+    reference_no?: string
+  } | null>(null)
+  const [paymentActionSubmitting, setPaymentActionSubmitting] = useState(false)
+  const [paymentActionForm] = Form.useForm<{ person: string; remarks: string }>()
 
   useEffect(() => {
     fetchData()
@@ -293,11 +310,25 @@ export const Dashboard = () => {
                 { title: 'Invoice Number', dataIndex: 'invoice_number', key: 'invoice_number', render: (v: string) => v || '—' },
                 { title: 'Reference', dataIndex: 'reference_no', key: 'reference_no', render: (v: string) => v || '—' },
                 {
+                  title: 'Tagged User',
+                  key: 'tagged',
+                  render: (_: unknown, r: { tagged_user_name?: string | null; tagged_user_email?: string | null }) =>
+                    r.tagged_user_name || r.tagged_user_email || '—',
+                },
+                {
                   title: 'Action',
                   key: 'action',
-                  render: () => (
-                    <Button size="small" type="link" onClick={() => navigate(ROUTES.CLIENT_PAYMENT)}>
-                      Open Client Payment
+                  render: (_: unknown, row: { client_payment_id: string; company_name?: string; reference_no?: string }) => (
+                    <Button
+                      type="primary"
+                      size="small"
+                      onClick={() => {
+                        setPaymentActionRow(row)
+                        paymentActionForm.resetFields()
+                        setPaymentActionModalOpen(true)
+                      }}
+                    >
+                      Submit
                     </Button>
                   ),
                 },
@@ -475,6 +506,63 @@ export const Dashboard = () => {
             ]}
           />
         )}
+      </Modal>
+
+      <Modal
+        title="Payment Action"
+        open={paymentActionModalOpen}
+        onCancel={() => {
+          setPaymentActionModalOpen(false)
+          setPaymentActionRow(null)
+          paymentActionForm.resetFields()
+        }}
+        footer={null}
+        destroyOnClose
+        width={480}
+      >
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+          {paymentActionRow?.company_name || '—'} · {paymentActionRow?.reference_no || '—'}
+        </Text>
+        <Form
+          form={paymentActionForm}
+          layout="vertical"
+          onFinish={async (values) => {
+            if (!paymentActionRow?.client_payment_id) return
+            setPaymentActionSubmitting(true)
+            try {
+              await dashboardApi.submitPaymentAction({
+                client_payment_id: paymentActionRow.client_payment_id,
+                person: values.person?.trim() || '',
+                remarks: values.remarks?.trim() || '',
+              })
+              message.success('Saved. This row is cleared from Payment Action and visible under Client Payment.')
+              setPaymentActions((prev) => prev.filter((x) => x.client_payment_id !== paymentActionRow.client_payment_id))
+              setPaymentActionModalOpen(false)
+              setPaymentActionRow(null)
+              paymentActionForm.resetFields()
+            } catch (e: unknown) {
+              const err = e as { response?: { data?: { detail?: string } } }
+              message.error(err?.response?.data?.detail || 'Submit failed')
+            } finally {
+              setPaymentActionSubmitting(false)
+            }
+          }}
+        >
+          <Form.Item name="person" label="Person" rules={[{ required: true, message: 'Enter person name' }]}>
+            <Input placeholder="Person" />
+          </Form.Item>
+          <Form.Item name="remarks" label="Remarks" rules={[{ required: true, message: 'Enter remarks' }]}>
+            <Input.TextArea placeholder="Remarks" rows={4} />
+          </Form.Item>
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Button onClick={() => { setPaymentActionModalOpen(false); setPaymentActionRow(null) }} style={{ marginRight: 8 }}>
+              Cancel
+            </Button>
+            <Button type="primary" htmlType="submit" loading={paymentActionSubmitting}>
+              Submit
+            </Button>
+          </Form.Item>
+        </Form>
       </Modal>
 
     </div>

@@ -95,3 +95,9 @@ CORS_ORIGIN=https://industryprime.vercel.app
 (or `CORS_ORIGINS` comma-separated list including that URL)
 
 Restart/redeploy backend after changing env.
+
+---
+
+## Payment Action (Master Admin dashboard → Client Payment drawer)
+
+Run **`docs/SUPABASE_CLIENT_PAYMENT_PAYMENT_ACTION.sql`** in Supabase so the intercept table has `payment_action_person`, `payment_action_remarks`, `payment_action_submitted_at`, `payment_action_submitted_by`. Without this, dashboard **Payment Action** or **Submit** may fail against the database.

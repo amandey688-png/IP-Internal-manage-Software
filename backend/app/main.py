@@ -25,6 +25,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 import uuid
+import re
 import httpx
 from app.supabase_client import supabase, supabase_auth
 from app.auth_middleware import get_current_user, get_current_user_optional
@@ -4114,6 +4115,9 @@ def get_client_payment_intercept(client_payment_id: str, auth: dict = Depends(ge
                     "tagged_user_id": None,
                     "tagged_user_name": None,
                     "tagged_user_email": None,
+                    "payment_action_person": None,
+                    "payment_action_remarks": None,
+                    "payment_action_submitted_at": None,
                 },
                 "submitted": False,
                 "editable_24h": True,
@@ -4142,6 +4146,9 @@ def get_client_payment_intercept(client_payment_id: str, auth: dict = Depends(ge
                 "tagged_user_id": row.get("tagged_user_id"),
                 "tagged_user_name": row.get("tagged_user_name"),
                 "tagged_user_email": row.get("tagged_user_email"),
+                "payment_action_person": row.get("payment_action_person"),
+                "payment_action_remarks": row.get("payment_action_remarks"),
+                "payment_action_submitted_at": row.get("payment_action_submitted_at"),
             },
             "submitted": True,
             "created_at": row.get("created_at"),
@@ -4244,20 +4251,72 @@ def list_user_options(auth: dict = Depends(require_roles(["admin", "master_admin
         return {"items": []}
 
 
+class PaymentActionSubmitRequest(BaseModel):
+    client_payment_id: str
+    person: str
+    remarks: str
+
+
+@api_router.post("/dashboard/payment-actions/submit")
+def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, auth: dict = Depends(require_roles(["master_admin"]))):
+    """Record Person + Remarks from Payment Action dashboard; row then drops off dashboard and shows in Client Payment drawer."""
+    person = (payload.person or "").strip()
+    remarks = (payload.remarks or "").strip()
+    if not person:
+        raise HTTPException(400, "Person is required")
+    if not remarks:
+        raise HTTPException(400, "Remarks is required")
+    cid = (payload.client_payment_id or "").strip()
+    if not cid:
+        raise HTTPException(400, "client_payment_id is required")
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        r = supabase.table("onboarding_client_payment_intercept").select("id, tagged_user_id").eq("client_payment_id", cid).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if not row or not row.get("tagged_user_id"):
+            raise HTTPException(404, "Tagged intercept not found for this invoice")
+        supabase.table("onboarding_client_payment_intercept").update({
+            "payment_action_person": person,
+            "payment_action_remarks": remarks,
+            "payment_action_submitted_at": now_iso,
+            "payment_action_submitted_by": auth.get("id"),
+            "updated_at": now_iso,
+        }).eq("id", row["id"]).execute()
+        return {"success": True, "payment_action_submitted_at": now_iso}
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"dashboard payment action submit: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
 @api_router.get("/dashboard/payment-actions")
 def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"]))):
-    """Items tagged to the current Master Admin from Client Payment Intercept."""
-    user_id = auth.get("id")
+    """Tagged intercept rows not yet cleared via Payment Action Submit (Master Admin)."""
     try:
         r = (
             supabase.table("onboarding_client_payment_intercept")
-            .select("client_payment_id, tagged_user_id, created_at")
-            .eq("tagged_user_id", user_id)
+            .select(
+                "client_payment_id, tagged_user_id, tagged_user_name, tagged_user_email, created_at, payment_action_submitted_at"
+            )
+            .not_.is_("tagged_user_id", "null")
+            .is_("payment_action_submitted_at", "null")
             .order("created_at", desc=True)
+            .limit(500)
             .execute()
         )
-        intercept_rows = r.data or []
-        ids = [str(x.get("client_payment_id")) for x in intercept_rows if x.get("client_payment_id")]
+        intercept_rows = [x for x in (r.data or []) if x.get("tagged_user_id")]
+        seen: set[str] = set()
+        ordered_cids: list[str] = []
+        intercept_by_cid: dict[str, dict] = {}
+        for x in intercept_rows:
+            cid = str(x.get("client_payment_id") or "")
+            if not cid or cid in seen:
+                continue
+            seen.add(cid)
+            ordered_cids.append(cid)
+            intercept_by_cid[cid] = x
+        ids = ordered_cids
         if not ids:
             return {"items": []}
         p = (
@@ -4272,6 +4331,7 @@ def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"
             row = by_id.get(cid)
             if not row:
                 continue
+            it = intercept_by_cid.get(cid) or {}
             out.append(
                 {
                     "client_payment_id": cid,
@@ -4281,6 +4341,9 @@ def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"
                     "invoice_date": row.get("invoice_date"),
                     "invoice_amount": row.get("invoice_amount"),
                     "genre": row.get("genre"),
+                    "tagged_user_id": it.get("tagged_user_id"),
+                    "tagged_user_name": it.get("tagged_user_name"),
+                    "tagged_user_email": it.get("tagged_user_email"),
                 }
             )
         return {"items": out}
@@ -4366,7 +4429,7 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
         r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
-            out["intercept"] = {"data": {"last_remark_user": None, "usage_last_1_month": None, "contact_person": None, "contact_number": None, "tagged_user_id": None, "tagged_user_name": None, "tagged_user_email": None}, "submitted": False, "editable_24h": True}
+            out["intercept"] = {"data": {"last_remark_user": None, "usage_last_1_month": None, "contact_person": None, "contact_number": None, "tagged_user_id": None, "tagged_user_name": None, "tagged_user_email": None, "payment_action_person": None, "payment_action_remarks": None, "payment_action_submitted_at": None}, "submitted": False, "editable_24h": True}
         else:
             role = _get_role_from_profile(auth["id"])
             is_admin = role in ("admin", "master_admin")
@@ -4378,7 +4441,7 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
                     editable_24h = False
             elif not is_admin and row.get("editable_until"):
                 editable_24h = False
-            out["intercept"] = {"data": {"last_remark_user": row.get("last_remark_user"), "usage_last_1_month": row.get("usage_last_1_month"), "contact_person": row.get("contact_person"), "contact_number": row.get("contact_number"), "tagged_user_id": row.get("tagged_user_id"), "tagged_user_name": row.get("tagged_user_name"), "tagged_user_email": row.get("tagged_user_email")}, "submitted": True, "created_at": row.get("created_at"), "editable_24h": True if is_admin else editable_24h}
+            out["intercept"] = {"data": {"last_remark_user": row.get("last_remark_user"), "usage_last_1_month": row.get("usage_last_1_month"), "contact_person": row.get("contact_person"), "contact_number": row.get("contact_number"), "tagged_user_id": row.get("tagged_user_id"), "tagged_user_name": row.get("tagged_user_name"), "tagged_user_email": row.get("tagged_user_email"), "payment_action_person": row.get("payment_action_person"), "payment_action_remarks": row.get("payment_action_remarks"), "payment_action_submitted_at": row.get("payment_action_submitted_at")}, "submitted": True, "created_at": row.get("created_at"), "editable_24h": True if is_admin else editable_24h}
     except Exception as e:
         _log(f"drawer intercept: {e}")
         out["intercept"] = {"data": {}, "submitted": False, "editable_24h": True}
@@ -5971,28 +6034,49 @@ class POCCreateRequest(BaseModel):
     contact: str | None = None  # mandatory in UI
 
 
-def _generate_performance_reference(company_id: str) -> str:
-    """Generate reference_no: first 4 letters of company + 0001, 0002, etc per company."""
+_SUCC_REF_RE = re.compile(r"(?i)^SUCC-(\d+)$")
+
+
+def _sort_performance_list_rows(rows: list) -> None:
+    """Newest tickets first: SUCC-#### descending (highest ref at top); legacy non-SUCC refs after, by created_at."""
+    succ_pairs: list[tuple[int, dict]] = []
+    other: list[dict] = []
+    for r in rows:
+        ref = str((r or {}).get("reference_no") or "").strip()
+        m = _SUCC_REF_RE.match(ref)
+        if m:
+            succ_pairs.append((int(m.group(1)), r))
+        else:
+            other.append(r)
+    succ_pairs.sort(key=lambda x: -x[0])
+    other.sort(
+        key=lambda row: (str(row.get("created_at") or ""), str(row.get("id") or "")),
+        reverse=True,
+    )
+    rows[:] = [pair[1] for pair in succ_pairs] + other
+
+
+def _generate_performance_reference(_company_id: str) -> str:
+    """Global Success reference: SUCC-0001, SUCC-0002, … (all performance_monitoring rows)."""
+    _ = _company_id  # kept for API compatibility; numbering is global
+    prefix = "SUCC-"
     try:
-        r = supabase.table("companies").select("name").eq("id", company_id).single().execute()
-        name = (r.data or {}).get("name", "XXXX")
-        prefix = "".join(c for c in name.upper() if c.isalpha())[:4] or "XXXX"
-        rows = supabase.table("performance_monitoring").select("reference_no").eq("company_id", company_id).execute()
-        nums = []
-        for row in (rows.data or []):
-            ref = (row or {}).get("reference_no", "")
-            if ref.startswith(prefix) and ref[len(prefix):].isdigit():
-                nums.append(int(ref[len(prefix):]))
-        next_num = max(nums, default=0) + 1
-        return f"{prefix}{next_num:04d}"
+        r = supabase.table("performance_monitoring").select("reference_no").execute()
+        max_n = 0
+        for row in (r.data or []):
+            ref = str((row or {}).get("reference_no") or "").strip()
+            m = _SUCC_REF_RE.match(ref)
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+        return f"{prefix}{max_n + 1:04d}"
     except Exception as e:
         _log(f"generate_performance_reference fallback: {e}")
-        return f"PM{uuid.uuid4().hex[:6].upper()}"
+        return f"SUCC-{uuid.uuid4().hex[:4].upper()}"
 
 
 @api_router.post("/success/performance/poc")
 def create_poc_details(payload: POCCreateRequest, auth: dict = Depends(get_current_user)):
-    """Add POC details. Generates reference_no (e.g. INDU0001) per company. Requires database/SUCCESS_PERFORMANCE_MONITORING.sql."""
+    """Add POC details. Generates reference_no SUCC-0001, SUCC-0002, … (global). Requires performance_monitoring table."""
     if payload.message_owner not in ("yes", "no"):
         raise HTTPException(status_code=400, detail="message_owner must be yes or no")
     try:
@@ -6025,6 +6109,65 @@ def create_poc_details(payload: POCCreateRequest, auth: dict = Depends(get_curre
         raise HTTPException(status_code=400, detail=str(e)[:200])
 
 
+def _batch_current_stages_for_performance_rows(rows: list, training_rows: list, tf_rows: list) -> None:
+    """Fill current_stage on each row without N+1 Supabase calls (used by list endpoint)."""
+    if not rows:
+        return
+    perf_id_training = {str(t.get("performance_id")): t for t in (training_rows or []) if t.get("performance_id")}
+    training_id_to_perf = {str(t.get("id")): str(t.get("performance_id")) for t in (training_rows or []) if t.get("id") and t.get("performance_id")}
+    tfs_by_perf: dict[str, list] = defaultdict(list)
+    for frow in tf_rows or []:
+        tid = frow.get("training_id")
+        if tid is None:
+            continue
+        pid = training_id_to_perf.get(str(tid))
+        if pid:
+            tfs_by_perf[pid].append(frow)
+    all_feature_ids = list({f.get("feature_id") for lst in tfs_by_perf.values() for f in lst if f.get("feature_id")})
+    feature_names: dict = {}
+    if all_feature_ids:
+        try:
+            fl = supabase.table("feature_list").select("id, name").in_("id", all_feature_ids).execute()
+            feature_names = {x["id"]: x["name"] for x in (fl.data or [])}
+        except Exception:
+            pass
+    all_tf_ids = [f.get("id") for lst in tfs_by_perf.values() for f in lst if f.get("id")]
+    completed_tf_ids: set = set()
+    if all_tf_ids:
+        try:
+            fu = supabase.table("feature_followups").select("ticket_feature_id").in_("ticket_feature_id", all_tf_ids).eq("status", "completed").execute()
+            completed_tf_ids = {x.get("ticket_feature_id") for x in (fu.data or []) if x.get("ticket_feature_id")}
+        except Exception:
+            pass
+    for row in rows:
+        rid = str(row.get("id") or "")
+        cs = row.get("completion_status", "in_progress")
+        if cs == "completed":
+            row["current_stage"] = "Completed"
+            continue
+        if rid not in perf_id_training:
+            row["current_stage"] = "POC Added - Pending: Training"
+            continue
+        tfs = tfs_by_perf.get(rid, [])
+        if not tfs:
+            row["current_stage"] = "Training Done - Pending: Add Feature Committed for Use"
+            continue
+        completed_names = []
+        pending_names = []
+        for tf in tfs:
+            name = feature_names.get(tf.get("feature_id"), "")
+            if tf.get("id") in completed_tf_ids:
+                completed_names.append(name)
+            else:
+                pending_names.append(name)
+        total = len(tfs)
+        done = len(completed_names)
+        if pending_names:
+            row["current_stage"] = f"Followup: {done}/{total} completed - Pending: {', '.join(pending_names)}"
+        else:
+            row["current_stage"] = f"Followup: {done}/{total} completed"
+
+
 @api_router.get("/success/performance/list")
 def list_performance_poc(
     completion_status: str | None = None,
@@ -6040,24 +6183,28 @@ def list_performance_poc(
         r = q.order("created_at", desc=True).execute()
         rows = r.data or []
         ticket_ids = [row.get("id") for row in rows if row.get("id")]
-        # Enrich with training total_percentage and feature count
+        # Enrich with training total_percentage and feature count (batched; no per-row _compute_current_stage)
         training_map = {}
         feature_count_map = {}
+        training_rows: list = []
+        tf_rows: list = []
         if ticket_ids:
             try:
                 tr = supabase.table("performance_training").select("id, performance_id, total_percentage").in_("performance_id", ticket_ids).execute()
-                for t in tr.data or []:
-                    training_map[t["performance_id"]] = t.get("total_percentage")
-                training_ids = [t["id"] for t in (tr.data or []) if t.get("id")]
+                training_rows = tr.data or []
+                for t in training_rows:
+                    if t.get("performance_id"):
+                        training_map[t["performance_id"]] = t.get("total_percentage")
+                training_ids = [t["id"] for t in training_rows if t.get("id")]
                 if training_ids:
-                    tf = supabase.table("ticket_features").select("training_id").in_("training_id", training_ids).execute()
-                    perf_to_training = {t["performance_id"]: t["id"] for t in (tr.data or []) if t.get("performance_id") and t.get("id")}
-                    for f in tf.data or []:
-                        tid = f.get("training_id")
-                        for pid, trid in perf_to_training.items():
-                            if trid == tid:
-                                feature_count_map[pid] = feature_count_map.get(pid, 0) + 1
-                                break
+                    tf = supabase.table("ticket_features").select("id, feature_id, training_id").in_("training_id", training_ids).execute()
+                    tf_rows = tf.data or []
+                    training_id_to_perf = {t["id"]: t["performance_id"] for t in training_rows if t.get("id") and t.get("performance_id")}
+                    for f in tf_rows:
+                        trnid = f.get("training_id")
+                        pid = training_id_to_perf.get(trnid) if trnid else None
+                        if pid is not None:
+                            feature_count_map[pid] = feature_count_map.get(pid, 0) + 1
             except Exception:
                 pass
         # Resolve company names
@@ -6069,13 +6216,13 @@ def list_performance_poc(
                 companies_map = {c["id"]: c["name"] for c in (cr.data or [])}
             except Exception:
                 pass
+        _batch_current_stages_for_performance_rows(rows, training_rows, tf_rows)
         for row in rows:
             row["company_name"] = companies_map.get(row.get("company_id"), "")
             row["total_percentage"] = training_map.get(row.get("id"))
             row["has_training"] = row.get("id") in training_map
             row["feature_count"] = feature_count_map.get(row.get("id"), 0)
-            stage, _ = _compute_current_stage(row.get("id", ""), row.get("completion_status", "in_progress"))
-            row["current_stage"] = stage
+        _sort_performance_list_rows(rows)
         return {"items": rows}
     except Exception as e:
         err = str(e).lower()

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Card, Typography, Select, Table, message, Modal, Alert, Descriptions } from 'antd'
 import { LineChartOutlined } from '@ant-design/icons'
 import { API_BASE_URL } from '../../api/axios'
+import { sortPerformanceRefOptions } from '../../utils/performanceRefs'
 
 const { Title } = Typography
 
@@ -163,7 +164,10 @@ export const CompPerformPage = () => {
             allowClear
             showSearch
             optionFilterProp="label"
-            options={[...new Set(items.map((i) => i.reference_no).filter(Boolean))].sort().map((r) => ({ value: r, label: r }))}
+            options={sortPerformanceRefOptions([...new Set(items.map((i) => i.reference_no).filter(Boolean))] as string[]).map((r) => ({
+              value: r,
+              label: r,
+            }))}
           />
           <Select
             placeholder="Filter by Company"

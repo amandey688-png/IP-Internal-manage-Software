@@ -16,10 +16,12 @@ import {
 } from 'antd'
 import { PlusOutlined, LineChartOutlined, EditOutlined, FormOutlined } from '@ant-design/icons'
 import { API_BASE_URL } from '../../api/axios'
+import { sortPerformanceRefOptions } from '../../utils/performanceRefs'
 
 const { Title } = Typography
 
-const FETCH_TIMEOUT_MS = 15000
+/* List endpoint batches Supabase calls; allow headroom for cold DB / network. */
+const FETCH_TIMEOUT_MS = 45000
 
 interface Company {
   id: string
@@ -113,10 +115,6 @@ export const PerformanceMonitoringPage = () => {
     loadCompanies()
     loadItems()
     loadFeatures()
-  }, [])
-
-  useEffect(() => {
-    loadItems()
   }, [])
 
   const fetchWithTimeout = (url: string, options: RequestInit = {}) => {
@@ -486,7 +484,10 @@ export const PerformanceMonitoringPage = () => {
             allowClear
             showSearch
             optionFilterProp="label"
-            options={[...new Set(items.map((i) => i.reference_no).filter(Boolean))].sort().map((r) => ({ value: r, label: r }))}
+            options={sortPerformanceRefOptions([...new Set(items.map((i) => i.reference_no).filter(Boolean))] as string[]).map((r) => ({
+              value: r,
+              label: r,
+            }))}
           />
           <Select
             placeholder="Filter by Company"
