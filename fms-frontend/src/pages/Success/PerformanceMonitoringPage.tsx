@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import {
   Card,
   Typography,
@@ -13,12 +13,15 @@ import {
   Descriptions,
   InputNumber,
   Popover,
+  Space,
 } from 'antd'
+import dayjs from 'dayjs'
 import { PlusOutlined, LineChartOutlined, EditOutlined, FormOutlined } from '@ant-design/icons'
 import { API_BASE_URL } from '../../api/axios'
 import { sortPerformanceRefOptions } from '../../utils/performanceRefs'
+import { PerformanceTablePaginationBar } from '../../components/success/PerformanceTablePaginationBar'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 
 /* List endpoint batches Supabase calls; allow headroom for cold DB / network. */
 const FETCH_TIMEOUT_MS = 45000
@@ -105,17 +108,26 @@ export const PerformanceMonitoringPage = () => {
   const activeTab = 'active'
   const [followupData, setFollowupData] = useState<{ features: FollowupFeature[]; total_percentage: number | null; initial_percentage: number | null; is_first_followup: boolean }>({ features: [], total_percentage: null, initial_percentage: null, is_first_followup: false })
   const [followupSubmitting, setFollowupSubmitting] = useState(false)
+  const [followupClicksByTf, setFollowupClicksByTf] = useState<
+    Record<string, { count: number; events: Array<{ id: string; clicked_at: string }> }>
+  >({})
   const [featuresLocked, setFeaturesLocked] = useState(false)
   const [detailsData, setDetailsData] = useState<TicketDetails | null>(null)
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [filterRef, setFilterRef] = useState<string>('')
   const [filterCompany, setFilterCompany] = useState<string>('')
+  const [tablePage, setTablePage] = useState(1)
+  const [tablePageSize, setTablePageSize] = useState(20)
 
   useEffect(() => {
     loadCompanies()
     loadItems()
     loadFeatures()
   }, [])
+
+  useEffect(() => {
+    setTablePage(1)
+  }, [filterRef, filterCompany])
 
   const fetchWithTimeout = (url: string, options: RequestInit = {}) => {
     const controller = new AbortController()
@@ -130,6 +142,49 @@ export const PerformanceMonitoringPage = () => {
     Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
     'Content-Type': 'application/json',
   })
+
+  const loadFollowupClicksForTfIds = async (tfIds: string[]) => {
+    if (!tfIds.length) {
+      setFollowupClicksByTf({})
+      return
+    }
+    const entries = await Promise.all(
+      tfIds.map(async (tfId) => {
+        try {
+          const r = await fetchWithTimeout(
+            `${API_BASE_URL}/success/performance/followup-clicks?ticket_feature_id=${encodeURIComponent(tfId)}`,
+            { headers: getAuthHeaders() }
+          )
+          if (r.ok) {
+            const j = (await r.json()) as { count?: number; events?: Array<{ id: string; clicked_at: string }> }
+            return [tfId, { count: j.count ?? 0, events: j.events ?? [] }] as const
+          }
+        } catch {
+          /* ignore */
+        }
+        return [tfId, { count: 0, events: [] }] as const
+      })
+    )
+    setFollowupClicksByTf(Object.fromEntries(entries))
+  }
+
+  const refreshClicksForTf = async (tfId: string) => {
+    try {
+      const r = await fetchWithTimeout(
+        `${API_BASE_URL}/success/performance/followup-clicks?ticket_feature_id=${encodeURIComponent(tfId)}`,
+        { headers: getAuthHeaders() }
+      )
+      if (r.ok) {
+        const j = (await r.json()) as { count?: number; events?: Array<{ id: string; clicked_at: string }> }
+        setFollowupClicksByTf((prev) => ({
+          ...prev,
+          [tfId]: { count: j.count ?? 0, events: j.events ?? [] },
+        }))
+      }
+    } catch {
+      /* ignore */
+    }
+  }
 
   const loadCompanies = async () => {
     try {
@@ -230,6 +285,7 @@ export const PerformanceMonitoringPage = () => {
   const openFollowupModal = async (record: POCItem) => {
     setSelectedItem(record)
     setFollowupModalOpen(true)
+    setFollowupClicksByTf({})
     setFollowupData({ features: [], total_percentage: null, initial_percentage: null, is_first_followup: false })
     try {
       const res = await fetchWithTimeout(
@@ -238,14 +294,16 @@ export const PerformanceMonitoringPage = () => {
       )
       if (res.ok) {
         const data = await res.json()
+        const feats = (data.features || []) as FollowupFeature[]
         setFollowupData({
-          features: data.features || [],
+          features: feats,
           total_percentage: data.total_percentage ?? null,
           initial_percentage: data.initial_percentage ?? null,
           is_first_followup: data.is_first_followup ?? false,
         })
         const lastTotal = data.total_percentage ?? 0
         followupForm.setFieldsValue({ previous_percentage: lastTotal, initial_percentage: data.initial_percentage ?? '' })
+        await loadFollowupClicksForTfIds(feats.map((f) => f.ticket_feature_id))
       }
     } catch {
       message.error('Failed to load followup data')
@@ -365,6 +423,32 @@ export const PerformanceMonitoringPage = () => {
     }
   }
 
+  /** Log KPI click for non-completed features, then submit follow-up (feeds Training Follow-up on Rimpa Dashboard). */
+  const onAddFollowupForFeature = async (ticketFeatureId: string, featureStatus: string) => {
+    if (!selectedItem) return
+    const notCompleted = String(featureStatus).toLowerCase() !== 'completed'
+    if (notCompleted) {
+      try {
+        const res = await fetchWithTimeout(`${API_BASE_URL}/success/performance/followup-click`, {
+          method: 'POST',
+          headers: getAuthHeadersWithJson(),
+          body: JSON.stringify({
+            ticket_id: selectedItem.id,
+            ticket_feature_id: ticketFeatureId,
+          }),
+        })
+        if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as { detail?: string }
+          message.warning(data?.detail || 'Could not log follow-up click for KPI. Follow-up may still save.')
+        }
+      } catch {
+        message.warning('Could not log follow-up click for KPI.')
+      }
+      await refreshClicksForTf(ticketFeatureId)
+    }
+    await submitFollowup(ticketFeatureId)
+  }
+
   const openViewDetails = async (record: POCItem) => {
     setSelectedItem(record)
     setDetailModalOpen(true)
@@ -457,6 +541,16 @@ export const PerformanceMonitoringPage = () => {
     return true
   })
 
+  const totalTablePages = Math.max(1, Math.ceil(displayItems.length / tablePageSize) || 1)
+  useEffect(() => {
+    if (tablePage > totalTablePages) setTablePage(totalTablePages)
+  }, [tablePage, totalTablePages])
+
+  const pagedDisplayItems = useMemo(() => {
+    const start = (tablePage - 1) * tablePageSize
+    return displayItems.slice(start, start + tablePageSize)
+  }, [displayItems, tablePage, tablePageSize])
+
   return (
     <div>
       <Title level={4} style={{ marginBottom: 24 }}>
@@ -501,7 +595,7 @@ export const PerformanceMonitoringPage = () => {
           />
         </div>
         <Table
-          dataSource={displayItems}
+          dataSource={pagedDisplayItems}
           rowKey="id"
           loading={loading}
           onRow={(record) => ({
@@ -509,12 +603,19 @@ export const PerformanceMonitoringPage = () => {
             style: { cursor: 'pointer' },
           })}
           columns={tableColumns}
-          pagination={{ pageSize: 20 }}
+          pagination={false}
           locale={{
             emptyText: !loading && !setupError
               ? 'No active companies. Use "Add POC Details" above to add one, or see Comp-Perform for completed companies.'
               : undefined,
           }}
+        />
+        <PerformanceTablePaginationBar
+          page={tablePage}
+          pageSize={tablePageSize}
+          total={displayItems.length}
+          onPageChange={setTablePage}
+          onPageSizeChange={setTablePageSize}
         />
       </Card>
 
@@ -651,15 +752,34 @@ export const PerformanceMonitoringPage = () => {
               </ul>
             )}
             {f.status !== 'Completed' && (
-              <Button
-                type="primary"
-                size="small"
-                style={{ marginTop: 8 }}
-                loading={followupSubmitting}
-                onClick={() => submitFollowup(f.ticket_feature_id)}
-              >
-                Add followup for this feature
-              </Button>
+              <Space wrap style={{ marginTop: 8 }} align="center">
+                <Button
+                  type="primary"
+                  size="small"
+                  loading={followupSubmitting}
+                  onClick={() => onAddFollowupForFeature(f.ticket_feature_id, f.status)}
+                >
+                  Add followup for this feature
+                </Button>
+                <Popover
+                  title="Follow-up button clicks (KPI)"
+                  content={
+                    (followupClicksByTf[f.ticket_feature_id]?.events?.length ?? 0) === 0 ? (
+                      <Text type="secondary">No clicks logged yet for this feature.</Text>
+                    ) : (
+                      <ul style={{ margin: 0, paddingLeft: 16, maxHeight: 260, overflow: 'auto', maxWidth: 280 }}>
+                        {(followupClicksByTf[f.ticket_feature_id]?.events ?? []).map((e) => (
+                          <li key={e.id}>{dayjs(e.clicked_at).format('YYYY-MM-DD HH:mm:ss')}</li>
+                        ))}
+                      </ul>
+                    )
+                  }
+                >
+                  <Button size="small" type="default" title="Opens timestamp list">
+                    {followupClicksByTf[f.ticket_feature_id]?.count ?? 0}
+                  </Button>
+                </Popover>
+              </Space>
             )}
           </Card>
         ))}

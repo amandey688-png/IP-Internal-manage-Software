@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Typography, Card, Button, Select, Row, Col, Table, Progress, Tag, Space, Spin, message, Modal } from 'antd'
+import { Typography, Card, Button, Select, Row, Col, Table, Progress, Tag, Space, Spin, message, Modal, Alert } from 'antd'
 import { DashboardOutlined, ArrowLeftOutlined, CheckSquareOutlined, SwapOutlined, CustomerServiceOutlined, UnorderedListOutlined } from '@ant-design/icons'
 import {
   BarChart,
@@ -505,8 +505,13 @@ export const DashboardKPIPage = () => {
                     <CustomerServiceOutlined />
                     Success KPI
                     <Tag color="gold" style={{ marginLeft: 8 }}>
-                      {successKpi.overallPercentage ?? 0}% Overall (Monthly)
+                      {successKpi.overallPercentage ?? 0}% Overall (selected week)
                     </Tag>
+                    {successKpi.meta?.weekLabel && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {successKpi.meta.weekLabel}
+                      </Text>
+                    )}
                   </Space>
                 }
               >
@@ -524,7 +529,7 @@ export const DashboardKPIPage = () => {
                       <Title level={4} style={{ marginBottom: 4 }}>
                         {successKpi.pocCollected.currentValue}/{successKpi.pocCollected.targetValue || 0}
                       </Title>
-                      <Text type="secondary">Message owner confirmed</Text>
+                      <Text type="secondary">POC entries added this week</Text>
                     </Card>
                   </Col>
                   <Col xs={24} md={6}>
@@ -589,25 +594,50 @@ export const DashboardKPIPage = () => {
                 className="kpi-modal"
               >
                 {successModal.type === 'poc' && (
-                  <Table
-                    size="small"
-                    dataSource={(successKpi.pocCollected.details?.companies ?? []).map((company, i) => ({
-                      key: i,
-                      company,
-                      messageOwner: successKpi.pocCollected.details.messageOwner?.[i] ?? '',
-                      date: successKpi.pocCollected.details.dates?.[i] ?? '',
-                      response: successKpi.pocCollected.details.responses?.[i] ?? '',
-                      contact: successKpi.pocCollected.details.contacts?.[i] ?? '',
-                    }))}
-                    columns={[
-                      { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
-                      { title: 'Message Owner', dataIndex: 'messageOwner', key: 'messageOwner', width: 120 },
-                      { title: 'Date', dataIndex: 'date', key: 'date', width: 140 },
-                      { title: 'Response', dataIndex: 'response', key: 'response' },
-                      { title: 'Contact', dataIndex: 'contact', key: 'contact', width: 160 },
-                    ]}
-                    pagination={{ pageSize: 10 }}
-                  />
+                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="POC Collected (selected week)"
+                      description={
+                        <>
+                          Count on the card ={' '}
+                          <strong>
+                            {successKpi.pocCollected.currentValue}/{successKpi.pocCollected.targetValue ?? 16}
+                          </strong>
+                          : every Performance Monitoring POC with <strong>created date</strong> in this week. Rows
+                          below match that count.
+                        </>
+                      }
+                    />
+                    <Table
+                      size="small"
+                      dataSource={(successKpi.pocCollected.details?.companies ?? []).map((company, i) => ({
+                        key: i,
+                        reference: successKpi.pocCollected.details.referenceNumbers?.[i] ?? '',
+                        company,
+                        messageOwner: successKpi.pocCollected.details.messageOwner?.[i] ?? '',
+                        date: successKpi.pocCollected.details.dates?.[i] ?? '',
+                        response: successKpi.pocCollected.details.responses?.[i] ?? '',
+                        contact: successKpi.pocCollected.details.contacts?.[i] ?? '',
+                      }))}
+                      columns={[
+                        { title: 'Reference', dataIndex: 'reference', key: 'reference', width: 120 },
+                        { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
+                        { title: 'Message Owner', dataIndex: 'messageOwner', key: 'messageOwner', width: 110 },
+                        {
+                          title: 'Entered at',
+                          dataIndex: 'date',
+                          key: 'date',
+                          width: 160,
+                          render: (v: string) => formatQueryArrival(v),
+                        },
+                        { title: 'Response', dataIndex: 'response', key: 'response' },
+                        { title: 'Contact', dataIndex: 'contact', key: 'contact', width: 140 },
+                      ]}
+                      pagination={{ pageSize: 10 }}
+                    />
+                  </Space>
                 )}
                 {successModal.type === 'training' && (
                   <Table
@@ -633,23 +663,74 @@ export const DashboardKPIPage = () => {
                   />
                 )}
                 {successModal.type === 'followup' && (
-                  <Table
-                    size="small"
-                    dataSource={(successKpi.trainingFollowUp.details?.companies ?? []).map((company, i) => ({
-                      key: i,
-                      company,
-                      callDate: successKpi.trainingFollowUp.details.followupDates?.[i] ?? '',
-                      before: successKpi.trainingFollowUp.details.beforePercentages?.[i] ?? null,
-                      after: successKpi.trainingFollowUp.details.afterPercentages?.[i] ?? null,
-                    }))}
-                    columns={[
-                      { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
-                      { title: 'Call Date', dataIndex: 'callDate', key: 'callDate', width: 130 },
-                      { title: 'Before %', dataIndex: 'before', key: 'before', width: 100 },
-                      { title: 'After %', dataIndex: 'after', key: 'after', width: 100 },
-                    ]}
-                    pagination={{ pageSize: 10 }}
-                  />
+                  <Space direction="vertical" size="middle" style={{ width: '100%' }}>
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="Training Follow-up (selected week)"
+                      description={
+                        <>
+                          Total toward KPI:{' '}
+                          <strong>
+                            {successKpi.trainingFollowUp.currentValue}/{successKpi.trainingFollowUp.targetValue ?? 25}
+                          </strong>{' '}
+                          = follow-up rows logged (
+                          {successKpi.trainingFollowUp.details?.followupRowsWeek ?? '—'}) + &quot;Add follow-up&quot; button
+                          clicks ({successKpi.trainingFollowUp.details?.clickCountWeek ?? '—'}).
+                        </>
+                      }
+                    />
+                    <Title level={5} style={{ margin: 0 }}>
+                      Follow-up rows
+                    </Title>
+                    <Table
+                      size="small"
+                      dataSource={(successKpi.trainingFollowUp.details?.companies ?? []).map((company, i) => ({
+                        key: `fu-${i}`,
+                        company,
+                        callDate: successKpi.trainingFollowUp.details.followupDates?.[i] ?? '',
+                        before: successKpi.trainingFollowUp.details.beforePercentages?.[i] ?? null,
+                        after: successKpi.trainingFollowUp.details.afterPercentages?.[i] ?? null,
+                        feature: successKpi.trainingFollowUp.details.features?.[i]?.[0] ?? '',
+                      }))}
+                      columns={[
+                        { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
+                        { title: 'Feature', dataIndex: 'feature', key: 'feature', width: 120, ellipsis: true },
+                        { title: 'Call Date', dataIndex: 'callDate', key: 'callDate', width: 130 },
+                        { title: 'Before %', dataIndex: 'before', key: 'before', width: 100 },
+                        { title: 'After %', dataIndex: 'after', key: 'after', width: 100 },
+                      ]}
+                      pagination={{ pageSize: 10 }}
+                    />
+                    {(successKpi.trainingFollowUp.details?.clickEventsWeek?.length ?? 0) > 0 && (
+                      <>
+                        <Title level={5} style={{ margin: 0 }}>
+                          Follow-up button clicks (timestamps)
+                        </Title>
+                        <Table
+                          size="small"
+                          dataSource={(successKpi.trainingFollowUp.details.clickEventsWeek ?? []).map((row, i) => ({
+                            key: `clk-${i}`,
+                            company: row.company ?? '',
+                            feature: row.feature ?? '',
+                            clickedAt: row.clickedAt ?? '',
+                          }))}
+                          columns={[
+                            { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
+                            { title: 'Feature', dataIndex: 'feature', key: 'feature', width: 140 },
+                            {
+                              title: 'Clicked at',
+                              dataIndex: 'clickedAt',
+                              key: 'clickedAt',
+                              width: 180,
+                              render: (v: string) => formatQueryArrival(v),
+                            },
+                          ]}
+                          pagination={{ pageSize: 10 }}
+                        />
+                      </>
+                    )}
+                  </Space>
                 )}
                 {successModal.type === 'increase' && (
                   <Table
