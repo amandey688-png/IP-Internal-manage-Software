@@ -49,7 +49,15 @@ export interface SupportFmsSection {
   details?: SupportFmsDelayItem[]
 }
 
+export interface SuccessKpiClickEventRow {
+  company?: string
+  feature?: string
+  clickedAt?: string
+}
+
 export interface SuccessKpiDetailLists {
+  /** POC Collected: reference numbers for rows in the selected week */
+  referenceNumbers?: string[]
   companies: string[]
   messageOwner?: string[]
   dates?: string[]
@@ -64,6 +72,12 @@ export interface SuccessKpiDetailLists {
   followupDates?: string[]
   beforePercentages?: (number | null)[]
   afterPercentages?: (number | null)[]
+  /** Training Follow-up: follow-up rows logged in selected week */
+  followupRowsWeek?: number
+  /** Training Follow-up: "Add follow-up" button clicks in selected week */
+  clickCountWeek?: number
+  /** Training Follow-up: per-click rows for the modal (selected week) */
+  clickEventsWeek?: SuccessKpiClickEventRow[]
 }
 
 export interface SuccessKpiSection {
@@ -79,6 +93,10 @@ export interface SuccessKpiResponse {
   trainingFollowUp: SuccessKpiSection
   successIncrease: SuccessKpiSection
   overallPercentage: number
+  meta?: {
+    weekLabel?: string
+    targets?: { poc: number; training: number; followup: number; increase: number }
+  }
 }
 
 export interface DashboardKpiResponse {

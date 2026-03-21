@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, Typography, Select, Table, message, Modal, Alert, Descriptions } from 'antd'
 import { LineChartOutlined } from '@ant-design/icons'
 import { API_BASE_URL } from '../../api/axios'
 import { sortPerformanceRefOptions } from '../../utils/performanceRefs'
+import { PerformanceTablePaginationBar } from '../../components/success/PerformanceTablePaginationBar'
 
 const { Title } = Typography
 
@@ -52,10 +53,16 @@ export const CompPerformPage = () => {
   const [setupError, setSetupError] = useState<string | null>(null)
   const [filterRef, setFilterRef] = useState<string>('')
   const [filterCompany, setFilterCompany] = useState<string>('')
+  const [tablePage, setTablePage] = useState(1)
+  const [tablePageSize, setTablePageSize] = useState(20)
 
   useEffect(() => {
     loadItems()
   }, [])
+
+  useEffect(() => {
+    setTablePage(1)
+  }, [filterRef, filterCompany])
 
   const fetchWithTimeout = (url: string, options: RequestInit = {}) => {
     const controller = new AbortController()
@@ -138,6 +145,16 @@ export const CompPerformPage = () => {
     return true
   })
 
+  const totalTablePages = Math.max(1, Math.ceil(displayItems.length / tablePageSize) || 1)
+  useEffect(() => {
+    if (tablePage > totalTablePages) setTablePage(totalTablePages)
+  }, [tablePage, totalTablePages])
+
+  const pagedDisplayItems = useMemo(() => {
+    const start = (tablePage - 1) * tablePageSize
+    return displayItems.slice(start, start + tablePageSize)
+  }, [displayItems, tablePage, tablePageSize])
+
   return (
     <div>
       <Title level={4} style={{ marginBottom: 24 }}>
@@ -181,7 +198,7 @@ export const CompPerformPage = () => {
           />
         </div>
         <Table
-          dataSource={displayItems}
+          dataSource={pagedDisplayItems}
           rowKey="id"
           loading={loading}
           onRow={(record) => ({
@@ -189,7 +206,14 @@ export const CompPerformPage = () => {
             style: { cursor: 'pointer' },
           })}
           columns={tableColumns}
-          pagination={{ pageSize: 20 }}
+          pagination={false}
+        />
+        <PerformanceTablePaginationBar
+          page={tablePage}
+          pageSize={tablePageSize}
+          total={displayItems.length}
+          onPageChange={setTablePage}
+          onPageSizeChange={setTablePageSize}
         />
       </Card>
 

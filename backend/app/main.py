@@ -2288,310 +2288,21 @@ def dashboard_kpi(
             _log(f"dashboard/kpi support FMS: {e}")
             support_fms_weekly_pct = 0
 
-        # ----- Success KPI (Performance Monitoring / Training / Followups for this user – MONTH basis) -----
+        # ----- Success KPI (Rimpa): ALL Success module data; selected week vs fixed targets 16/1/25/2 -----
+        from app.dashboard_success_kpi import compute_success_kpi_for_dashboard
+
         success_kpi = None
-        weekly_success_pct = []
+        weekly_success_pct: list[float] = []
         try:
-            # Base performance tickets created by this user (owner)
-            pm_rows: list[dict] = []
-            try:
-                pr = (
-                    supabase.table("performance_monitoring")
-                    .select("id, company_id, message_owner, response, contact, created_at, created_by")
-                    .eq("created_by", user_id)
-                    .execute()
-                )
-                pm_rows = pr.data or []
-            except Exception:
-                pm_rows = []
-
-            if pm_rows:
-                pm_by_id = {row.get("id"): row for row in pm_rows if row.get("id")}
-                company_ids = {row.get("company_id") for row in pm_rows if row.get("company_id")}
-            else:
-                pm_by_id = {}
-                company_ids = set()
-
-            companies_map: dict[str, str] = {}
-            if company_ids:
-                try:
-                    cr = supabase.table("companies").select("id, name").in_("id", list(company_ids)).execute()
-                    companies_map = {c["id"]: c["name"] for c in (cr.data or [])}
-                except Exception:
-                    companies_map = {}
-
-            pm_ids = [pid for pid in pm_by_id.keys() if pid]
-
-            trainings: list[dict] = []
-            if pm_ids:
-                try:
-                    tr = (
-                        supabase.table("performance_training")
-                        .select("*")
-                        .in_("performance_id", pm_ids)
-                        .execute()
-                    )
-                    trainings = tr.data or []
-                except Exception:
-                    trainings = []
-
-            training_by_id = {t.get("id"): t for t in trainings if t.get("id")}
-            perf_for_training = {t.get("id"): t.get("performance_id") for t in trainings if t.get("id")}
-
-            training_ids = [t_id for t_id in training_by_id.keys() if t_id]
-            ticket_features: list[dict] = []
-            if training_ids:
-                try:
-                    tfr = (
-                        supabase.table("ticket_features")
-                        .select("id, training_id, feature_id, status")
-                        .in_("training_id", training_ids)
-                        .execute()
-                    )
-                    ticket_features = tfr.data or []
-                except Exception:
-                    ticket_features = []
-
-            tf_by_id = {tf.get("id"): tf for tf in ticket_features if tf.get("id")}
-            tf_ids = [tid for tid in tf_by_id.keys() if tid]
-            feature_ids = {tf.get("feature_id") for tf in ticket_features if tf.get("feature_id")}
-
-            feature_names: dict[str, str] = {}
-            if feature_ids:
-                try:
-                    fl = (
-                        supabase.table("feature_list")
-                        .select("id, name")
-                        .in_("id", list(feature_ids))
-                        .execute()
-                    )
-                    feature_names = {x["id"]: x["name"] for x in (fl.data or [])}
-                except Exception:
-                    feature_names = {}
-
-            followups: list[dict] = []
-            if tf_ids:
-                try:
-                    fu = (
-                        supabase.table("feature_followups")
-                        .select("*")
-                        .in_("ticket_feature_id", tf_ids)
-                        .execute()
-                    )
-                    followups = fu.data or []
-                except Exception:
-                    followups = []
-
-            # 1) POC Collected (month range)
-            poc_rows = []
-            for row in pm_rows:
-                d = _parse_iso_to_date(row.get("created_at"))
-                if d and month_start <= d <= month_end:
-                    poc_rows.append(row)
-            poc_current = sum(
-                1
-                for row in poc_rows
-                if str(row.get("message_owner") or "").lower() == "yes"
-            )
-            poc_target = len(poc_rows)
-            poc_pct = round((poc_current / poc_target) * 100) if poc_target else 0
-            poc_details = {
-                "companies": [companies_map.get(row.get("company_id"), "") for row in poc_rows],
-                "messageOwner": [row.get("message_owner") for row in poc_rows],
-                "dates": [str(row.get("created_at") or "") for row in poc_rows],
-                "responses": [row.get("response") or "" for row in poc_rows],
-                "contacts": [row.get("contact") or "" for row in poc_rows],
-            }
-
-            # 2) Training Target (month range)
-            trainings_month = []
-            for t in trainings:
-                d = _parse_iso_to_date(t.get("training_schedule_date") or t.get("created_at"))
-                if d and month_start <= d <= month_end:
-                    trainings_month.append(t)
-            train_target = len(trainings_month)
-            train_current = sum(
-                1 for t in trainings_month if str(t.get("training_status") or "").lower() == "yes"
-            )
-            train_pct = round((train_current / train_target) * 100) if train_target else 0
-            # Map training_id -> list of feature names
-            features_by_training: dict[str, list[str]] = {}
-            for tf in ticket_features:
-                tid = tf.get("training_id")
-                if not tid:
-                    continue
-                fname = feature_names.get(tf.get("feature_id"), "")
-                if fname:
-                    features_by_training.setdefault(tid, []).append(fname)
-            train_companies: list[str] = []
-            train_call_poc: list[str] = []
-            train_message_poc: list[str] = []
-            train_dates: list[str] = []
-            train_status: list[str] = []
-            train_remarks: list[str] = []
-            train_features: list[list[str]] = []
-            for t in trainings_month:
-                perf_id = t.get("performance_id")
-                pm_row = pm_by_id.get(perf_id, {})
-                company_name = companies_map.get(pm_row.get("company_id"), "")
-                train_companies.append(company_name)
-                train_call_poc.append(t.get("call_poc") or "")
-                train_message_poc.append(t.get("message_poc") or "")
-                train_dates.append(str(t.get("training_schedule_date") or t.get("created_at") or ""))
-                train_status.append(t.get("training_status") or "")
-                train_remarks.append(t.get("remarks") or "")
-                train_features.append(features_by_training.get(t.get("id"), []))
-            train_details = {
-                "companies": train_companies,
-                "callPOC": train_call_poc,
-                "messagePOC": train_message_poc,
-                "trainingDates": train_dates,
-                "trainingStatus": train_status,
-                "remarks": train_remarks,
-                "features": train_features,
-            }
-
-            # 3) Training Follow-up KPI (month range)
-            followups_month = []
-            for fu in followups:
-                d = _parse_iso_to_date(fu.get("created_at"))
-                if d and month_start <= d <= month_end:
-                    followups_month.append(fu)
-            fu_target = len(followups_month)
-            fu_current = sum(
-                1 for fu in followups_month if str(fu.get("status") or "").lower() == "completed"
-            )
-            fu_pct = round((fu_current / fu_target) * 100) if fu_target else 0
-            fu_companies: list[str] = []
-            fu_remarks: list[str] = []
-            fu_dates: list[str] = []
-            fu_before: list[float | None] = []
-            fu_after: list[float | None] = []
-            fu_features: list[str] = []
-            for fu in followups_month:
-                tf_id = fu.get("ticket_feature_id")
-                tf_row = tf_by_id.get(tf_id, {})
-                tr = training_by_id.get(tf_row.get("training_id"))
-                pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
-                company_name = companies_map.get(pm_row.get("company_id"), "")
-                fu_companies.append(company_name)
-                fu_remarks.append(fu.get("remarks") or "")
-                fu_dates.append(str(fu.get("created_at") or ""))
-                fu_before.append(
-                    float(fu.get("previous_percentage")) if fu.get("previous_percentage") is not None else None
-                )
-                fu_after.append(
-                    float(fu.get("total_percentage")) if fu.get("total_percentage") is not None else None
-                )
-                fname = fu.get("feature_name") or feature_names.get(tf_row.get("feature_id"), "")
-                fu_features.append(fname)
-            fu_details = {
-                "companies": fu_companies,
-                "remarks": fu_remarks,
-                "followupDates": fu_dates,
-                "beforePercentages": fu_before,
-                "afterPercentages": fu_after,
-                "features": [[f] for f in fu_features],
-            }
-
-            # 4) Success Increase KPI (month range)
-            success_rows = [
-                fu
-                for fu in followups_month
-                if fu.get("total_percentage") is not None
-                and fu.get("previous_percentage") is not None
-                and float(fu["total_percentage"]) > float(fu["previous_percentage"])
-            ]
-            success_target = len(followups_month)
-            success_current = len(success_rows)
-            success_pct = round((success_current / success_target) * 100) if success_target else 0
-            succ_companies: list[str] = []
-            succ_remarks: list[str] = []
-            succ_dates: list[str] = []
-            succ_before: list[float | None] = []
-            succ_after: list[float | None] = []
-            succ_features: list[str] = []
-            for fu in success_rows:
-                tf_id = fu.get("ticket_feature_id")
-                tf_row = tf_by_id.get(tf_id, {})
-                tr = training_by_id.get(tf_row.get("training_id"))
-                pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
-                company_name = companies_map.get(pm_row.get("company_id"), "")
-                succ_companies.append(company_name)
-                succ_remarks.append(fu.get("remarks") or "")
-                succ_dates.append(str(fu.get("created_at") or ""))
-                succ_before.append(
-                    float(fu.get("previous_percentage")) if fu.get("previous_percentage") is not None else None
-                )
-                succ_after.append(
-                    float(fu.get("total_percentage")) if fu.get("total_percentage") is not None else None
-                )
-                fname = fu.get("feature_name") or feature_names.get(tf_row.get("feature_id"), "")
-                succ_features.append(fname)
-            succ_details = {
-                "companies": succ_companies,
-                "remarks": succ_remarks,
-                "followupDates": succ_dates,
-                "beforePercentages": succ_before,
-                "afterPercentages": succ_after,
-                "features": [[f] for f in succ_features],
-            }
-
-            # Overall Success KPI percentage = average of four KPI percentages
-            pct_values = [poc_pct, train_pct, fu_pct, success_pct]
-            overall_pct = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
-
-            # Weekly Success KPI % for graph (Rimpa only): one value per week of month
             if (name or "").strip().lower() == "rimpa":
-                for w in range(1, 6):
-                    rng = _dashboard_kpi_week_range(y, month_num, f"week {w}")
-                    if not rng:
-                        weekly_success_pct.append(0)
-                        continue
-                    rs, re = rng
-                    poc_week = [row for row in pm_rows if (lambda d: d is not None and rs <= d <= re)(_parse_iso_to_date(row.get("created_at")))]
-                    poc_pct_w = round((sum(1 for row in poc_week if str(row.get("message_owner") or "").lower() == "yes") / len(poc_week) * 100)) if poc_week else 0
-                    train_week = [t for t in trainings if (lambda d: d is not None and rs <= d <= re)(_parse_iso_to_date(t.get("training_schedule_date") or t.get("created_at")))]
-                    train_pct_w = round((sum(1 for t in train_week if str(t.get("training_status") or "").lower() == "yes") / len(train_week) * 100)) if train_week else 0
-                    fu_week = [fu for fu in followups if (lambda d: d is not None and rs <= d <= re)(_parse_iso_to_date(fu.get("created_at")))]
-                    fu_pct_w = round((sum(1 for fu in fu_week if str(fu.get("status") or "").lower() == "completed") / len(fu_week) * 100)) if fu_week else 0
-                    success_inc_week = [fu for fu in fu_week if fu.get("total_percentage") is not None and fu.get("previous_percentage") is not None and float(fu["total_percentage"]) > float(fu["previous_percentage"])]
-                    success_inc_pct_w = round((len(success_inc_week) / len(fu_week) * 100)) if fu_week else 0
-                    overall_w = round((poc_pct_w + train_pct_w + fu_pct_w + success_inc_pct_w) / 4, 2)
-                    weekly_success_pct.append(overall_w)
-
-            success_kpi = {
-                "pocCollected": {
-                    "currentValue": poc_current,
-                    "targetValue": poc_target,
-                    "percentage": f"{poc_current}/{poc_target or 0}",
-                    "details": poc_details,
-                },
-                "weeklyTrainingTarget": {
-                    "currentValue": train_current,
-                    "targetValue": train_target,
-                    "percentage": f"{train_current}/{train_target or 0}",
-                    "details": train_details,
-                },
-                "trainingFollowUp": {
-                    "currentValue": fu_current,
-                    "targetValue": fu_target,
-                    "percentage": f"{fu_current}/{fu_target or 0}",
-                    "details": fu_details,
-                },
-                "successIncrease": {
-                    "currentValue": success_current,
-                    "targetValue": success_target,
-                    "percentage": f"{success_current}/{success_target or 0}",
-                    "details": succ_details,
-                },
-                "overallPercentage": overall_pct,
-            }
+                success_kpi, weekly_success_pct = compute_success_kpi_for_dashboard(
+                    range_start, range_end, y, month_num
+                )
         except Exception as e:
             _log(f"dashboard/kpi success: {e}")
 
-        # For Rimpa dashboard always expose Success KPI (with zeros if not computed)
         _empty_details = {
+            "referenceNumbers": [],
             "companies": [],
             "messageOwner": [],
             "dates": [],
@@ -2609,10 +2320,10 @@ def dashboard_kpi(
         }
         if (name or "").strip().lower() == "rimpa" and success_kpi is None:
             success_kpi = {
-                "pocCollected": {"currentValue": 0, "targetValue": 0, "percentage": "0/0", "details": _empty_details},
-                "weeklyTrainingTarget": {"currentValue": 0, "targetValue": 0, "percentage": "0/0", "details": _empty_details},
-                "trainingFollowUp": {"currentValue": 0, "targetValue": 0, "percentage": "0/0", "details": _empty_details},
-                "successIncrease": {"currentValue": 0, "targetValue": 0, "percentage": "0/0", "details": _empty_details},
+                "pocCollected": {"currentValue": 0, "targetValue": 16, "percentage": "0/16", "details": _empty_details},
+                "weeklyTrainingTarget": {"currentValue": 0, "targetValue": 1, "percentage": "0/1", "details": _empty_details},
+                "trainingFollowUp": {"currentValue": 0, "targetValue": 25, "percentage": "0/25", "details": _empty_details},
+                "successIncrease": {"currentValue": 0, "targetValue": 2, "percentage": "0/2", "details": _empty_details},
                 "overallPercentage": 0,
             }
 
@@ -6178,9 +5889,13 @@ def list_performance_poc(
         q = supabase.table("performance_monitoring").select(
             "id, company_id, message_owner, response, contact, reference_no, completion_status, created_at"
         )
-        if completion_status in ("in_progress", "completed"):
-            q = q.eq("completion_status", completion_status)
-        r = q.order("created_at", desc=True).execute()
+        if completion_status == "in_progress":
+            # Include NULL so older/manual rows without status still show as "active"
+            q = q.or_("completion_status.eq.in_progress,completion_status.is.null")
+        elif completion_status == "completed":
+            q = q.eq("completion_status", "completed")
+        # PostgREST default max rows is often 1000; raise cap so full Success list always returns
+        r = q.order("created_at", desc=True).limit(10000).execute()
         rows = r.data or []
         ticket_ids = [row.get("id") for row in rows if row.get("id")]
         # Enrich with training total_percentage and feature count (batched; no per-row _compute_current_stage)
@@ -6531,6 +6246,57 @@ def list_performance_followups(
     init_pct = float(init_pct) if init_pct is not None else None
     n_followups = len(followups)
     return {"features": list(by_tf.values()), "total_percentage": total_percentage, "initial_percentage": init_pct, "is_first_followup": n_followups == 0}
+
+
+class FollowupClickRequest(BaseModel):
+    ticket_id: str
+    ticket_feature_id: str
+
+
+@api_router.post("/success/performance/followup-click")
+def log_success_followup_click(payload: FollowupClickRequest, auth: dict = Depends(get_current_user)):
+    """Log a click on 'Add followup for this feature' for Success KPI Training Follow-up."""
+    try:
+        supabase.table("success_followup_click_events").insert(
+            {
+                "performance_id": payload.ticket_id,
+                "ticket_feature_id": payload.ticket_feature_id,
+                "created_by": auth.get("id"),
+            }
+        ).execute()
+        return {"ok": True}
+    except Exception as e:
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            raise HTTPException(
+                status_code=503,
+                detail="Run docs/SUCCESS_FOLLOWUP_CLICK_EVENTS.sql in Supabase to enable click tracking.",
+            )
+        raise HTTPException(status_code=400, detail=str(e)[:200])
+
+
+@api_router.get("/success/performance/followup-clicks")
+def list_success_followup_clicks(
+    ticket_feature_id: str,
+    auth: dict = Depends(get_current_user),
+):
+    """Count and timestamps for follow-up button clicks (per ticket_feature)."""
+    try:
+        r = (
+            supabase.table("success_followup_click_events")
+            .select("id, clicked_at")
+            .eq("ticket_feature_id", ticket_feature_id)
+            .order("clicked_at", desc=True)
+            .limit(500)
+            .execute()
+        )
+        rows = r.data or []
+        return {"count": len(rows), "events": rows}
+    except Exception as e:
+        err = str(e).lower()
+        if "does not exist" in err or "relation" in err:
+            return {"count": 0, "events": []}
+        raise HTTPException(status_code=400, detail=str(e)[:200])
 
 
 @api_router.post("/success/performance/followup")

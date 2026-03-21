@@ -1,0 +1,394 @@
+"""
+Success KPI for Rimpa Dashboard: pulls from ALL Success / performance_monitoring data
+(not filtered by dashboard user). Cards use selected week + fixed targets: 16 / 1 / 25 / 2.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime, timezone
+from typing import Any
+
+from app.supabase_client import supabase
+
+SUCCESS_KPI_POC_TARGET = 16
+SUCCESS_KPI_TRAIN_TARGET = 1
+SUCCESS_KPI_FOLLOWUP_TARGET = 25
+SUCCESS_KPI_INCREASE_TARGET = 2
+
+
+def _parse_iso_to_date(value) -> date | None:
+    try:
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
+        if isinstance(value, datetime):
+            return value.date()
+        if isinstance(value, str):
+            if "T" in value or " " in value:
+                return datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+            return date.fromisoformat(value[:10])
+    except Exception:
+        return None
+
+
+def _in_range(d: date | None, rs: date, re: date) -> bool:
+    return d is not None and rs <= d <= re
+
+
+def compute_success_kpi_for_dashboard(
+    week_start: date,
+    week_end: date,
+    y: int,
+    month_num: int,
+) -> tuple[dict[str, Any] | None, list[float]]:
+    """
+    Returns (success_kpi dict, weekly_success_pct list of 5 values for bar chart).
+    """
+    weekly_success_pct: list[float] = []
+    try:
+        pm_rows: list[dict] = []
+        try:
+            pr = (
+                supabase.table("performance_monitoring")
+                .select("id, company_id, reference_no, message_owner, response, contact, created_at, created_by")
+                .limit(10000)
+                .execute()
+            )
+            pm_rows = pr.data or []
+        except Exception:
+            pm_rows = []
+
+        pm_by_id = {row.get("id"): row for row in pm_rows if row.get("id")}
+        company_ids = {row.get("company_id") for row in pm_rows if row.get("company_id")}
+        companies_map: dict[str, str] = {}
+        if company_ids:
+            try:
+                cr = supabase.table("companies").select("id, name").in_("id", list(company_ids)).execute()
+                companies_map = {c["id"]: c["name"] for c in (cr.data or [])}
+            except Exception:
+                pass
+
+        pm_ids = [pid for pid in pm_by_id.keys() if pid]
+        trainings: list[dict] = []
+        if pm_ids:
+            try:
+                tr = supabase.table("performance_training").select("*").in_("performance_id", pm_ids).execute()
+                trainings = tr.data or []
+            except Exception:
+                trainings = []
+
+        training_by_id = {t.get("id"): t for t in trainings if t.get("id")}
+        perf_for_training = {t.get("id"): t.get("performance_id") for t in trainings if t.get("id")}
+
+        training_ids = [t_id for t_id in training_by_id.keys() if t_id]
+        ticket_features: list[dict] = []
+        if training_ids:
+            try:
+                tfr = (
+                    supabase.table("ticket_features")
+                    .select("id, training_id, feature_id, status")
+                    .in_("training_id", training_ids)
+                    .execute()
+                )
+                ticket_features = tfr.data or []
+            except Exception:
+                ticket_features = []
+
+        tf_by_id = {tf.get("id"): tf for tf in ticket_features if tf.get("id")}
+        tf_ids = [tid for tid in tf_by_id.keys() if tid]
+        feature_ids = {tf.get("feature_id") for tf in ticket_features if tf.get("feature_id")}
+        feature_names: dict[str, str] = {}
+        if feature_ids:
+            try:
+                fl = supabase.table("feature_list").select("id, name").in_("id", list(feature_ids)).execute()
+                feature_names = {x["id"]: x["name"] for x in (fl.data or [])}
+            except Exception:
+                pass
+
+        followups: list[dict] = []
+        if tf_ids:
+            try:
+                fu = supabase.table("feature_followups").select("*").in_("ticket_feature_id", tf_ids).execute()
+                followups = fu.data or []
+            except Exception:
+                followups = []
+
+        rs, re = week_start, week_end
+
+        # --- Weekly counts for KPI cards (selected week) ---
+        # POC Collected = count of Performance Monitoring (POC) rows *entered* in this week (created_at in range).
+        poc_week = sum(
+            1
+            for row in pm_rows
+            if _in_range(_parse_iso_to_date(row.get("created_at")), rs, re)
+        )
+        poc_target = SUCCESS_KPI_POC_TARGET
+        poc_pct = round(min(100, (poc_week / poc_target) * 100)) if poc_target else 0
+
+        train_week = []
+        for t in trainings:
+            d = _parse_iso_to_date(t.get("training_schedule_date") or t.get("created_at"))
+            if _in_range(d, rs, re):
+                train_week.append(t)
+        train_current = sum(1 for t in train_week if str(t.get("training_status") or "").lower() == "yes")
+        train_target = SUCCESS_KPI_TRAIN_TARGET
+        train_pct = round(min(100, (train_current / train_target) * 100)) if train_target else 0
+
+        features_by_training: dict[str, list[str]] = {}
+        for tf in ticket_features:
+            tid = tf.get("training_id")
+            if not tid:
+                continue
+            fname = feature_names.get(tf.get("feature_id"), "")
+            if fname:
+                features_by_training.setdefault(tid, []).append(fname)
+
+        followups_week = []
+        for fu in followups:
+            d = _parse_iso_to_date(fu.get("created_at"))
+            if _in_range(d, rs, re):
+                followups_week.append(fu)
+
+        all_click_rows: list[dict] = []
+        try:
+            ce = supabase.table("success_followup_click_events").select("id, clicked_at, ticket_feature_id").limit(10000).execute()
+            all_click_rows = ce.data or []
+        except Exception:
+            all_click_rows = []
+
+        def _count_clicks_in_range(wrs: date, wre: date) -> int:
+            n = 0
+            for row in all_click_rows:
+                d = _parse_iso_to_date(row.get("clicked_at"))
+                if _in_range(d, wrs, wre):
+                    n += 1
+            return n
+
+        click_week_count = _count_clicks_in_range(rs, re)
+
+        fu_from_rows = len(followups_week)
+        fu_current = fu_from_rows + click_week_count
+        fu_target = SUCCESS_KPI_FOLLOWUP_TARGET
+        fu_pct = round(min(100, (fu_current / fu_target) * 100)) if fu_target else 0
+
+        success_rows = [
+            fu
+            for fu in followups_week
+            if fu.get("total_percentage") is not None
+            and fu.get("previous_percentage") is not None
+            and float(fu["total_percentage"]) > float(fu["previous_percentage"])
+        ]
+        success_current = len(success_rows)
+        success_target = SUCCESS_KPI_INCREASE_TARGET
+        success_pct = round(min(100, (success_current / success_target) * 100)) if success_target else 0
+
+        # Details for modals (week-scoped)
+        poc_rows_w = [
+            row
+            for row in pm_rows
+            if _in_range(_parse_iso_to_date(row.get("created_at")), rs, re)
+        ]
+        poc_details = {
+            "referenceNumbers": [str(row.get("reference_no") or "") for row in poc_rows_w],
+            "companies": [companies_map.get(row.get("company_id"), "") for row in poc_rows_w],
+            "messageOwner": [row.get("message_owner") for row in poc_rows_w],
+            "dates": [str(row.get("created_at") or "") for row in poc_rows_w],
+            "responses": [row.get("response") or "" for row in poc_rows_w],
+            "contacts": [row.get("contact") or "" for row in poc_rows_w],
+        }
+
+        train_companies: list[str] = []
+        train_call_poc: list[str] = []
+        train_message_poc: list[str] = []
+        train_dates: list[str] = []
+        train_status: list[str] = []
+        train_remarks: list[str] = []
+        train_features: list[list[str]] = []
+        for t in train_week:
+            perf_id = t.get("performance_id")
+            pm_row = pm_by_id.get(perf_id, {})
+            train_companies.append(companies_map.get(pm_row.get("company_id"), ""))
+            train_call_poc.append(t.get("call_poc") or "")
+            train_message_poc.append(t.get("message_poc") or "")
+            train_dates.append(str(t.get("training_schedule_date") or t.get("created_at") or ""))
+            train_status.append(t.get("training_status") or "")
+            train_remarks.append(t.get("remarks") or "")
+            train_features.append(features_by_training.get(t.get("id"), []))
+        train_details = {
+            "companies": train_companies,
+            "callPOC": train_call_poc,
+            "messagePOC": train_message_poc,
+            "trainingDates": train_dates,
+            "trainingStatus": train_status,
+            "remarks": train_remarks,
+            "features": train_features,
+        }
+
+        fu_companies: list[str] = []
+        fu_remarks: list[str] = []
+        fu_dates: list[str] = []
+        fu_before: list[float | None] = []
+        fu_after: list[float | None] = []
+        fu_features: list[str] = []
+        for fu in followups_week:
+            tf_id = fu.get("ticket_feature_id")
+            tf_row = tf_by_id.get(tf_id, {})
+            tr = training_by_id.get(tf_row.get("training_id"))
+            pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
+            fu_companies.append(companies_map.get(pm_row.get("company_id"), ""))
+            fu_remarks.append(fu.get("remarks") or "")
+            fu_dates.append(str(fu.get("created_at") or ""))
+            fu_before.append(float(fu.get("previous_percentage")) if fu.get("previous_percentage") is not None else None)
+            fu_after.append(float(fu.get("total_percentage")) if fu.get("total_percentage") is not None else None)
+            fname = fu.get("feature_name") or feature_names.get(tf_row.get("feature_id"), "")
+            fu_features.append(fname)
+        click_events_week: list[dict[str, Any]] = []
+        for row in all_click_rows:
+            d = _parse_iso_to_date(row.get("clicked_at"))
+            if not _in_range(d, rs, re):
+                continue
+            tf_id = row.get("ticket_feature_id")
+            tf_row = tf_by_id.get(tf_id, {}) if tf_id else {}
+            tr = training_by_id.get(tf_row.get("training_id")) if tf_row else None
+            pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr and tr.get("id") else None, {})
+            fname = feature_names.get(tf_row.get("feature_id"), "") if tf_row else ""
+            click_events_week.append(
+                {
+                    "company": companies_map.get(pm_row.get("company_id"), ""),
+                    "feature": fname,
+                    "clickedAt": str(row.get("clicked_at") or ""),
+                }
+            )
+        click_events_week.sort(key=lambda x: x.get("clickedAt") or "", reverse=True)
+
+        fu_details = {
+            "companies": fu_companies,
+            "remarks": fu_remarks,
+            "followupDates": fu_dates,
+            "beforePercentages": fu_before,
+            "afterPercentages": fu_after,
+            "features": [[f] for f in fu_features],
+            "clickCountWeek": click_week_count,
+            "followupRowsWeek": fu_from_rows,
+            "clickEventsWeek": click_events_week,
+        }
+
+        succ_companies: list[str] = []
+        succ_remarks: list[str] = []
+        succ_dates: list[str] = []
+        succ_before: list[float | None] = []
+        succ_after: list[float | None] = []
+        succ_features: list[str] = []
+        for fu in success_rows:
+            tf_id = fu.get("ticket_feature_id")
+            tf_row = tf_by_id.get(tf_id, {})
+            tr = training_by_id.get(tf_row.get("training_id"))
+            pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
+            succ_companies.append(companies_map.get(pm_row.get("company_id"), ""))
+            succ_remarks.append(fu.get("remarks") or "")
+            succ_dates.append(str(fu.get("created_at") or ""))
+            succ_before.append(float(fu.get("previous_percentage")) if fu.get("previous_percentage") is not None else None)
+            succ_after.append(float(fu.get("total_percentage")) if fu.get("total_percentage") is not None else None)
+            fname = fu.get("feature_name") or feature_names.get(tf_row.get("feature_id"), "")
+            succ_features.append(fname)
+        succ_details = {
+            "companies": succ_companies,
+            "remarks": succ_remarks,
+            "followupDates": succ_dates,
+            "beforePercentages": succ_before,
+            "afterPercentages": succ_after,
+            "features": [[f] for f in succ_features],
+        }
+
+        pct_values = [poc_pct, train_pct, fu_pct, success_pct]
+        overall_pct = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
+
+        # Weekly graph: same logic per calendar week of month
+        for w in range(1, 6):
+            rng = None
+            try:
+                import calendar as _cal
+
+                _, last_day = _cal.monthrange(y, month_num)
+                start_day = (w - 1) * 7 + 1
+                end_day = min(w * 7, last_day)
+                if start_day > last_day:
+                    start_day = 1
+                    end_day = min(7, last_day)
+                wrs = date(y, month_num, start_day)
+                wre = date(y, month_num, end_day)
+                rng = (wrs, wre)
+            except Exception:
+                rng = None
+            if not rng:
+                weekly_success_pct.append(0)
+                continue
+            wrs, wre = rng
+            poc_w = sum(
+                1
+                for row in pm_rows
+                if _in_range(_parse_iso_to_date(row.get("created_at")), wrs, wre)
+            )
+            poc_pct_w = min(100, (poc_w / SUCCESS_KPI_POC_TARGET) * 100) if SUCCESS_KPI_POC_TARGET else 0
+            train_w = []
+            for t in trainings:
+                d = _parse_iso_to_date(t.get("training_schedule_date") or t.get("created_at"))
+                if _in_range(d, wrs, wre):
+                    train_w.append(t)
+            train_pct_w = min(
+                100,
+                (sum(1 for t in train_w if str(t.get("training_status") or "").lower() == "yes") / SUCCESS_KPI_TRAIN_TARGET) * 100,
+            ) if SUCCESS_KPI_TRAIN_TARGET else 0
+            fu_w = [fu for fu in followups if _in_range(_parse_iso_to_date(fu.get("created_at")), wrs, wre)]
+            clicks_w = _count_clicks_in_range(wrs, wre)
+            fu_cnt = len(fu_w) + clicks_w
+            fu_pct_w = min(100, (fu_cnt / SUCCESS_KPI_FOLLOWUP_TARGET) * 100) if SUCCESS_KPI_FOLLOWUP_TARGET else 0
+            inc_w = [
+                fu
+                for fu in fu_w
+                if fu.get("total_percentage") is not None
+                and fu.get("previous_percentage") is not None
+                and float(fu["total_percentage"]) > float(fu["previous_percentage"])
+            ]
+            success_inc_pct_w = min(100, (len(inc_w) / SUCCESS_KPI_INCREASE_TARGET) * 100) if SUCCESS_KPI_INCREASE_TARGET else 0
+            overall_w = round((poc_pct_w + train_pct_w + fu_pct_w + success_inc_pct_w) / 4, 2)
+            weekly_success_pct.append(overall_w)
+
+        success_kpi = {
+            "pocCollected": {
+                "currentValue": poc_week,
+                "targetValue": poc_target,
+                "percentage": f"{poc_week}/{poc_target}",
+                "details": poc_details,
+            },
+            "weeklyTrainingTarget": {
+                "currentValue": train_current,
+                "targetValue": train_target,
+                "percentage": f"{train_current}/{train_target}",
+                "details": train_details,
+            },
+            "trainingFollowUp": {
+                "currentValue": fu_current,
+                "targetValue": fu_target,
+                "percentage": f"{fu_current}/{fu_target}",
+                "details": fu_details,
+            },
+            "successIncrease": {
+                "currentValue": success_current,
+                "targetValue": success_target,
+                "percentage": f"{success_current}/{success_target}",
+                "details": succ_details,
+            },
+            "overallPercentage": overall_pct,
+            "meta": {
+                "weekLabel": f"{week_start.isoformat()} – {week_end.isoformat()}",
+                "targets": {
+                    "poc": SUCCESS_KPI_POC_TARGET,
+                    "training": SUCCESS_KPI_TRAIN_TARGET,
+                    "followup": SUCCESS_KPI_FOLLOWUP_TARGET,
+                    "increase": SUCCESS_KPI_INCREASE_TARGET,
+                },
+            },
+        }
+        return success_kpi, weekly_success_pct
+    except Exception:
+        return None, [0, 0, 0, 0, 0]
+
