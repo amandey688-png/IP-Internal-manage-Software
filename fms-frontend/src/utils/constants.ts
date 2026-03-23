@@ -75,6 +75,8 @@ export const ROUTES = {
   CLIENT_PAYMENT_Q_COMP: '/onboarding/client-payment/completed/Q-Comp',
   CLIENT_PAYMENT_M_COMP: '/onboarding/client-payment/completed/M-Comp',
   CLIENT_PAYMENT_HF_COMP: '/onboarding/client-payment/completed/HF-Comp',
+  /** Payment Ageing Report (grid + summary; data from API) */
+  CLIENT_PAYMENT_PAYMENT_AGEING: '/onboarding/client-payment/payment-ageing',
   /** Training module */
   TRAINING: '/training',
   TRAINING_CLIENT: '/training/client-training',
@@ -136,6 +138,7 @@ export const API_ENDPOINTS = {
     LIST_OPEN: '/onboarding/client-payment?status=open',
     LIST_COMPLETED: (section: string) => `/onboarding/client-payment?status=completed&section=${encodeURIComponent(section)}`,
     CREATE: '/onboarding/client-payment',
+    PAYMENT_AGEING_REPORT: '/onboarding/client-payment/payment-ageing-report',
   },
   LEADS: {
     LIST: '/leads',
