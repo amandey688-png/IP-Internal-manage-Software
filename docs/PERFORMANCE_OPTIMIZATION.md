@@ -9,6 +9,8 @@ Target: **Sub-1 second** load for key pages (small DB ~0.03 GB). Stack: FastAPI 
 | Issue | Fix |
 |-------|-----|
 | `list_client_payment` fetched all rows with `SELECT *` | Server-side filter by `status`/`section`, explicit column list, `.limit(500)` |
+| List waited on **two** Supabase lookups **sequentially** + huge `.in_(ids)` | **Parallel** `sent` + `max_followup` lookups; **batched** `IN` lists (120 ids/chunk); `max_followup` loads followups + legacy followup1 **in parallel** |
+| Raised Invoices page blocked on **`GET /companies`** (full table) | **Lazy-load** companies only when **Add Raised Invoice** modal opens |
 | Client Payment drawer = 4 separate API calls | Single **batch endpoint** `GET /onboarding/client-payment/{id}/drawer` returns sent + followups + intercept + discontinuation |
 | Tickets list uses `select("*", count="exact")` | Kept; pagination and range already applied. Enrichment does 4 batched lookups (companies, pages, divisions, approvers) — acceptable |
 | `_build_ref_no_to_company()` loads all tickets | Cached globally; first request per process can be slow — consider short TTL or removing if not critical |
@@ -28,7 +30,7 @@ Run the statements in `docs/supabase_performance_indexes.sql` in Supabase SQL Ed
 
 ## 3. N+1 and Extra Round-Trips
 
-- **List client payment**: Was 1 full-table query + 2 batch lookups (sent ids, max followup). Now: one filtered, limited list query + same 2 batch lookups (no N+1).
+- **List client payment**: One filtered list query + **two parallel** batch lookups (sent ids, max followup), each **chunked** to avoid huge PostgREST URLs. Max followup runs **followups table + legacy followup1** in parallel.
 - **Drawer**: Was 4 requests per open; now 1 request to `/drawer` (backend runs 4 queries in parallel and returns one JSON).
 
 ---
@@ -77,6 +79,8 @@ Run the statements in `docs/supabase_performance_indexes.sql` in Supabase SQL Ed
 ## 7. Checklist
 
 - [x] `list_client_payment`: server-side filter, explicit columns, limit 500.
+- [x] `list_client_payment`: parallel sent + max-followup lookups; batched `IN`; parallel followups vs legacy followup1 inside max-followup.
+- [x] Client Payment: lazy-load `/companies` on Add Invoice modal.
 - [x] Batch drawer endpoint: `GET /onboarding/client-payment/{id}/drawer`.
 - [x] Frontend uses drawer endpoint in Client Payment page.
 - [x] Indexes script: `docs/supabase_performance_indexes.sql`.

@@ -22,6 +22,7 @@ import {
   type DashboardKpiResponse,
   type SupportFmsDelayItem,
 } from '../../api/dashboardKpi'
+import { weekOfMonth } from './kpiWeekUtils'
 
 const { Title, Text } = Typography
 
@@ -65,14 +66,13 @@ export const DashboardKPIPage = () => {
   >(null)
   const [graphModal, setGraphModal] = useState<'checklist' | 'delegation' | 'supportFMS' | 'successKpi' | null>(null)
 
-  // Default filters: show data for the week prior to the current week
+  // Default filters: same calendar week as ~7 days ago (week-of-month matches backend _week_of_month)
   useEffect(() => {
     const today = dayjs()
     const previousWeekDate = today.subtract(7, 'day')
     setMonth(MONTHS[previousWeekDate.month()])
     setYear(String(previousWeekDate.year()))
-    const w = Math.ceil(previousWeekDate.date() / 7)
-    setWeek(`week ${Math.min(w, 5)}`)
+    setWeek(`week ${weekOfMonth(previousWeekDate)}`)
   }, [])
 
   const loadData = useCallback(() => {

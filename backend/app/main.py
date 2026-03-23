@@ -9,6 +9,7 @@ import os
 import sys
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict, deque
 # Fix Windows console encoding for emoji/special chars
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -2197,6 +2198,7 @@ def dashboard_kpi(
         completion_delay_details = []
         pending_details = []
         tickets = []
+        stage2_completed_in_week = 0
         try:
             types_cb = ["chore", "bug"]
             cols = (
@@ -2227,30 +2229,33 @@ def dashboard_kpi(
                 except Exception:
                     week_num_selected = 1
 
+            # Enrich all chores/bugs once (company names) — used for weekly slice and Stage 2 completion week
+            _enrich_tickets_with_lookups(tickets)
+
             week_tickets = []
             for t in tickets:
                 w_num, m_num, y_num = _get_ticket_week(t)
                 if w_num == week_num_selected and m_num == month_num and y_num == y:
                     week_tickets.append(t)
 
-            # Resolve company name: ticket company_name, else companies by company_id, else reference_no fallback (same as list_tickets)
-            _enrich_tickets_with_lookups(week_tickets)
-
-            for t in week_tickets:
-                created = t.get("created_at") or ""
-                ref = (t.get("reference_no") or "").strip() or "N/A"
-                company_val = (t.get("company_name") or "").strip() or "—"
-                row_item = {
-                    "type": (t.get("type") or "Chore").title(),
+            def _support_fms_row_item(ticket: dict) -> dict:
+                created = ticket.get("created_at") or ""
+                ref = (ticket.get("reference_no") or "").strip() or "N/A"
+                company_val = (ticket.get("company_name") or "").strip() or "—"
+                return {
+                    "type": (ticket.get("type") or "Chore").title(),
                     "company": company_val,
                     "requested_person": "",
                     "submitted_by": "",
-                    "title": (t.get("title") or "").strip() or "—",
-                    "description": (t.get("description") or "").strip() or "",
+                    "title": (ticket.get("title") or "").strip() or "—",
+                    "description": (ticket.get("description") or "").strip() or "",
                     "reference_no": ref,
-                    "query_arrival": _normalize_query_arrival_iso(t.get("query_arrival_at") or created),
+                    "query_arrival": _normalize_query_arrival_iso(ticket.get("query_arrival_at") or created),
                     "month": month,
                 }
+
+            for t in week_tickets:
+                row_item = _support_fms_row_item(t)
                 # Response delay: same SLA logic as Support Dashboard (30 min from query_arrival to response)
                 has_resp, resp_text = _has_response_delay(
                     t.get("query_arrival_at") or t.get("created_at"),
@@ -2260,7 +2265,25 @@ def dashboard_kpi(
                     response_delay_count += 1
                     response_delay_details.append({**row_item, "delay_time": resp_text or "Delay"})
 
-                # Completion delay: use Stage‑2 SLA helper (same as Support Dashboard stats)
+                # Pending chores & bugs for this owner in the selected week
+                status = t.get("status") or ""
+                if _is_pending(status) and not _is_resolved(status, t.get("status_4")):
+                    pending_count += 1
+                    pending_details.append(row_item)
+
+            # Completion delay (Stage 2): bucket by week of actual_2 (when Stage 2 completed), not ticket creation week.
+            # So CH-0265 / CH-0264 appear in the week they crossed Stage 2 TAT, even if created earlier.
+            stage2_completed_in_week = 0
+            for t in tickets:
+                if not _stage2_marked_completed(t.get("status_2")):
+                    continue
+                if not (str(t.get("actual_2") or "").strip()):
+                    continue
+                w2, m2, y2 = _get_ticket_week_from_iso(t.get("actual_2"))
+                if w2 == week_num_selected and m2 == month_num and y2 == y:
+                    stage2_completed_in_week += 1
+
+            for t in tickets:
                 has_comp, comp_text = _has_completion_delay(
                     resolved_at=t.get("actual_4"),
                     created_at=t.get("created_at"),
@@ -2270,15 +2293,13 @@ def dashboard_kpi(
                     status_2=t.get("status_2"),
                     actual_1=t.get("actual_1"),
                 )
-                if has_comp:
-                    completion_delay_count += 1
-                    completion_delay_details.append({**row_item, "delay_time": comp_text or "TAT crossed"})
-
-                # Pending chores & bugs for this owner in the selected week
-                status = t.get("status") or ""
-                if _is_pending(status) and not _is_resolved(status, t.get("status_4")):
-                    pending_count += 1
-                    pending_details.append(row_item)
+                if not has_comp:
+                    continue
+                w2, m2, y2 = _get_ticket_week_from_iso(t.get("actual_2"))
+                if w2 != week_num_selected or m2 != month_num or y2 != y:
+                    continue
+                completion_delay_count += 1
+                completion_delay_details.append({**_support_fms_row_item(t), "delay_time": comp_text or "TAT crossed"})
 
             # Target = total chores & bugs for this week (same as Support Dashboard weekly stats)
             total_cb = len(week_tickets)
@@ -2419,8 +2440,8 @@ def dashboard_kpi(
                 },
                 "completionDelay": {
                     "value": completion_delay_count,
-                    "target": total_cb,
-                    "percentage": f"{completion_delay_count}/{total_cb or 0}",
+                    "target": stage2_completed_in_week if stage2_completed_in_week else total_cb,
+                    "percentage": f"{completion_delay_count}/{stage2_completed_in_week or total_cb or 0}",
                     "details": completion_delay_details,
                 },
                 "pendingChores": {
@@ -2564,11 +2585,12 @@ def _has_completion_delay(
     actual_1: str | None = None,
 ) -> tuple[bool, str]:
     """Returns (has_delay, delay_time_text).
-    Completion delay = ONLY (Chores & Bugs) where Stage 2 Status is 'Completed' AND TAT crossed (actual_2 - planned_2 > 1 day).
-    If Stage 2 is Pending, do NOT show in completion delay."""
+    Completion delay = Chores & Bugs where Stage 2 is completed AND
+    elapsed time from planned_2 (or actual_1) to actual_2 exceeds SLA_STAGE2_DAYS (1 calendar day = 86400s).
+    Uses wall-clock duration, not only .days, so delays >24h across two calendar days count correctly."""
     if ticket_type not in ("chore", "bug"):
         return False, ""
-    if not status_2 or str(status_2).lower() != "completed":
+    if not _stage2_marked_completed(status_2):
         return False, ""
     p2 = planned_2 or actual_1
     if not p2 or not actual_2:
@@ -2580,9 +2602,11 @@ def _has_completion_delay(
             planned = planned.replace(tzinfo=timezone.utc)
         if actual.tzinfo is None:
             actual = actual.replace(tzinfo=timezone.utc)
-        delta_days = (actual - planned).days
-        if delta_days > SLA_STAGE2_DAYS:
-            return True, f"TAT crossed: {delta_days}d"
+        delta_sec = (actual - planned).total_seconds()
+        sla_sec = float(SLA_STAGE2_DAYS) * 86400.0
+        if delta_sec > sla_sec:
+            delta_days = delta_sec / 86400.0
+            return True, f"TAT crossed: {delta_days:.1f}d"
         return False, ""
     except Exception:
         return False, ""
@@ -2798,6 +2822,29 @@ def _get_ticket_week(t: dict) -> tuple[int, int, int]:
         return _week_of_month(dt), dt.month, dt.year
     except Exception:
         return 0, 0, 0
+
+
+def _get_ticket_week_from_iso(ts: str | None) -> tuple[int, int, int]:
+    """Return (week_num, month, year) for an ISO timestamp (e.g. Stage 2 actual_2)."""
+    if not ts:
+        return 0, 0, 0
+    try:
+        dt = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return _week_of_month(dt), dt.month, dt.year
+    except Exception:
+        return 0, 0, 0
+
+
+def _stage2_marked_completed(status_2: str | None) -> bool:
+    """True when Stage 2 is recorded as completed (handles Completed / complete / done)."""
+    if not status_2:
+        return False
+    s = str(status_2).lower().strip()
+    if s in ("completed", "complete", "done", "closed"):
+        return True
+    return "complet" in s and "incomplet" not in s
 
 
 def _week_date_range(week_num: int, month: int, year: int) -> str:
@@ -3171,18 +3218,33 @@ def create_onboarding_payment_status(payload: OnboardingPaymentStatusCreate, aut
         raise HTTPException(400, str(e)[:200])
 
 
+# PostgREST URL limits + large IN lists: batch id filters (Raised Invoices list).
+_OCP_ID_IN_BATCH = 120
+
+
+def _chunk_ids(ids: list, batch_size: int):
+    for i in range(0, len(ids), batch_size):
+        yield ids[i : i + batch_size]
+
+
 def _get_client_payment_ids_with_sent(client_payment_ids: list) -> set:
     """Return set of client_payment ids that have Invoice Sent details submitted (row in onboarding_client_payment_sent)."""
     if not client_payment_ids:
         return set()
+    out = set()
     try:
-        r = (
-            supabase.table("onboarding_client_payment_sent")
-            .select("client_payment_id")
-            .in_("client_payment_id", client_payment_ids)
-            .execute()
-        )
-        return {str(row.get("client_payment_id")) for row in (r.data or []) if row.get("client_payment_id")}
+        for chunk in _chunk_ids(client_payment_ids, _OCP_ID_IN_BATCH):
+            r = (
+                supabase.table("onboarding_client_payment_sent")
+                .select("client_payment_id")
+                .in_("client_payment_id", chunk)
+                .execute()
+            )
+            for row in (r.data or []):
+                cid = row.get("client_payment_id")
+                if cid:
+                    out.add(str(cid))
+        return out
     except Exception as e:
         _log(f"client payment sent lookup: {e}")
         return set()
@@ -3192,14 +3254,20 @@ def _get_client_payment_ids_with_followup1(client_payment_ids: list) -> set:
     """Return set of client_payment ids that have Follow up 1 submitted (legacy onboarding_client_payment_followup1)."""
     if not client_payment_ids:
         return set()
+    out = set()
     try:
-        r = (
-            supabase.table("onboarding_client_payment_followup1")
-            .select("client_payment_id")
-            .in_("client_payment_id", client_payment_ids)
-            .execute()
-        )
-        return {str(row.get("client_payment_id")) for row in (r.data or []) if row.get("client_payment_id")}
+        for chunk in _chunk_ids(client_payment_ids, _OCP_ID_IN_BATCH):
+            r = (
+                supabase.table("onboarding_client_payment_followup1")
+                .select("client_payment_id")
+                .in_("client_payment_id", chunk)
+                .execute()
+            )
+            for row in (r.data or []):
+                cid = row.get("client_payment_id")
+                if cid:
+                    out.add(str(cid))
+        return out
     except Exception as e:
         _log(f"client payment followup1 lookup: {e}")
         return set()
@@ -3210,26 +3278,45 @@ def _get_client_payment_max_followup(client_payment_ids: list) -> dict:
     out = {}
     if not client_payment_ids:
         return out
-    try:
-        r = (
-            supabase.table("onboarding_client_payment_followups")
-            .select("client_payment_id, followup_no")
-            .in_("client_payment_id", client_payment_ids)
-            .execute()
-        )
-        for row in (r.data or []):
+
+    def _merge_followup_rows(rows: list) -> None:
+        for row in rows:
             cid = str(row.get("client_payment_id")) if row.get("client_payment_id") else None
             if cid:
                 no = row.get("followup_no")
                 if no is not None:
                     out[cid] = max(out.get(cid, 0), int(no))
+
+    try:
+        # Parallel: multi-followup rows vs legacy followup1 (two round-trips at once).
+        def load_followups_table():
+            acc = []
+            for chunk in _chunk_ids(client_payment_ids, _OCP_ID_IN_BATCH):
+                r = (
+                    supabase.table("onboarding_client_payment_followups")
+                    .select("client_payment_id, followup_no")
+                    .in_("client_payment_id", chunk)
+                    .execute()
+                )
+                acc.extend(r.data or [])
+            return acc
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            fut_rows = pool.submit(load_followups_table)
+            fut_legacy = pool.submit(_get_client_payment_ids_with_followup1, client_payment_ids)
+            follow_rows = fut_rows.result()
+            legacy_set = fut_legacy.result()
+
+        _merge_followup_rows(follow_rows)
+        for cid in legacy_set:
+            if cid and out.get(cid, 0) < 1:
+                out[cid] = 1
     except Exception as e:
         _log(f"client payment max followup lookup: {e}")
-    # Fallback: legacy followup1 counts as 1
-    legacy = _get_client_payment_ids_with_followup1(client_payment_ids)
-    for cid in legacy:
-        if cid and out.get(cid, 0) < 1:
-            out[cid] = 1
+        legacy = _get_client_payment_ids_with_followup1(client_payment_ids)
+        for cid in legacy:
+            if cid and out.get(cid, 0) < 1:
+                out[cid] = 1
     return out
 
 
@@ -3260,8 +3347,11 @@ def list_client_payment(auth: dict = Depends(get_current_user), status: str = No
         if status == "completed" and section and section == "Gener":
             items = [x for x in items if (x.get("genre") == "Y" or x.get("genre") not in ("M", "Q", "HY"))]
         ids = [str(row.get("id")) for row in items if row.get("id")]
-        ids_with_sent = _get_client_payment_ids_with_sent(ids)
-        max_followup = _get_client_payment_max_followup(ids)
+        with ThreadPoolExecutor(max_workers=2) as _pool:
+            _f_sent = _pool.submit(_get_client_payment_ids_with_sent, ids)
+            _f_max = _pool.submit(_get_client_payment_max_followup, ids)
+            ids_with_sent = _f_sent.result()
+            max_followup = _f_max.result()
         today = date.today()
         for row in items:
             inv_date = row.get("invoice_date")
@@ -3826,9 +3916,15 @@ def get_client_payment_intercept(client_payment_id: str, auth: dict = Depends(ge
                     "tagged_user_id": None,
                     "tagged_user_name": None,
                     "tagged_user_email": None,
+                    "tagged_user_2_id": None,
+                    "tagged_user_2_name": None,
+                    "tagged_user_2_email": None,
                     "payment_action_person": None,
                     "payment_action_remarks": None,
                     "payment_action_submitted_at": None,
+                    "payment_action_2_person": None,
+                    "payment_action_2_remarks": None,
+                    "payment_action_2_submitted_at": None,
                 },
                 "submitted": False,
                 "editable_24h": True,
@@ -3857,9 +3953,15 @@ def get_client_payment_intercept(client_payment_id: str, auth: dict = Depends(ge
                 "tagged_user_id": row.get("tagged_user_id"),
                 "tagged_user_name": row.get("tagged_user_name"),
                 "tagged_user_email": row.get("tagged_user_email"),
+                "tagged_user_2_id": row.get("tagged_user_2_id"),
+                "tagged_user_2_name": row.get("tagged_user_2_name"),
+                "tagged_user_2_email": row.get("tagged_user_2_email"),
                 "payment_action_person": row.get("payment_action_person"),
                 "payment_action_remarks": row.get("payment_action_remarks"),
                 "payment_action_submitted_at": row.get("payment_action_submitted_at"),
+                "payment_action_2_person": row.get("payment_action_2_person"),
+                "payment_action_2_remarks": row.get("payment_action_2_remarks"),
+                "payment_action_2_submitted_at": row.get("payment_action_2_submitted_at"),
             },
             "submitted": True,
             "created_at": row.get("created_at"),
@@ -3868,6 +3970,66 @@ def get_client_payment_intercept(client_payment_id: str, auth: dict = Depends(ge
     except Exception as e:
         _log(f"get client payment intercept: {e}")
         return {"data": {}, "submitted": False}
+
+
+@api_router.post("/onboarding/client-payment/{client_payment_id}/intercept/tag-2")
+def save_client_payment_intercept_tag2(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Second tag (T 2) for Client Payment. Any authenticated user may submit. Requires intercept tag + first payment action."""
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict):
+        raise HTTPException(400, "data must be an object")
+    tagged_uid = (data.get("tagged_user_id") or "").strip() or None
+    if not tagged_uid:
+        raise HTTPException(400, "tagged_user_id is required")
+    now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
+        row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        if not row:
+            raise HTTPException(400, "Save Intercept Requirements and Tag first")
+        if not row.get("tagged_user_id"):
+            raise HTTPException(400, "Tag (T 1) required before Tag 2")
+        if not row.get("payment_action_submitted_at"):
+            raise HTTPException(400, "Client Payment first action must be completed before Tag 2")
+        if row.get("tagged_user_2_id"):
+            raise HTTPException(400, "Tag 2 is already set")
+        u_name = ""
+        u_email = ""
+        try:
+            ur = supabase.table("users_view").select("id, full_name, email").eq("id", tagged_uid).limit(1).execute()
+            urow = (ur.data or [None])[0] if ur.data else None
+            if urow:
+                u_name = (urow.get("full_name") or "").strip() or ""
+                u_email = (urow.get("email") or "").strip() or ""
+        except Exception:
+            pass
+        supabase.table("onboarding_client_payment_intercept").update(
+            {
+                "tagged_user_2_id": tagged_uid,
+                "tagged_user_2_name": u_name or None,
+                "tagged_user_2_email": u_email or None,
+                "updated_at": now_iso,
+            }
+        ).eq("id", row["id"]).execute()
+        return {
+            "data": {
+                "tagged_user_2_id": tagged_uid,
+                "tagged_user_2_name": u_name or None,
+                "tagged_user_2_email": u_email or None,
+            },
+            "created_at": now_iso,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        err = str(e).lower()
+        if "column" in err and "tagged_user_2" in err:
+            raise HTTPException(
+                503,
+                "Run docs/CLIENT_PAYMENT_INTERCEPT_TAG2.sql in Supabase to add Tag 2 columns.",
+            )
+        _log(f"save client payment intercept tag2: {e}")
+        raise HTTPException(400, str(e)[:200])
 
 
 @api_router.post("/onboarding/client-payment/{client_payment_id}/intercept")
@@ -3946,8 +4108,8 @@ def save_client_payment_intercept(client_payment_id: str, payload: dict, auth: d
 
 
 @api_router.get("/users/options")
-def list_user_options(auth: dict = Depends(require_roles(["admin", "master_admin"]))):
-    """Lightweight list of registered users for dropdowns (id, full_name, email)."""
+def list_user_options(auth: dict = Depends(get_current_user)):
+    """Lightweight list of registered users for dropdowns (id, full_name, email). Any authenticated user."""
     try:
         r = supabase.table("users_view").select("id, full_name, email, is_active, created_at").order("created_at", desc=True).execute()
         rows = [x for x in (r.data or []) if x and x.get("id") and x.get("is_active", True)]
@@ -3966,11 +4128,12 @@ class PaymentActionSubmitRequest(BaseModel):
     client_payment_id: str
     person: str
     remarks: str
+    tag: str | None = None  # "t1" | "t2" — which payment action round (default t1)
 
 
 @api_router.post("/dashboard/payment-actions/submit")
 def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, auth: dict = Depends(require_roles(["master_admin"]))):
-    """Record Person + Remarks from Payment Action dashboard; row then drops off dashboard and shows in Client Payment drawer."""
+    """Record Person + Remarks from Payment Action dashboard; T1 or T2 round."""
     person = (payload.person or "").strip()
     remarks = (payload.remarks or "").strip()
     if not person:
@@ -3980,54 +4143,126 @@ def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, auth: d
     cid = (payload.client_payment_id or "").strip()
     if not cid:
         raise HTTPException(400, "client_payment_id is required")
+    tag = (payload.tag or "t1").strip().lower()
+    if tag not in ("t1", "t2"):
+        raise HTTPException(400, "tag must be t1 or t2")
     now_iso = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     try:
-        r = supabase.table("onboarding_client_payment_intercept").select("id, tagged_user_id").eq("client_payment_id", cid).limit(1).execute()
+        r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", cid).limit(1).execute()
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row or not row.get("tagged_user_id"):
             raise HTTPException(404, "Tagged intercept not found for this invoice")
+        if tag == "t1":
+            if row.get("payment_action_submitted_at"):
+                raise HTTPException(400, "T1 payment action already submitted")
+            supabase.table("onboarding_client_payment_intercept").update({
+                "payment_action_person": person,
+                "payment_action_remarks": remarks,
+                "payment_action_submitted_at": now_iso,
+                "payment_action_submitted_by": auth.get("id"),
+                "updated_at": now_iso,
+            }).eq("id", row["id"]).execute()
+            return {"success": True, "payment_action_submitted_at": now_iso, "tag": "t1"}
+        # T2
+        if not row.get("payment_action_submitted_at"):
+            raise HTTPException(400, "Complete T1 payment action before T2")
+        has_t2 = bool(
+            row.get("tagged_user_2_id")
+            or (str(row.get("tagged_user_2_name") or "").strip())
+            or (str(row.get("tagged_user_2_email") or "").strip())
+        )
+        if not has_t2:
+            raise HTTPException(400, "No Tag 2 user for this invoice")
+        if row.get("payment_action_2_submitted_at"):
+            raise HTTPException(400, "T2 payment action already submitted")
         supabase.table("onboarding_client_payment_intercept").update({
-            "payment_action_person": person,
-            "payment_action_remarks": remarks,
-            "payment_action_submitted_at": now_iso,
-            "payment_action_submitted_by": auth.get("id"),
+            "payment_action_2_person": person,
+            "payment_action_2_remarks": remarks,
+            "payment_action_2_submitted_at": now_iso,
+            "payment_action_2_submitted_by": auth.get("id"),
             "updated_at": now_iso,
         }).eq("id", row["id"]).execute()
-        return {"success": True, "payment_action_submitted_at": now_iso}
+        return {"success": True, "payment_action_2_submitted_at": now_iso, "tag": "t2"}
     except HTTPException:
         raise
     except Exception as e:
+        err = str(e).lower()
+        if "payment_action_2" in err and ("column" in err or "does not exist" in err):
+            raise HTTPException(
+                503,
+                "Run docs/CLIENT_PAYMENT_INTERCEPT_TAG2.sql in Supabase (payment_action_2_* columns).",
+            )
         _log(f"dashboard payment action submit: {e}")
         raise HTTPException(400, str(e)[:200])
 
 
 @api_router.get("/dashboard/payment-actions")
 def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"]))):
-    """Tagged intercept rows not yet cleared via Payment Action Submit (Master Admin)."""
+    """Tagged intercept rows: pending T1/T2 work items plus last 100 fully completed T2 flows (read-only)."""
     try:
         r = (
             supabase.table("onboarding_client_payment_intercept")
             .select(
-                "client_payment_id, tagged_user_id, tagged_user_name, tagged_user_email, created_at, payment_action_submitted_at"
+                "client_payment_id, tagged_user_id, tagged_user_name, tagged_user_email, created_at, updated_at, "
+                "payment_action_submitted_at, tagged_user_2_id, tagged_user_2_name, tagged_user_2_email, payment_action_2_submitted_at"
             )
             .not_.is_("tagged_user_id", "null")
-            .is_("payment_action_submitted_at", "null")
             .order("created_at", desc=True)
             .limit(500)
             .execute()
         )
-        intercept_rows = [x for x in (r.data or []) if x.get("tagged_user_id")]
-        seen: set[str] = set()
-        ordered_cids: list[str] = []
-        intercept_by_cid: dict[str, dict] = {}
-        for x in intercept_rows:
+        raw_rows = [x for x in (r.data or []) if x.get("tagged_user_id")]
+
+        def _intercept_has_t2_tag(x: dict) -> bool:
+            return bool(
+                x.get("tagged_user_2_id")
+                or (str(x.get("tagged_user_2_name") or "").strip())
+                or (str(x.get("tagged_user_2_email") or "").strip())
+            )
+
+        pending_items: list[dict] = []
+        completed_items: list[dict] = []
+        for x in raw_rows:
             cid = str(x.get("client_payment_id") or "")
-            if not cid or cid in seen:
+            if not cid:
                 continue
-            seen.add(cid)
-            ordered_cids.append(cid)
-            intercept_by_cid[cid] = x
-        ids = ordered_cids
+            t1_done = bool(x.get("payment_action_submitted_at"))
+            t2_tag = _intercept_has_t2_tag(x)
+            t2_done = bool(x.get("payment_action_2_submitted_at"))
+            if not t1_done:
+                pending_items.append(
+                    {
+                        "client_payment_id": cid,
+                        "intercept_row": x,
+                        "pending_payment_tag": "t1",
+                    }
+                )
+            elif t2_tag and not t2_done:
+                pending_items.append(
+                    {
+                        "client_payment_id": cid,
+                        "intercept_row": x,
+                        "pending_payment_tag": "t2",
+                    }
+                )
+            elif t1_done and t2_tag and t2_done:
+                # Read-only: both T1+T2 payment actions submitted — show Tag T1 / Tag T2 like pending rows
+                sort_key = str(x.get("payment_action_2_submitted_at") or x.get("updated_at") or "")
+                completed_items.append(
+                    {
+                        "client_payment_id": cid,
+                        "intercept_row": x,
+                        "pending_payment_tag": "completed",
+                        "_sort": sort_key,
+                    }
+                )
+        completed_items.sort(key=lambda it: it.get("_sort") or "", reverse=True)
+        for it in completed_items:
+            it.pop("_sort", None)
+        completed_items = completed_items[:100]
+
+        queue: list[dict] = pending_items + completed_items
+        ids = list({p["client_payment_id"] for p in queue})
         if not ids:
             return {"items": []}
         p = (
@@ -4038,11 +4273,12 @@ def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"
         )
         by_id = {str(x.get("id")): x for x in (p.data or []) if x and x.get("id")}
         out = []
-        for cid in ids:
+        for pitem in queue:
+            cid = pitem["client_payment_id"]
             row = by_id.get(cid)
             if not row:
                 continue
-            it = intercept_by_cid.get(cid) or {}
+            it = pitem["intercept_row"]
             out.append(
                 {
                     "client_payment_id": cid,
@@ -4055,11 +4291,19 @@ def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"
                     "tagged_user_id": it.get("tagged_user_id"),
                     "tagged_user_name": it.get("tagged_user_name"),
                     "tagged_user_email": it.get("tagged_user_email"),
+                    "tagged_user_2_id": it.get("tagged_user_2_id"),
+                    "tagged_user_2_name": it.get("tagged_user_2_name"),
+                    "tagged_user_2_email": it.get("tagged_user_2_email"),
+                    "pending_payment_tag": pitem["pending_payment_tag"],
                 }
             )
         return {"items": out}
     except Exception as e:
-        _log(f"dashboard payment actions: {e}")
+        err = str(e).lower()
+        if "payment_action_2" in err and ("column" in err or "does not exist" in err):
+            _log(f"dashboard payment actions (missing T2 columns): {e}")
+        else:
+            _log(f"dashboard payment actions: {e}")
         return {"items": []}
 
 
@@ -4140,7 +4384,28 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
         r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
-            out["intercept"] = {"data": {"last_remark_user": None, "usage_last_1_month": None, "contact_person": None, "contact_number": None, "tagged_user_id": None, "tagged_user_name": None, "tagged_user_email": None, "payment_action_person": None, "payment_action_remarks": None, "payment_action_submitted_at": None}, "submitted": False, "editable_24h": True}
+            out["intercept"] = {
+                "data": {
+                    "last_remark_user": None,
+                    "usage_last_1_month": None,
+                    "contact_person": None,
+                    "contact_number": None,
+                    "tagged_user_id": None,
+                    "tagged_user_name": None,
+                    "tagged_user_email": None,
+                    "tagged_user_2_id": None,
+                    "tagged_user_2_name": None,
+                    "tagged_user_2_email": None,
+                    "payment_action_person": None,
+                    "payment_action_remarks": None,
+                    "payment_action_submitted_at": None,
+                    "payment_action_2_person": None,
+                    "payment_action_2_remarks": None,
+                    "payment_action_2_submitted_at": None,
+                },
+                "submitted": False,
+                "editable_24h": True,
+            }
         else:
             role = _get_role_from_profile(auth["id"])
             is_admin = role in ("admin", "master_admin")
@@ -4152,7 +4417,29 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
                     editable_24h = False
             elif not is_admin and row.get("editable_until"):
                 editable_24h = False
-            out["intercept"] = {"data": {"last_remark_user": row.get("last_remark_user"), "usage_last_1_month": row.get("usage_last_1_month"), "contact_person": row.get("contact_person"), "contact_number": row.get("contact_number"), "tagged_user_id": row.get("tagged_user_id"), "tagged_user_name": row.get("tagged_user_name"), "tagged_user_email": row.get("tagged_user_email"), "payment_action_person": row.get("payment_action_person"), "payment_action_remarks": row.get("payment_action_remarks"), "payment_action_submitted_at": row.get("payment_action_submitted_at")}, "submitted": True, "created_at": row.get("created_at"), "editable_24h": True if is_admin else editable_24h}
+            out["intercept"] = {
+                "data": {
+                    "last_remark_user": row.get("last_remark_user"),
+                    "usage_last_1_month": row.get("usage_last_1_month"),
+                    "contact_person": row.get("contact_person"),
+                    "contact_number": row.get("contact_number"),
+                    "tagged_user_id": row.get("tagged_user_id"),
+                    "tagged_user_name": row.get("tagged_user_name"),
+                    "tagged_user_email": row.get("tagged_user_email"),
+                    "tagged_user_2_id": row.get("tagged_user_2_id"),
+                    "tagged_user_2_name": row.get("tagged_user_2_name"),
+                    "tagged_user_2_email": row.get("tagged_user_2_email"),
+                    "payment_action_person": row.get("payment_action_person"),
+                    "payment_action_remarks": row.get("payment_action_remarks"),
+                    "payment_action_submitted_at": row.get("payment_action_submitted_at"),
+                    "payment_action_2_person": row.get("payment_action_2_person"),
+                    "payment_action_2_remarks": row.get("payment_action_2_remarks"),
+                    "payment_action_2_submitted_at": row.get("payment_action_2_submitted_at"),
+                },
+                "submitted": True,
+                "created_at": row.get("created_at"),
+                "editable_24h": True if is_admin else editable_24h,
+            }
     except Exception as e:
         _log(f"drawer intercept: {e}")
         out["intercept"] = {"data": {}, "submitted": False, "editable_24h": True}
