@@ -4131,9 +4131,48 @@ class PaymentActionSubmitRequest(BaseModel):
     tag: str | None = None  # "t1" | "t2" — which payment action round (default t1)
 
 
+def _norm_uuid_str(s: str | None) -> str:
+    """Compare UUIDs from DB vs JWT regardless of dashes / case."""
+    return (str(s or "").replace("-", "").lower())
+
+
+def _user_matches_tagged_t1(row: dict, uid: str, email: str) -> bool:
+    """Match T1 tagger by user id or by stored tagged email (fallback if id missing/mismatch)."""
+    tid = row.get("tagged_user_id")
+    if tid and uid and _norm_uuid_str(tid) == _norm_uuid_str(uid):
+        return True
+    te = (str(row.get("tagged_user_email") or "").strip().lower())
+    em = (email or "").strip().lower()
+    return bool(em and te and te == em)
+
+
+def _user_matches_tagged_t2(row: dict, uid: str, email: str) -> bool:
+    """Match T2 tagger by user id or by stored tagged_2 email."""
+    tid = row.get("tagged_user_2_id")
+    if tid and uid and _norm_uuid_str(tid) == _norm_uuid_str(uid):
+        return True
+    te = (str(row.get("tagged_user_2_email") or "").strip().lower())
+    em = (email or "").strip().lower()
+    return bool(em and te and te == em)
+
+
+def _can_submit_payment_action(current: dict, row: dict, tag: str) -> bool:
+    """Master Admin / SK, or the user tagged for T1 / T2 for this intercept."""
+    role = (current.get("role") or "").lower()
+    uid = str(current.get("id") or "")
+    email = (current.get("email") or "").lower()
+    if role in ("master_admin", "admin") or email == "sk@industryprime.com":
+        return True
+    if tag == "t1":
+        return _user_matches_tagged_t1(row, uid, email)
+    if tag == "t2":
+        return _user_matches_tagged_t2(row, uid, email)
+    return False
+
+
 @api_router.post("/dashboard/payment-actions/submit")
-def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, auth: dict = Depends(require_roles(["master_admin"]))):
-    """Record Person + Remarks from Payment Action dashboard; T1 or T2 round."""
+def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, current: dict = Depends(get_current_user_with_role)):
+    """Record Person + Remarks from Payment Action dashboard; T1 or T2 round. Master Admin or tagged user for that round."""
     person = (payload.person or "").strip()
     remarks = (payload.remarks or "").strip()
     if not person:
@@ -4152,6 +4191,8 @@ def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, auth: d
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row or not row.get("tagged_user_id"):
             raise HTTPException(404, "Tagged intercept not found for this invoice")
+        if not _can_submit_payment_action(current, row, tag):
+            raise HTTPException(403, "Only Master Admin or the tagged user for this step can submit")
         if tag == "t1":
             if row.get("payment_action_submitted_at"):
                 raise HTTPException(400, "T1 payment action already submitted")
@@ -4159,7 +4200,7 @@ def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, auth: d
                 "payment_action_person": person,
                 "payment_action_remarks": remarks,
                 "payment_action_submitted_at": now_iso,
-                "payment_action_submitted_by": auth.get("id"),
+                "payment_action_submitted_by": current.get("id"),
                 "updated_at": now_iso,
             }).eq("id", row["id"]).execute()
             return {"success": True, "payment_action_submitted_at": now_iso, "tag": "t1"}
@@ -4179,7 +4220,7 @@ def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, auth: d
             "payment_action_2_person": person,
             "payment_action_2_remarks": remarks,
             "payment_action_2_submitted_at": now_iso,
-            "payment_action_2_submitted_by": auth.get("id"),
+            "payment_action_2_submitted_by": current.get("id"),
             "updated_at": now_iso,
         }).eq("id", row["id"]).execute()
         return {"success": True, "payment_action_2_submitted_at": now_iso, "tag": "t2"}
@@ -4197,15 +4238,21 @@ def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, auth: d
 
 
 @api_router.get("/dashboard/payment-actions")
-def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"]))):
-    """Tagged intercept rows: pending T1/T2 work items plus last 100 fully completed T2 flows (read-only)."""
+def dashboard_payment_actions(current: dict = Depends(get_current_user_with_role)):
+    """Tagged intercept rows with pending Payment Action only (T1 and/or T2).
+    Rows disappear after the last required submit (T1 only if no T2; else T1 then T2).
+    Master Admin / Admin / SK: all pending rows; others: only where they are tagged for that pending step."""
     try:
+        role = (current.get("role") or "").lower()
+        uid = str(current.get("id") or "")
+        email = (current.get("email") or "").lower()
+        # Full list: Master Admin, Admin, or SK — same as other dashboard admin views
+        is_full_list = role in ("master_admin", "admin") or email == "sk@industryprime.com"
+        # Use select("*") so missing optional columns (e.g. T2 / payment_action_2_*) in DB do not break the query.
+        # Naming columns explicitly caused empty dashboard when payment_action_2_* was not migrated yet.
         r = (
             supabase.table("onboarding_client_payment_intercept")
-            .select(
-                "client_payment_id, tagged_user_id, tagged_user_name, tagged_user_email, created_at, updated_at, "
-                "payment_action_submitted_at, tagged_user_2_id, tagged_user_2_name, tagged_user_2_email, payment_action_2_submitted_at"
-            )
+            .select("*")
             .not_.is_("tagged_user_id", "null")
             .order("created_at", desc=True)
             .limit(500)
@@ -4220,8 +4267,8 @@ def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"
                 or (str(x.get("tagged_user_2_email") or "").strip())
             )
 
+        # Only pending work items: once T1 (and T2 if applicable) payment actions are submitted, row leaves this list.
         pending_items: list[dict] = []
-        completed_items: list[dict] = []
         for x in raw_rows:
             cid = str(x.get("client_payment_id") or "")
             if not cid:
@@ -4245,23 +4292,21 @@ def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"
                         "pending_payment_tag": "t2",
                     }
                 )
-            elif t1_done and t2_tag and t2_done:
-                # Read-only: both T1+T2 payment actions submitted — show Tag T1 / Tag T2 like pending rows
-                sort_key = str(x.get("payment_action_2_submitted_at") or x.get("updated_at") or "")
-                completed_items.append(
-                    {
-                        "client_payment_id": cid,
-                        "intercept_row": x,
-                        "pending_payment_tag": "completed",
-                        "_sort": sort_key,
-                    }
-                )
-        completed_items.sort(key=lambda it: it.get("_sort") or "", reverse=True)
-        for it in completed_items:
-            it.pop("_sort", None)
-        completed_items = completed_items[:100]
+            # T1 done and no T2 tag → nothing to do on dashboard. T1+T2 both done → row clears (not listed).
 
-        queue: list[dict] = pending_items + completed_items
+        queue: list[dict] = pending_items
+
+        if not is_full_list:
+            filtered_queue: list[dict] = []
+            for pitem in queue:
+                it = pitem["intercept_row"]
+                tag = pitem["pending_payment_tag"]
+                if tag == "t1" and _user_matches_tagged_t1(it, uid, email):
+                    filtered_queue.append(pitem)
+                elif tag == "t2" and _user_matches_tagged_t2(it, uid, email):
+                    filtered_queue.append(pitem)
+            queue = filtered_queue
+
         ids = list({p["client_payment_id"] for p in queue})
         if not ids:
             return {"items": []}
@@ -4274,9 +4319,15 @@ def dashboard_payment_actions(auth: dict = Depends(require_roles(["master_admin"
         by_id = {str(x.get("id")): x for x in (p.data or []) if x and x.get("id")}
         out = []
         for pitem in queue:
-            cid = pitem["client_payment_id"]
+            cid = str(pitem["client_payment_id"] or "")
             row = by_id.get(cid)
             if not row:
+                for k, v in by_id.items():
+                    if _norm_uuid_str(str(k)) == _norm_uuid_str(cid):
+                        row = v
+                        break
+            if not row:
+                _log(f"dashboard payment actions: no onboarding_client_payment row for client_payment_id={cid!r}")
                 continue
             it = pitem["intercept_row"]
             out.append(
