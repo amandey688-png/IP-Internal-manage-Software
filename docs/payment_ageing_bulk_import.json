@@ -1,0 +1,1039 @@
+{
+  "rows": [
+    {
+      "company_name": "GM Iron & Steels Ltd. Badampahar",
+      "quarter_days": [
+        null,
+        null,
+        18,
+        11,
+        50,
+        23,
+        35,
+        14,
+        26,
+        12
+      ]
+    },
+    {
+      "company_name": "Dadiji Steel Manufacture & Trading Pvt Ltd",
+      "quarter_days": [
+        6,
+        15,
+        9,
+        15,
+        6,
+        14,
+        66,
+        10,
+        16,
+        5
+      ]
+    },
+    {
+      "company_name": "Shri Varu Polytex Pvt. Ltd.",
+      "quarter_days": [
+        20,
+        null,
+        45,
+        null,
+        23,
+        null,
+        20,
+        null,
+        27,
+        null
+      ]
+    },
+    {
+      "company_name": "Govinda Polytex India Pvt. Ltd.",
+      "quarter_days": [
+        19,
+        null,
+        45,
+        null,
+        28,
+        null,
+        1,
+        null,
+        27,
+        null
+      ]
+    },
+    {
+      "company_name": "Rausheena Udyog Ltd.",
+      "quarter_days": [
+        36,
+        23,
+        16,
+        31,
+        20,
+        26,
+        9,
+        52,
+        15,
+        26
+      ]
+    },
+    {
+      "company_name": "Black Rock Steel & Power Pvt Ltd",
+      "quarter_days": [
+        31,
+        22,
+        21,
+        10,
+        28,
+        19,
+        4,
+        11,
+        30,
+        12
+      ]
+    },
+    {
+      "company_name": "Bharat Hitech (Cements) Pvt Ltd",
+      "quarter_days": [
+        31,
+        31,
+        33,
+        25,
+        8,
+        9,
+        4,
+        29,
+        42,
+        36
+      ]
+    },
+    {
+      "company_name": "Singhal Enterprises(Jharsuguda)Pvt Ltd",
+      "quarter_days": [
+        10,
+        10,
+        11,
+        16,
+        2,
+        31,
+        11,
+        9,
+        10,
+        2
+      ]
+    },
+    {
+      "company_name": "Jay Iron & Steels Ltd.",
+      "quarter_days": [
+        20,
+        8,
+        14,
+        15,
+        1,
+        16,
+        9,
+        4,
+        7,
+        7
+      ]
+    },
+    {
+      "company_name": "Agroha Steel and Power Pvt. Ltd.",
+      "quarter_days": [
+        4,
+        2,
+        7,
+        0,
+        57,
+        41,
+        24,
+        2,
+        7,
+        18
+      ]
+    },
+    {
+      "company_name": "Gopal Sponge & Power Pvt. Ltd.",
+      "quarter_days": [
+        5,
+        7,
+        9,
+        12,
+        27,
+        6,
+        24,
+        2,
+        12,
+        8
+      ]
+    },
+    {
+      "company_name": "Suprime Cement Pvt. Ltd.",
+      "quarter_days": [
+        19,
+        30,
+        43,
+        11,
+        9,
+        9,
+        13,
+        7,
+        12,
+        30
+      ]
+    },
+    {
+      "company_name": "Karni Kripa Power Pvt Ltd",
+      "quarter_days": [
+        65,
+        11,
+        32,
+        22,
+        38,
+        6,
+        45,
+        31,
+        21,
+        5
+      ]
+    },
+    {
+      "company_name": "GM Iron & Steel Pvt. Ltd.",
+      "quarter_days": [
+        37,
+        18,
+        33,
+        15,
+        17,
+        54,
+        15,
+        172,
+        80,
+        null
+      ]
+    },
+    {
+      "company_name": "Crescent Foundry Co Pvt.Ltd.",
+      "quarter_days": [
+        38,
+        23,
+        37,
+        35,
+        25,
+        56,
+        9,
+        50,
+        23,
+        2
+      ]
+    },
+    {
+      "company_name": "Maruti Ferrous Private Limited",
+      "quarter_days": [
+        61,
+        11,
+        16,
+        35,
+        55,
+        8,
+        21,
+        28,
+        65,
+        6
+      ]
+    },
+    {
+      "company_name": "Vraj Iron & Steels Ltd. Bilaspur",
+      "quarter_days": [
+        39,
+        51,
+        43,
+        52,
+        16,
+        15,
+        8,
+        50,
+        56,
+        47
+      ]
+    },
+    {
+      "company_name": "Spintech Tubes Pvt. Ltd.",
+      "quarter_days": [
+        10,
+        31,
+        31,
+        24,
+        49,
+        12,
+        16,
+        34,
+        56,
+        16
+      ]
+    },
+    {
+      "company_name": "MVK Industries Pvt. Ltd.",
+      "quarter_days": [
+        4,
+        8,
+        11,
+        4,
+        75,
+        6,
+        24,
+        4,
+        8,
+        11
+      ]
+    },
+    {
+      "company_name": "Shakambari Overseas Trade Pvt. Ltd.",
+      "quarter_days": [
+        31,
+        14,
+        21,
+        28,
+        14,
+        24,
+        9,
+        55,
+        38,
+        29
+      ]
+    },
+    {
+      "company_name": "Pratishtha Polypack Pvt. Ltd.",
+      "quarter_days": [
+        16,
+        38,
+        35,
+        12,
+        7,
+        20,
+        9,
+        16,
+        9,
+        7
+      ]
+    },
+    {
+      "company_name": "Rashmi Sponge Iron & Power Industries Pvt. Ltd.",
+      "quarter_days": [
+        50,
+        7,
+        17,
+        28,
+        8,
+        54,
+        48,
+        24,
+        49,
+        null
+      ]
+    },
+    {
+      "company_name": "Indo East Corporation Pvt. Ltd.",
+      "quarter_days": [
+        11,
+        11,
+        12,
+        4,
+        16,
+        10,
+        21,
+        21,
+        26,
+        28
+      ]
+    },
+    {
+      "company_name": "Agrawal Sponge Pvt. Ltd.",
+      "quarter_days": [
+        36,
+        29,
+        57,
+        14,
+        14,
+        24,
+        9,
+        14,
+        8,
+        8
+      ]
+    },
+    {
+      "company_name": "Vraj Metaliks Pvt. Ltd.",
+      "quarter_days": [
+        12,
+        11,
+        21,
+        8,
+        98,
+        15,
+        80,
+        14,
+        8,
+        8
+      ]
+    },
+    {
+      "company_name": "Vraj Iron & Steels Ltd. (Siltara Div)",
+      "quarter_days": [
+        32,
+        77,
+        58,
+        52,
+        28,
+        88,
+        17,
+        55,
+        65,
+        47
+      ]
+    },
+    {
+      "company_name": "Maa Mangla Ispat Pvt. Ltd.",
+      "quarter_days": [
+        63,
+        15,
+        15,
+        39,
+        18,
+        15,
+        32,
+        38,
+        34,
+        20
+      ]
+    },
+    {
+      "company_name": "B. R Sponge & Power Ltd.",
+      "quarter_days": [
+        60,
+        19,
+        11,
+        24,
+        46,
+        7,
+        14,
+        11,
+        14,
+        8
+      ]
+    },
+    {
+      "company_name": "Amiya Steel Pvt. Ltd.",
+      "quarter_days": [
+        15,
+        16,
+        37,
+        46,
+        21,
+        12,
+        9,
+        23,
+        12,
+        26
+      ]
+    },
+    {
+      "company_name": "Sky Alloys and Power Pvt Ltd",
+      "quarter_days": [
+        39,
+        8,
+        59,
+        17,
+        29,
+        9,
+        59,
+        28,
+        14,
+        78
+      ]
+    },
+    {
+      "company_name": "Nutan Ispat & Power Ltd",
+      "quarter_days": [
+        60,
+        11,
+        16,
+        35,
+        15,
+        19,
+        14,
+        53,
+        48,
+        11
+      ]
+    },
+    {
+      "company_name": "Sri Venkatesh Iron & Alloys (India) Ltd.",
+      "quarter_days": [
+        55,
+        42,
+        61,
+        19,
+        8,
+        41,
+        13,
+        8,
+        17,
+        5
+      ]
+    },
+    {
+      "company_name": "Maa Shakambari Steel Ltd.",
+      "quarter_days": [
+        25,
+        14,
+        17,
+        19,
+        20,
+        15,
+        13,
+        14,
+        20,
+        11
+      ]
+    },
+    {
+      "company_name": "Maan Steel & Power Ltd.",
+      "quarter_days": [
+        17,
+        28,
+        16,
+        10,
+        28,
+        15,
+        8,
+        23,
+        27,
+        16
+      ]
+    },
+    {
+      "company_name": "Shree Parashnath Re-Roolling Mills Ltd.",
+      "quarter_days": [
+        116,
+        65,
+        31,
+        50,
+        16,
+        12,
+        4,
+        42,
+        44,
+        46
+      ]
+    },
+    {
+      "company_name": "Balajee Mini Steels & Re Rolling Pvt. Ltd.",
+      "quarter_days": [
+        32,
+        11,
+        53,
+        10,
+        20,
+        28,
+        7,
+        36,
+        7,
+        11
+      ]
+    },
+    {
+      "company_name": "Balmukund Sponge Iron Pvt. Ltd.",
+      "quarter_days": [
+        32,
+        44,
+        17,
+        10,
+        15,
+        6,
+        15,
+        36,
+        15,
+        11
+      ]
+    },
+    {
+      "company_name": "Ugen Ferro Alloys Pvt. Ltd.",
+      "quarter_days": [
+        26,
+        21,
+        35,
+        21,
+        23,
+        8,
+        43,
+        3,
+        7,
+        20
+      ]
+    },
+    {
+      "company_name": "Hariom Ingots & Power Pvt. Ltd.",
+      "quarter_days": [
+        24,
+        29,
+        54,
+        35,
+        6,
+        23,
+        86,
+        13,
+        30,
+        16
+      ]
+    },
+    {
+      "company_name": "Surendra Mining Industries Pvt. Ltd.",
+      "quarter_days": [
+        32,
+        10,
+        5,
+        4,
+        16,
+        19,
+        8,
+        7,
+        2,
+        6
+      ]
+    },
+    {
+      "company_name": "Mark Steels P Ltd.",
+      "quarter_days": [
+        33,
+        4,
+        15,
+        5,
+        7,
+        6,
+        4,
+        0,
+        9,
+        8
+      ]
+    },
+    {
+      "company_name": "Maan Concast Pvt. Ltd.",
+      "quarter_days": [
+        59,
+        24,
+        57,
+        33,
+        49,
+        6,
+        30,
+        22,
+        9,
+        6
+      ]
+    },
+    {
+      "company_name": "Hitech Plastochem Udyog Pvt. Ltd.",
+      "quarter_days": [
+        52,
+        26,
+        31,
+        5,
+        6,
+        40,
+        48,
+        70,
+        56,
+        18
+      ]
+    },
+    {
+      "company_name": "Dhanbad Fuels Ltd.",
+      "quarter_days": [
+        43,
+        15,
+        9,
+        16,
+        20,
+        38,
+        35,
+        24,
+        14,
+        8
+      ]
+    },
+    {
+      "company_name": "Hi-Tech Power & Steel Ltd.",
+      "quarter_days": [
+        48,
+        8,
+        11,
+        11,
+        16,
+        48,
+        7,
+        3,
+        3,
+        5
+      ]
+    },
+    {
+      "company_name": "Sky Steel & Power Pvt. Ltd",
+      "quarter_days": [
+        null,
+        null,
+        77,
+        32,
+        21,
+        3,
+        6,
+        36,
+        49,
+        27
+      ]
+    },
+    {
+      "company_name": "Maa Mangla Ispat Pvt. Ltd 2",
+      "quarter_days": [
+        null,
+        null,
+        33,
+        56,
+        23,
+        7,
+        24,
+        38,
+        26,
+        20
+      ]
+    },
+    {
+      "company_name": "Salagram Power & Steels Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        49,
+        39,
+        29,
+        16,
+        22,
+        31,
+        35
+      ]
+    },
+    {
+      "company_name": "Shikhara Steels Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        2,
+        0,
+        33,
+        27,
+        9,
+        7,
+        8
+      ]
+    },
+    {
+      "company_name": "Super Iron Foundry",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        27,
+        null,
+        null,
+        31,
+        null,
+        10,
+        null
+      ]
+    },
+    {
+      "company_name": "Plascom Industries LLP",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        120,
+        30,
+        6,
+        44,
+        21,
+        40
+      ]
+    },
+    {
+      "company_name": "Odissa Concrete & Allied Industries Limited",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        6,
+        26,
+        10,
+        11,
+        10,
+        13
+      ]
+    },
+    {
+      "company_name": "Anjanisuta Steels Private Limited",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        48,
+        24,
+        40,
+        27
+      ]
+    },
+    {
+      "company_name": "Niranjan Metalliks Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        16,
+        27,
+        22,
+        5
+      ]
+    },
+    {
+      "company_name": "Mangal Sponge & Steel Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        16,
+        11,
+        51,
+        27
+      ]
+    },
+    {
+      "company_name": "Vaswani Industries Limited",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        14,
+        21,
+        55,
+        24
+      ]
+    },
+    {
+      "company_name": "Flexicom Industries Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        29,
+        44,
+        21,
+        27
+      ]
+    },
+    {
+      "company_name": "Orissa Concrete & Allied Industries Ltd. (Raipur)",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        11,
+        37,
+        17,
+        51
+      ]
+    },
+    {
+      "company_name": "Brahmaputra Metallics Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        21,
+        25,
+        7
+      ]
+    },
+    {
+      "company_name": "Roopgarh Power & Alloys Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        9,
+        29,
+        29
+      ]
+    },
+    {
+      "company_name": "Dinesh Brothers Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        22,
+        16,
+        23
+      ]
+    },
+    {
+      "company_name": "Govind Steel Co. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        23,
+        16,
+        23
+      ]
+    },
+    {
+      "company_name": "Kodarma Chemical Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        16,
+        10,
+        9
+      ]
+    },
+    {
+      "company_name": "Vighneshwar Ispat Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        28,
+        29,
+        33
+      ]
+    },
+    {
+      "company_name": "Shilphy Steels Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        15,
+        17,
+        20
+      ]
+    },
+    {
+      "company_name": "Coffers Metallics Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        18,
+        44,
+        27
+      ]
+    },
+    {
+      "company_name": "Kodarma Petrochemicals Pvt. Ltd.",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        15,
+        9
+      ]
+    },
+    {
+      "company_name": "Bihar Foundry & Casting Limited",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        31,
+        14
+      ]
+    },
+    {
+      "company_name": "B R Refinery LLP",
+      "quarter_days": [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        43
+      ]
+    }
+  ]
+}

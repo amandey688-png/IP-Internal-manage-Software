@@ -30,6 +30,7 @@ import re
 import httpx
 from app.supabase_client import supabase, supabase_auth
 from app.auth_middleware import get_current_user, get_current_user_optional
+from app import payment_ageing as _pa
 
 # Role-based access: master_admin, admin (Super Admin), approver (Approver), user (Operator)
 def _normalize_role(name: str | None) -> str:
@@ -3384,6 +3385,363 @@ def list_client_payment(auth: dict = Depends(get_current_user), status: str = No
     except Exception as e:
         _log(f"client payment list: {e}")
         return {"items": []}
+
+
+def _norm_name_company(s: str | None) -> str:
+    """Delegate to shared normalizer (see ``app.payment_ageing.normalize_company_name``)."""
+    return _pa.normalize_company_name(s)
+
+
+def _dedupe_ageing_display_rows(rows: list[dict], nq: int) -> list[dict]:
+    """Merge rows that differ only by punctuation/spacing (same logical company)."""
+    groups: dict[str, list[dict]] = {}
+    for r in rows:
+        k = _norm_name_company(r.get("company_name"))
+        if not k:
+            continue
+        groups.setdefault(k, []).append(r)
+    out: list[dict] = []
+    for _k, grp in groups.items():
+        if len(grp) == 1:
+            out.append(grp[0])
+            continue
+        qd: list[int | None] = [None] * nq
+        for r in grp:
+            rd = r.get("quarter_days") or []
+            for i in range(min(nq, len(rd))):
+                if rd[i] is not None:
+                    qd[i] = rd[i]
+        amt = max(int(x.get("amount_incl_gst") or 0) for x in grp)
+        rec = max(int(x.get("received_amount") or 0) for x in grp)
+        cid_row = next((x for x in grp if x.get("company_id")), None)
+        if cid_row:
+            name = (cid_row.get("company_name") or "").strip()
+            cid = cid_row.get("company_id")
+        else:
+            best = max(grp, key=lambda x: int(x.get("amount_incl_gst") or 0))
+            name = (best.get("company_name") or "").strip()
+            cid = best.get("company_id")
+        med = _pa.median_int(qd)
+        last_q = qd[-1] if len(qd) == nq else None
+        out.append(
+            {
+                "company_id": cid,
+                "company_name": name,
+                "amount_incl_gst": amt,
+                "quarter_days": qd,
+                "median_value": med,
+                "last_quarter_days": int(last_q) if last_q is not None else 0,
+                "received_amount": rec,
+            }
+        )
+    return out
+
+
+def _parse_invoice_amount(val) -> int:
+    if val is None:
+        return 0
+    s = str(val).strip()
+    if not s.isdigit():
+        return 0
+    return int(s)
+
+
+def _payment_ageing_report_payload():
+    """Build Payment Ageing Report: companies + amounts from raised invoices + saved quarter days."""
+    _nq = _pa.PAYMENT_AGEING_QUARTER_COUNT
+    qroll = _pa.payment_ageing_sheet_quarters()
+    quarter_labels = [x[2] for x in qroll]
+    quarter_keys = [{"fy": x[0], "q": x[1]} for x in qroll]
+
+    companies_rows = []
+    try:
+        cr = supabase.table("companies").select("id, name").order("name").execute()
+        companies_rows = cr.data or []
+    except Exception as e:
+        _log(f"payment ageing companies: {e}")
+
+    pay_rows: list[dict] = []
+    try:
+        pr = (
+            supabase.table("onboarding_client_payment")
+            .select("company_name,invoice_amount,invoice_date,timestamp,payment_received_date")
+            .limit(5000)
+            .execute()
+        )
+        pay_rows = pr.data or []
+    except Exception as e:
+        _log(f"payment ageing invoices: {e}")
+
+    # Aggregate by normalized company name
+    by_name: dict[str, dict] = {}
+    for row in pay_rows:
+        nm = _norm_name_company(row.get("company_name"))
+        if not nm:
+            continue
+        if nm not in by_name:
+            by_name[nm] = {
+                "invoice_total": 0,
+                "received_total": 0,
+                "first_date": None,
+                "display_name": (row.get("company_name") or "").strip(),
+            }
+        amt = _parse_invoice_amount(row.get("invoice_amount"))
+        by_name[nm]["invoice_total"] += amt
+        if row.get("payment_received_date"):
+            by_name[nm]["received_total"] += amt
+        inv_d = _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
+        fd = by_name[nm]["first_date"]
+        if inv_d:
+            if fd is None or inv_d < fd:
+                by_name[nm]["first_date"] = inv_d
+                by_name[nm]["display_name"] = (row.get("company_name") or "").strip()
+
+    ageing_by_name: dict[str, dict] = {}
+    try:
+        ar = supabase.table("onboarding_client_payment_ageing").select("*").execute()
+        for a in ar.data or []:
+            cn = _norm_name_company(a.get("company_name"))
+            if not cn:
+                continue
+            if cn not in ageing_by_name:
+                ageing_by_name[cn] = a
+                continue
+            prev = ageing_by_name[cn]
+            rp = _pa.normalize_quarter_days(prev.get("quarter_days"), _nq)
+            rn = _pa.normalize_quarter_days(a.get("quarter_days"), _nq)
+            merged_days = [rn[i] if rn[i] is not None else rp[i] for i in range(_nq)]
+            pick_name = (prev.get("company_name") or "").strip()
+            if len((a.get("company_name") or "").strip()) > len(pick_name):
+                pick_name = (a.get("company_name") or "").strip()
+            ageing_by_name[cn] = {
+                **prev,
+                "company_name": pick_name,
+                "quarter_days": merged_days,
+            }
+    except Exception as e:
+        _log(f"payment ageing load: {e}")
+
+    summary_upload: list | None = None
+    try:
+        sr = supabase.table("onboarding_client_payment_ageing_summary").select("summary_rows").eq("id", 1).limit(1).execute()
+        row0 = (sr.data or [None])[0]
+        if row0 and isinstance(row0.get("summary_rows"), list):
+            summary_upload = row0["summary_rows"]
+    except Exception:
+        summary_upload = None
+
+    # Build row list: one per company, plus orphan invoice names
+    seen: set[str] = set()
+    out_rows: list[dict] = []
+
+    def build_row(company_id: str | None, name: str, nm: str):
+        agg = by_name.get(nm, {})
+        amount_incl_gst = int(agg.get("invoice_total", 0))
+        received_amt = int(agg.get("received_total", 0))
+        display_name = agg.get("display_name") or name
+        first_d = agg.get("first_date")
+        start_idx = _pa.first_invoiced_quarter_index(qroll, first_d) if first_d else 0
+
+        age = ageing_by_name.get(nm)
+        raw_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
+        slot_days: list[int | None] = []
+        for i in range(_nq):
+            if i < start_idx:
+                slot_days.append(None)
+            else:
+                slot_days.append(raw_days[i])
+
+        med = _pa.median_int(slot_days)
+        last_q = slot_days[-1] if len(slot_days) == _nq else None
+        last_quarter_days = int(last_q) if last_q is not None else 0
+
+        out_rows.append(
+            {
+                "company_id": company_id,
+                "company_name": display_name,
+                "amount_incl_gst": amount_incl_gst,
+                "quarter_days": slot_days,
+                "median_value": med,
+                "last_quarter_days": last_quarter_days,
+                "received_amount": received_amt,
+            }
+        )
+
+    for c in companies_rows:
+        cid = str(c.get("id")) if c.get("id") else None
+        name = (c.get("name") or "").strip()
+        nm = _norm_name_company(name)
+        if not nm:
+            continue
+        seen.add(nm)
+        build_row(cid, name, nm)
+
+    # Orphan invoice company names (not in companies master)
+    for nm, agg in by_name.items():
+        if nm in seen:
+            continue
+        seen.add(nm)
+        build_row(None, agg.get("display_name") or nm, nm)
+
+    out_rows = _dedupe_ageing_display_rows(out_rows, _nq)
+    out_rows.sort(key=lambda r: (r.get("company_name") or "").lower())
+
+    # Only companies in the quarter's allowed client list (matched after normalize_company_name)
+    allowed = _pa.PAYMENT_AGEING_ALLOWED_COMPANY_KEYS
+    if allowed:
+        out_rows = [r for r in out_rows if _norm_name_company(r.get("company_name")) in allowed]
+
+    # Bucket summary (SUMIFS-style: sum amount where median falls in day range)
+    nb = len(_pa.DAY_BUCKETS)
+    bucket_median_sums = [0] * nb
+    bucket_received_sums = [0] * nb
+    bucket_fy_q4_to_be = [0] * nb
+    bucket_fy_q1 = [0] * nb
+    bucket_fy_q2 = [0] * nb
+    bucket_fy_q3 = [0] * nb
+    bucket_fy_q4_received = [0] * nb
+    for r in out_rows:
+        amt = int(r.get("amount_incl_gst") or 0)
+        rec = int(r.get("received_amount") or 0)
+        med = int(r.get("median_value") or 0)
+        bi = _pa.bucket_for_median_days(med)
+        qdays = _pa.normalize_quarter_days(r.get("quarter_days"), _nq)
+        bucket_median_sums[bi] += amt
+        bucket_received_sums[bi] += rec
+        bucket_fy_q4_to_be[bi] += _pa.weighted_fy_amount(amt, qdays, _pa.FY24_25_Q4_IDX)
+        bucket_fy_q1[bi] += _pa.weighted_fy_amount(amt, qdays, _pa.FY24_25_Q1_IDX)
+        bucket_fy_q2[bi] += _pa.weighted_fy_amount(amt, qdays, _pa.FY24_25_Q2_IDX)
+        bucket_fy_q3[bi] += _pa.weighted_fy_amount(amt, qdays, _pa.FY24_25_Q3_IDX)
+        bucket_fy_q4_received[bi] += _pa.weighted_fy_amount(rec, qdays, _pa.FY24_25_Q4_IDX)
+
+    total_median = sum(bucket_median_sums)
+    total_received = sum(bucket_received_sums)
+
+    summary_rows = []
+    for i, (label, lo, hi) in enumerate(_pa.DAY_BUCKETS):
+        med_sum = bucket_median_sums[i]
+        rec_sum = bucket_received_sums[i]
+        due = rec_sum - med_sum
+        to_be_pct = round((med_sum / total_median * 100) if total_median > 0 else 0.0, 2)
+        received_pct = round((rec_sum / total_received * 100) if total_received > 0 else 0.0, 2)
+        summary_rows.append(
+            {
+                "days": label,
+                "median": med_sum,
+                "received": rec_sum,
+                "due_excs_for_wk": due,
+                "fy_24_25_q4_to_be": bucket_fy_q4_to_be[i],
+                "to_be_pct": to_be_pct,
+                "received_pct": received_pct,
+                "fy_24_25_q1": bucket_fy_q1[i],
+                "fy_24_25_q2": bucket_fy_q2[i],
+                "fy_24_25_q4_received": bucket_fy_q4_received[i],
+                "fy_24_25_q3": bucket_fy_q3[i],
+            }
+        )
+
+    totals_due = sum(r["due_excs_for_wk"] for r in summary_rows)
+    totals = {
+        "median": total_median,
+        "received": total_received,
+        "due_excs_for_wk": totals_due,
+        "fy_24_25_q4_to_be": sum(bucket_fy_q4_to_be),
+        "to_be_pct": round(sum(r["to_be_pct"] for r in summary_rows), 2),
+        "received_pct": round(sum(r["received_pct"] for r in summary_rows), 2),
+        "fy_24_25_q1": sum(bucket_fy_q1),
+        "fy_24_25_q2": sum(bucket_fy_q2),
+        "fy_24_25_q4_received": sum(bucket_fy_q4_received),
+        "fy_24_25_q3": sum(bucket_fy_q3),
+    }
+
+    return {
+        "quarter_labels": quarter_labels,
+        "quarter_keys": quarter_keys,
+        "rows": out_rows,
+        "summary": {"rows": summary_rows, "totals": totals},
+        "summary_uploaded": summary_upload or [],
+    }
+
+
+@api_router.get("/onboarding/client-payment/payment-ageing-report")
+def get_payment_ageing_report(auth: dict = Depends(get_current_user)):
+    """Payment Ageing grid + bucket summary; amounts from raised invoices (invoice_amount sum per company)."""
+    try:
+        return _payment_ageing_report_payload()
+    except Exception as e:
+        _log(f"payment ageing report: {e}")
+        raise HTTPException(500, str(e)[:200])
+
+
+@api_router.put("/onboarding/client-payment/payment-ageing-report/{company_key}")
+def put_payment_ageing_row(company_key: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Save quarter day values (10 quarters). company_key = company UUID or URL-encoded company name."""
+    from urllib.parse import unquote
+
+    _nq = _pa.PAYMENT_AGEING_QUARTER_COUNT
+    key = unquote(company_key).strip()
+    if not key:
+        raise HTTPException(400, "company_key required")
+    raw_days = payload.get("quarter_days")
+    if not isinstance(raw_days, list) or len(raw_days) != _nq:
+        raise HTTPException(400, f"quarter_days must be an array of {_nq} numbers or nulls")
+
+    days = _pa.normalize_quarter_days(raw_days, _nq)
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    company_id = None
+    company_name = key
+    # UUID?
+    try:
+        u = uuid.UUID(key)
+        company_id = str(u)
+        try:
+            cr = supabase.table("companies").select("name").eq("id", company_id).single().execute()
+            if cr.data and cr.data.get("name"):
+                company_name = (cr.data.get("name") or "").strip()
+        except Exception:
+            pass
+    except ValueError:
+        company_name = key
+
+    if not company_name:
+        raise HTTPException(400, "Could not resolve company name")
+
+    if _pa.PAYMENT_AGEING_ALLOWED_COMPANY_KEYS and _pa.normalize_company_name(company_name) not in _pa.PAYMENT_AGEING_ALLOWED_COMPANY_KEYS:
+        raise HTTPException(403, "Company is not in the payment ageing list for this quarter")
+
+    row = {
+        "company_id": company_id,
+        "company_name": company_name,
+        "quarter_days": days,
+        "updated_at": now,
+    }
+    try:
+        supabase.table("onboarding_client_payment_ageing").upsert(
+            row, on_conflict="company_name"
+        ).execute()
+    except Exception as e:
+        _log(f"payment ageing upsert: {e}")
+        raise HTTPException(400, str(e)[:200])
+    return {"ok": True, "company_name": company_name, "quarter_days": days}
+
+
+@api_router.post("/onboarding/client-payment/payment-ageing-report/summary-upload")
+def post_payment_ageing_summary_upload(payload: dict, auth: dict = Depends(get_current_user)):
+    """Optional summary grid from spreadsheet (JSON array of rows)."""
+    rows = payload.get("summary_rows")
+    if not isinstance(rows, list):
+        raise HTTPException(400, "summary_rows must be an array")
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        supabase.table("onboarding_client_payment_ageing_summary").upsert(
+            {"id": 1, "summary_rows": rows, "updated_at": now},
+            on_conflict="id",
+        ).execute()
+    except Exception as e:
+        _log(f"payment ageing summary upload: {e}")
+        raise HTTPException(400, str(e)[:200])
+    return {"ok": True}
 
 
 @api_router.post("/onboarding/client-payment")
