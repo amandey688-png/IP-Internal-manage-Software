@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Button, Card, DatePicker, Descriptions, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Typography, message } from 'antd'
+import { Button, Card, DatePicker, Descriptions, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tooltip, Typography, message } from 'antd'
 import { CheckCircleOutlined, EditOutlined, FormOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { API_ENDPOINTS } from '../../utils/constants'
 import { apiClient } from '../../api/axios'
+import { useAuth } from '../../hooks/useAuth'
 
 const { Title } = Typography
 
@@ -30,8 +31,11 @@ const GENRE_OPTIONS = [
 ]
 
 export function ClientPaymentPage() {
+  const { user } = useAuth()
   const [records, setRecords] = useState<ClientPaymentRecord[]>([])
   const [companies, setCompanies] = useState<{ id: string; name: string }[]>([])
+  /** Loaded lazily when "Add Raised Invoice" opens — avoids blocking the table on /companies. */
+  const [companiesLoading, setCompaniesLoading] = useState(false)
   const [loading, setLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [submitLoading, setSubmitLoading] = useState(false)
@@ -79,9 +83,15 @@ export function ClientPaymentPage() {
     tagged_user_id?: string | null
     tagged_user_name?: string | null
     tagged_user_email?: string | null
+    tagged_user_2_id?: string | null
+    tagged_user_2_name?: string | null
+    tagged_user_2_email?: string | null
     payment_action_person?: string | null
     payment_action_remarks?: string | null
     payment_action_submitted_at?: string | null
+    payment_action_2_person?: string | null
+    payment_action_2_remarks?: string | null
+    payment_action_2_submitted_at?: string | null
   } | null>(null)
   const [interceptEditable, setInterceptEditable] = useState(true)
   const [interceptModalOpen, setInterceptModalOpen] = useState(false)
@@ -95,9 +105,11 @@ export function ClientPaymentPage() {
   const [discontinuationModalOpen, setDiscontinuationModalOpen] = useState(false)
   const [discontinuationForm] = Form.useForm()
   const [interceptTagModalOpen, setInterceptTagModalOpen] = useState(false)
+  const [interceptTag2ModalOpen, setInterceptTag2ModalOpen] = useState(false)
   const [tagUsers, setTagUsers] = useState<{ id: string; full_name: string; email: string }[]>([])
   const [tagLoading, setTagLoading] = useState(false)
   const [tagSelectedUserId, setTagSelectedUserId] = useState<string | null>(null)
+  const [tag2SelectedUserId, setTag2SelectedUserId] = useState<string | null>(null)
   const [paymRecModalOpen, setPaymRecModalOpen] = useState(false)
   const [paymRecForm] = Form.useForm()
   const [currentFollowupNo, setCurrentFollowupNo] = useState(1)
@@ -109,13 +121,11 @@ export function ClientPaymentPage() {
   const loadData = () => {
     setLoading(true)
     const listUrl = completedSection ? API_ENDPOINTS.CLIENT_PAYMENT.LIST_COMPLETED(completedSection) : API_ENDPOINTS.CLIENT_PAYMENT.LIST_OPEN
-    Promise.all([
-      apiClient.get<{ items: ClientPaymentRecord[] }>(listUrl).then((r) => r.data).catch(() => ({ items: [] })),
-      isOpenList ? apiClient.get<{ id: string; name: string }[]>('/companies').then((r) => r.data).catch(() => []) : Promise.resolve([]),
-    ])
-      .then(([payments, companiesList]) => {
+    apiClient
+      .get<{ items: ClientPaymentRecord[] }>(listUrl)
+      .then((r) => r.data)
+      .then((payments) => {
         setRecords((payments.items || []) as ClientPaymentRecord[])
-        setCompanies((companiesList || []).filter((c: { id?: string; name?: string }) => c && c.id && c.name))
       })
       .catch(() => {
         setRecords([])
@@ -127,6 +137,19 @@ export function ClientPaymentPage() {
   useEffect(() => {
     loadData()
   }, [location.pathname])
+
+  useEffect(() => {
+    if (!modalOpen || companies.length > 0) return
+    setCompaniesLoading(true)
+    apiClient
+      .get<{ id: string; name: string }[]>('/companies')
+      .then((r) => r.data)
+      .then((companiesList) => {
+        setCompanies((companiesList || []).filter((c: { id?: string; name?: string }) => c && c.id && c.name))
+      })
+      .catch(() => setCompanies([]))
+      .finally(() => setCompaniesLoading(false))
+  }, [modalOpen, companies.length])
 
   const openModal = () => {
     form.resetFields()
@@ -242,9 +265,15 @@ export function ClientPaymentPage() {
           tagged_user_id: i.tagged_user_id ?? null,
           tagged_user_name: i.tagged_user_name ?? null,
           tagged_user_email: i.tagged_user_email ?? null,
+          tagged_user_2_id: i.tagged_user_2_id ?? null,
+          tagged_user_2_name: i.tagged_user_2_name ?? null,
+          tagged_user_2_email: i.tagged_user_2_email ?? null,
           payment_action_person: i.payment_action_person ?? null,
           payment_action_remarks: i.payment_action_remarks ?? null,
           payment_action_submitted_at: i.payment_action_submitted_at ?? null,
+          payment_action_2_person: i.payment_action_2_person ?? null,
+          payment_action_2_remarks: i.payment_action_2_remarks ?? null,
+          payment_action_2_submitted_at: i.payment_action_2_submitted_at ?? null,
         })
         setDiscontinuationSubmitted(!!discontinuationRes?.submitted)
         const d = discontinuationRes?.data || {}
@@ -391,6 +420,15 @@ export function ClientPaymentPage() {
         tagged_user_id: d.tagged_user_id ?? null,
         tagged_user_name: d.tagged_user_name ?? null,
         tagged_user_email: d.tagged_user_email ?? null,
+        tagged_user_2_id: d.tagged_user_2_id ?? null,
+        tagged_user_2_name: d.tagged_user_2_name ?? null,
+        tagged_user_2_email: d.tagged_user_2_email ?? null,
+        payment_action_person: d.payment_action_person ?? null,
+        payment_action_remarks: d.payment_action_remarks ?? null,
+        payment_action_submitted_at: d.payment_action_submitted_at ?? null,
+        payment_action_2_person: d.payment_action_2_person ?? null,
+        payment_action_2_remarks: d.payment_action_2_remarks ?? null,
+        payment_action_2_submitted_at: d.payment_action_2_submitted_at ?? null,
       })
       setInterceptModalOpen(true)
     }).catch(() => message.error('Could not load'))
@@ -439,6 +477,38 @@ export function ClientPaymentPage() {
       .catch((e) => message.error(e?.response?.data?.detail || 'Failed to save tag'))
       .finally(() => setTagLoading(false))
   }
+
+  const openInterceptTag2 = () => {
+    if (!selectedRecord) return
+    setInterceptTag2ModalOpen(true)
+    setTag2SelectedUserId(interceptDetails?.tagged_user_2_id ?? null)
+    if (tagUsers.length > 0) return
+    setTagLoading(true)
+    apiClient
+      .get<{ items: { id: string; full_name: string; email: string }[] }>('/users/options')
+      .then((res) => setTagUsers(res.data?.items || []))
+      .catch(() => setTagUsers([]))
+      .finally(() => setTagLoading(false))
+  }
+
+  const saveInterceptTag2 = () => {
+    if (!selectedRecord) return
+    if (!tag2SelectedUserId) {
+      message.warning('Select a user to tag')
+      return
+    }
+    setTagLoading(true)
+    apiClient
+      .post(`/onboarding/client-payment/${selectedRecord.id}/intercept/tag-2`, { data: { tagged_user_id: tag2SelectedUserId } })
+      .then(() => {
+        message.success('Tag 2 saved')
+        setInterceptTag2ModalOpen(false)
+        loadDrawerData(selectedRecord)
+      })
+      .catch((e) => message.error(e?.response?.data?.detail || 'Failed to save Tag 2'))
+      .finally(() => setTagLoading(false))
+  }
+
   const handleInterceptSubmit = () => {
     if (!selectedRecord) return
     interceptForm.validateFields().then((values) => {
@@ -572,6 +642,23 @@ export function ClientPaymentPage() {
   const pageTitle = completedSection ? `Client Payment – ${completedSection}` : 'Raised Invoices'
   const dayOfMonth = new Date().getDate()
   const showInterceptByDate = dayOfMonth >= 20
+
+  /** Hide "Tag" after Tag user (Intercept Requirements) has been saved once. */
+  const interceptHasTaggedUser = !!(
+    interceptDetails?.tagged_user_id ||
+    interceptDetails?.tagged_user_name ||
+    interceptDetails?.tagged_user_email
+  )
+  const interceptHasTaggedUser2 = !!(
+    interceptDetails?.tagged_user_2_id ||
+    interceptDetails?.tagged_user_2_name ||
+    interceptDetails?.tagged_user_2_email
+  )
+  const showClientPaymentT2Button =
+    !!user &&
+    interceptHasTaggedUser &&
+    !!interceptDetails?.payment_action_submitted_at &&
+    !interceptHasTaggedUser2
   const showDiscontinuationByDate = dayOfMonth >= 25
   const isCompleted = selectedRecord?.status === 'Completed'
 
@@ -704,7 +791,11 @@ export function ClientPaymentPage() {
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                           <Space><CheckCircleOutlined style={{ color: '#52c41a' }} /><span>Intercept Requirements</span></Space>
                           <Space size={8}>
-                            <Button size="small" onClick={openInterceptTag}>Tag</Button>
+                            {!interceptHasTaggedUser && (
+                              <Button size="small" onClick={openInterceptTag}>
+                                Tag
+                              </Button>
+                            )}
                             {interceptEditable ? (
                               <Button type="link" size="small" icon={<EditOutlined />} onClick={openIntercept}>Edit</Button>
                             ) : (
@@ -726,8 +817,18 @@ export function ClientPaymentPage() {
                     {interceptSubmitted &&
                       !!(interceptDetails?.tagged_user_id || interceptDetails?.tagged_user_name || interceptDetails?.tagged_user_email) && (
                         <div style={{ marginBottom: 16 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                            <Space><CheckCircleOutlined style={{ color: '#52c41a' }} /><span>Client Payment</span></Space>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
+                            <Space>
+                              <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                              <span>Client Payment</span>
+                            </Space>
+                            {showClientPaymentT2Button && (
+                              <Tooltip title="Assign a second user (after first Client Payment action)">
+                                <Button size="small" type="default" onClick={openInterceptTag2}>
+                                  T 2
+                                </Button>
+                              </Tooltip>
+                            )}
                           </div>
                           <Descriptions column={1} size="small" bordered>
                             <Descriptions.Item label="Tag (user)">
@@ -735,6 +836,26 @@ export function ClientPaymentPage() {
                             </Descriptions.Item>
                             <Descriptions.Item label="Person">{interceptDetails?.payment_action_person || '—'}</Descriptions.Item>
                             <Descriptions.Item label="Remarks">{interceptDetails?.payment_action_remarks || '—'}</Descriptions.Item>
+                            {(interceptDetails?.tagged_user_2_name || interceptDetails?.tagged_user_2_email) && (
+                              <Descriptions.Item label="Tag 2 (user)">
+                                {interceptDetails?.tagged_user_2_name || interceptDetails?.tagged_user_2_email || '—'}
+                              </Descriptions.Item>
+                            )}
+                            {interceptHasTaggedUser2 && (
+                              <>
+                                <Descriptions.Item label="Person (T2)">
+                                  {interceptDetails?.payment_action_2_person || '—'}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Remarks (T2)">
+                                  {interceptDetails?.payment_action_2_remarks || '—'}
+                                </Descriptions.Item>
+                                <Descriptions.Item label="Submitted (T2)">
+                                  {interceptDetails?.payment_action_2_submitted_at
+                                    ? dayjs(interceptDetails.payment_action_2_submitted_at).format('DD-MMM-YYYY HH:mm')
+                                    : '—'}
+                                </Descriptions.Item>
+                              </>
+                            )}
                           </Descriptions>
                         </div>
                       )}
@@ -959,6 +1080,37 @@ export function ClientPaymentPage() {
         </div>
       </Modal>
 
+      <Modal
+        title="Tag user (T 2 — Client Payment)"
+        open={interceptTag2ModalOpen}
+        onCancel={() => setInterceptTag2ModalOpen(false)}
+        onOk={saveInterceptTag2}
+        okText="Save"
+        okButtonProps={{ loading: tagLoading }}
+        confirmLoading={tagLoading}
+        destroyOnClose
+        width={520}
+      >
+        <div style={{ marginTop: 12 }}>
+          <Select
+            showSearch
+            placeholder="Select registered user"
+            loading={tagLoading}
+            value={tag2SelectedUserId ?? undefined}
+            onChange={(v) => setTag2SelectedUserId(v)}
+            options={tagUsers.map((u) => ({
+              label: `${u.full_name || '(No name)'}${u.email ? ` — ${u.email}` : ''}`,
+              value: u.id,
+            }))}
+            filterOption={(input, option) => String(option?.label ?? '').toLowerCase().includes(input.toLowerCase())}
+            style={{ width: '100%' }}
+          />
+        </div>
+        <div style={{ marginTop: 12, color: '#666', fontSize: 12 }}>
+          Available after the first <b>Client Payment</b> action (Person / Remarks). Any logged-in user can assign Tag 2.
+        </div>
+      </Modal>
+
       <Modal title="Discontinuation Mail" open={discontinuationModalOpen} onCancel={() => setDiscontinuationModalOpen(false)} footer={null} destroyOnClose width={520}>
         <Form form={discontinuationForm} layout="vertical" style={{ marginTop: 16 }} onFinish={handleDiscontinuationSubmit}>
           <Form.Item name="mail_sent_to" label="Mail Sent To" rules={[{ required: true, message: 'Required' }]}><Input placeholder="Email or recipient" /></Form.Item>
@@ -1004,7 +1156,8 @@ export function ClientPaymentPage() {
           >
             <Select
               showSearch
-              placeholder="Select company"
+              loading={companiesLoading}
+              placeholder={companiesLoading ? 'Loading companies…' : 'Select company'}
               options={companies.map((c) => ({ label: c.name, value: c.name }))}
               filterOption={(input, option) =>
                 (option?.label as string).toLowerCase().includes(input.toLowerCase())

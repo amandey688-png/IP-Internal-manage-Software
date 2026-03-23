@@ -59,6 +59,11 @@ export const dashboardApi = {
       tagged_user_id?: string | null
       tagged_user_name?: string | null
       tagged_user_email?: string | null
+      tagged_user_2_id?: string | null
+      tagged_user_2_name?: string | null
+      tagged_user_2_email?: string | null
+      /** t1/t2 = pending action; completed = both T1+T2 payment actions submitted (read-only row) */
+      pending_payment_tag?: 't1' | 't2' | 'completed'
     }>
   }> => {
     const r = await apiClient.get<{
@@ -73,11 +78,21 @@ export const dashboardApi = {
         tagged_user_id?: string | null
         tagged_user_name?: string | null
         tagged_user_email?: string | null
+        tagged_user_2_id?: string | null
+        tagged_user_2_name?: string | null
+        tagged_user_2_email?: string | null
+        pending_payment_tag?: 't1' | 't2' | 'completed'
       }>
     }>('/dashboard/payment-actions')
     return r.data
   },
-  submitPaymentAction: async (body: { client_payment_id: string; person: string; remarks: string }): Promise<{ success: boolean }> => {
+  submitPaymentAction: async (body: {
+    client_payment_id: string
+    person: string
+    remarks: string
+    /** T1 = first Payment Action; T2 = second after Tag 2 */
+    tag?: 't1' | 't2'
+  }): Promise<{ success: boolean }> => {
     const r = await apiClient.post<{ success: boolean }>('/dashboard/payment-actions/submit', body)
     return r.data
   },

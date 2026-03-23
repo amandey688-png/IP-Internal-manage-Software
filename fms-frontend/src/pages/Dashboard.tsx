@@ -37,6 +37,14 @@ const ACTIVE_LEAD_STAGE_COLORS: Record<string, string> = {
 
 const { Title, Text } = Typography
 
+/** Same display for Tag (T1) and Tag (T2): name + email when both exist */
+function formatTagColumn(name?: string | null, email?: string | null) {
+  const n = (name || '').trim()
+  const e = (email || '').trim()
+  if (n && e) return `${n} (${e})`
+  return n || e || '—'
+}
+
 const lightPanel = {
   background: '#ffffff',
   border: '1px solid rgba(0, 0, 0, 0.06)',
@@ -73,6 +81,9 @@ export const Dashboard = () => {
       reference_no?: string
       tagged_user_name?: string | null
       tagged_user_email?: string | null
+      tagged_user_2_name?: string | null
+      tagged_user_2_email?: string | null
+      pending_payment_tag?: 't1' | 't2' | 'completed'
     }>
   >([])
   const [paymentActionsLoading, setPaymentActionsLoading] = useState(false)
@@ -81,6 +92,7 @@ export const Dashboard = () => {
     client_payment_id: string
     company_name?: string
     reference_no?: string
+    pending_payment_tag?: 't1' | 't2' | 'completed'
   } | null>(null)
   const [paymentActionSubmitting, setPaymentActionSubmitting] = useState(false)
   const [paymentActionForm] = Form.useForm<{ person: string; remarks: string }>()
@@ -303,37 +315,73 @@ export const Dashboard = () => {
               size="small"
               loading={paymentActionsLoading}
               dataSource={paymentActions}
-              rowKey="client_payment_id"
+              rowKey={(r) => `${r.client_payment_id}-${r.pending_payment_tag || 't1'}`}
               pagination={false}
               columns={[
                 { title: 'Company', dataIndex: 'company_name', key: 'company_name', render: (v: string) => v || '—' },
                 { title: 'Invoice Number', dataIndex: 'invoice_number', key: 'invoice_number', render: (v: string) => v || '—' },
                 { title: 'Reference', dataIndex: 'reference_no', key: 'reference_no', render: (v: string) => v || '—' },
                 {
-                  title: 'Tagged User',
-                  key: 'tagged',
+                  title: 'Tag (T1)',
+                  key: 't1',
+                  width: 200,
                   render: (_: unknown, r: { tagged_user_name?: string | null; tagged_user_email?: string | null }) =>
-                    r.tagged_user_name || r.tagged_user_email || '—',
+                    formatTagColumn(r.tagged_user_name, r.tagged_user_email),
+                },
+                {
+                  title: 'Tag (T2)',
+                  key: 't2',
+                  width: 200,
+                  render: (_: unknown, r: { tagged_user_2_name?: string | null; tagged_user_2_email?: string | null }) =>
+                    formatTagColumn(r.tagged_user_2_name, r.tagged_user_2_email),
+                },
+                {
+                  title: 'Step',
+                  key: 'step',
+                  width: 100,
+                  render: (_: unknown, r: { pending_payment_tag?: 't1' | 't2' | 'completed' }) => {
+                    if (r.pending_payment_tag === 'completed') {
+                      return <Tag color="success">Done</Tag>
+                    }
+                    return (
+                      <Tag color={r.pending_payment_tag === 't2' ? 'blue' : 'default'}>
+                        {r.pending_payment_tag === 't2' ? 'T2' : 'T1'}
+                      </Tag>
+                    )
+                  },
                 },
                 {
                   title: 'Action',
                   key: 'action',
-                  render: (_: unknown, row: { client_payment_id: string; company_name?: string; reference_no?: string }) => (
-                    <Button
-                      type="primary"
-                      size="small"
-                      onClick={() => {
-                        setPaymentActionRow(row)
-                        paymentActionForm.resetFields()
-                        setPaymentActionModalOpen(true)
-                      }}
-                    >
-                      Submit
-                    </Button>
-                  ),
+                  render: (
+                    _: unknown,
+                    row: {
+                      client_payment_id: string
+                      company_name?: string
+                      reference_no?: string
+                      pending_payment_tag?: 't1' | 't2' | 'completed'
+                    }
+                  ) =>
+                    row.pending_payment_tag === 'completed' ? (
+                      <Text type="secondary">Recorded</Text>
+                    ) : (
+                      <Button
+                        type="primary"
+                        size="small"
+                        onClick={() => {
+                          setPaymentActionRow(row)
+                          paymentActionForm.resetFields()
+                          setPaymentActionModalOpen(true)
+                        }}
+                      >
+                        Submit
+                      </Button>
+                    ),
                 },
               ]}
-              locale={{ emptyText: 'No tagged intercept actions.' }}
+              locale={{
+                emptyText: 'No pending Payment Actions. Completed T1+T2 rows appear here when applicable.',
+              }}
             />
           </Card>
         </>
@@ -509,7 +557,13 @@ export const Dashboard = () => {
       </Modal>
 
       <Modal
-        title="Payment Action"
+        title={
+          paymentActionRow?.pending_payment_tag === 't2'
+            ? 'Payment Action — Tag T2'
+            : paymentActionRow?.pending_payment_tag === 't1'
+              ? 'Payment Action — Tag T1'
+              : 'Payment Action'
+        }
         open={paymentActionModalOpen}
         onCancel={() => {
           setPaymentActionModalOpen(false)
@@ -528,15 +582,18 @@ export const Dashboard = () => {
           layout="vertical"
           onFinish={async (values) => {
             if (!paymentActionRow?.client_payment_id) return
+            if (paymentActionRow.pending_payment_tag === 'completed') return
             setPaymentActionSubmitting(true)
             try {
               await dashboardApi.submitPaymentAction({
                 client_payment_id: paymentActionRow.client_payment_id,
                 person: values.person?.trim() || '',
                 remarks: values.remarks?.trim() || '',
+                tag: paymentActionRow.pending_payment_tag === 't2' ? 't2' : 't1',
               })
               message.success('Saved. This row is cleared from Payment Action and visible under Client Payment.')
-              setPaymentActions((prev) => prev.filter((x) => x.client_payment_id !== paymentActionRow.client_payment_id))
+              const res = await dashboardApi.getPaymentActions()
+              setPaymentActions(res.items || [])
               setPaymentActionModalOpen(false)
               setPaymentActionRow(null)
               paymentActionForm.resetFields()
