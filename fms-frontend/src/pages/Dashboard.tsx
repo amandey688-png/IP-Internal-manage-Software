@@ -6,7 +6,7 @@ import {
   CheckCircleOutlined,
   RocketOutlined,
 } from '@ant-design/icons'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { dashboardApi, type DashboardDetailTicket } from '../api/dashboard'
 import { ticketsApi } from '../api/tickets'
@@ -104,21 +104,103 @@ export const Dashboard = () => {
   useEffect(() => {
     setPaymentActionsLoading(true)
     setActiveLeadsLoading(true)
-    const isMasterAdmin = user?.role === 'master_admin'
-    const isSk = (user?.email || '').toLowerCase() === 'sk@industryprime.com'
     const promises: Promise<void>[] = [
       leadsApi.listActive().then((res) => setActiveLeads(res.leads || [])).catch(() => setActiveLeads([])),
     ]
-    if (isMasterAdmin || isSk) {
+    if (user) {
       promises.push(
         dashboardApi.getPaymentActions().then((res) => setPaymentActions(res.items || [])).catch(() => setPaymentActions([]))
       )
+    } else {
+      setPaymentActions([])
     }
     Promise.all(promises).finally(() => {
       setPaymentActionsLoading(false)
       setActiveLeadsLoading(false)
     })
-  }, [user?.role, user?.email])
+  }, [user?.role, user?.email, user?.id])
+
+  const isFullPaymentViewer =
+    user?.role === 'master_admin' ||
+    user?.role === 'admin' ||
+    (user?.email || '').toLowerCase() === 'sk@industryprime.com'
+
+  const paymentActionColumns = useMemo(
+    () => [
+      { title: 'Company', dataIndex: 'company_name', key: 'company_name', render: (v: string) => v || '—' },
+      { title: 'Invoice Number', dataIndex: 'invoice_number', key: 'invoice_number', render: (v: string) => v || '—' },
+      { title: 'Reference', dataIndex: 'reference_no', key: 'reference_no', render: (v: string) => v || '—' },
+      {
+        title: 'Tags (T1 & T2)',
+        key: 'tags',
+        width: 280,
+        render: (
+          _: unknown,
+          r: {
+            tagged_user_name?: string | null
+            tagged_user_email?: string | null
+            tagged_user_2_name?: string | null
+            tagged_user_2_email?: string | null
+          }
+        ) => (
+          <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+            <div>
+              <Text type="secondary">T1: </Text>
+              {formatTagColumn(r.tagged_user_name, r.tagged_user_email)}
+            </div>
+            <div style={{ marginTop: 4 }}>
+              <Text type="secondary">T2: </Text>
+              {formatTagColumn(r.tagged_user_2_name, r.tagged_user_2_email)}
+            </div>
+          </div>
+        ),
+      },
+      {
+        title: 'Step',
+        key: 'step',
+        width: 100,
+        render: (_: unknown, r: { pending_payment_tag?: 't1' | 't2' | 'completed' }) => {
+          if (r.pending_payment_tag === 'completed') {
+            return <Tag color="success">Done</Tag>
+          }
+          return (
+            <Tag color={r.pending_payment_tag === 't2' ? 'blue' : 'default'}>
+              {r.pending_payment_tag === 't2' ? 'T2' : 'T1'}
+            </Tag>
+          )
+        },
+      },
+      {
+        title: 'Action',
+        key: 'action',
+        render: (
+          _: unknown,
+          row: {
+            client_payment_id: string
+            company_name?: string
+            reference_no?: string
+            pending_payment_tag?: 't1' | 't2' | 'completed'
+          }
+        ) =>
+          row.pending_payment_tag === 'completed' ? (
+            <Text type="secondary">Recorded</Text>
+          ) : (
+            <Button
+              type="primary"
+              size="small"
+              onClick={() => {
+                setPaymentActionRow(row)
+                paymentActionForm.resetFields()
+                setPaymentActionModalOpen(true)
+              }}
+            >
+              Submit
+            </Button>
+          ),
+      },
+    ],
+    []
+  )
 
   const fetchData = async () => {
     setLoading(true)
@@ -302,10 +384,33 @@ export const Dashboard = () => {
         ))}
       </Row>
 
-      {(user?.role === 'master_admin' || (user?.email || '').toLowerCase() === 'sk@industryprime.com') && (
+      {user && (
         <>
-          <Title level={4} style={{ marginBottom: 16, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>
+          <Title level={4} style={{ marginBottom: 8, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>
             Payment Action
+          </Title>
+          {!isFullPaymentViewer && (
+            <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+              Rows where you are tagged for T1 or T2 (pending). Master Admin / Admin sees all intercepts.
+            </Text>
+          )}
+          {!isFullPaymentViewer &&
+            !paymentActionsLoading &&
+            paymentActions.length === 0 && (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="No payment actions for your login. If you should be tagged, check that Client Payment has your user id or email saved on the intercept."
+              />
+            )}
+          {isFullPaymentViewer && (
+            <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+              Pending steps only: when T1 (and T2 if tagged) are submitted, the row leaves this list — details stay under Client Payment on the invoice.
+            </Text>
+          )}
+          <Title level={5} style={{ marginBottom: 12, color: '#1e293b', fontWeight: 600 }}>
+            Tag (T1) — Client Payment actions
           </Title>
           <Card
             style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff', marginBottom: 28 }}
@@ -317,70 +422,11 @@ export const Dashboard = () => {
               dataSource={paymentActions}
               rowKey={(r) => `${r.client_payment_id}-${r.pending_payment_tag || 't1'}`}
               pagination={false}
-              columns={[
-                { title: 'Company', dataIndex: 'company_name', key: 'company_name', render: (v: string) => v || '—' },
-                { title: 'Invoice Number', dataIndex: 'invoice_number', key: 'invoice_number', render: (v: string) => v || '—' },
-                { title: 'Reference', dataIndex: 'reference_no', key: 'reference_no', render: (v: string) => v || '—' },
-                {
-                  title: 'Tag (T1)',
-                  key: 't1',
-                  width: 200,
-                  render: (_: unknown, r: { tagged_user_name?: string | null; tagged_user_email?: string | null }) =>
-                    formatTagColumn(r.tagged_user_name, r.tagged_user_email),
-                },
-                {
-                  title: 'Tag (T2)',
-                  key: 't2',
-                  width: 200,
-                  render: (_: unknown, r: { tagged_user_2_name?: string | null; tagged_user_2_email?: string | null }) =>
-                    formatTagColumn(r.tagged_user_2_name, r.tagged_user_2_email),
-                },
-                {
-                  title: 'Step',
-                  key: 'step',
-                  width: 100,
-                  render: (_: unknown, r: { pending_payment_tag?: 't1' | 't2' | 'completed' }) => {
-                    if (r.pending_payment_tag === 'completed') {
-                      return <Tag color="success">Done</Tag>
-                    }
-                    return (
-                      <Tag color={r.pending_payment_tag === 't2' ? 'blue' : 'default'}>
-                        {r.pending_payment_tag === 't2' ? 'T2' : 'T1'}
-                      </Tag>
-                    )
-                  },
-                },
-                {
-                  title: 'Action',
-                  key: 'action',
-                  render: (
-                    _: unknown,
-                    row: {
-                      client_payment_id: string
-                      company_name?: string
-                      reference_no?: string
-                      pending_payment_tag?: 't1' | 't2' | 'completed'
-                    }
-                  ) =>
-                    row.pending_payment_tag === 'completed' ? (
-                      <Text type="secondary">Recorded</Text>
-                    ) : (
-                      <Button
-                        type="primary"
-                        size="small"
-                        onClick={() => {
-                          setPaymentActionRow(row)
-                          paymentActionForm.resetFields()
-                          setPaymentActionModalOpen(true)
-                        }}
-                      >
-                        Submit
-                      </Button>
-                    ),
-                },
-              ]}
+              columns={paymentActionColumns}
               locale={{
-                emptyText: 'No pending Payment Actions. Completed T1+T2 rows appear here when applicable.',
+                emptyText: isFullPaymentViewer
+                  ? 'No payment actions. Add intercept + Tag (T1) on Client Payment, run docs/CLIENT_PAYMENT_INTERCEPT_TAG2.sql in Supabase if T2 columns are missing.'
+                  : 'No rows for your account. You must be tagged for T1 or T2 on an intercept with pending payment action.',
               }}
             />
           </Card>

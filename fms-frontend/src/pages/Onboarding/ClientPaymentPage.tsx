@@ -7,7 +7,7 @@ import { API_ENDPOINTS } from '../../utils/constants'
 import { apiClient } from '../../api/axios'
 import { useAuth } from '../../hooks/useAuth'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 
 interface ClientPaymentRecord {
   id: string
@@ -836,6 +836,13 @@ export function ClientPaymentPage() {
                             </Descriptions.Item>
                             <Descriptions.Item label="Person">{interceptDetails?.payment_action_person || '—'}</Descriptions.Item>
                             <Descriptions.Item label="Remarks">{interceptDetails?.payment_action_remarks || '—'}</Descriptions.Item>
+                            {!interceptDetails?.payment_action_submitted_at && (
+                              <Descriptions.Item label=" ">
+                                <Text type="secondary" style={{ fontSize: 12 }}>
+                                  Person &amp; Remarks appear here after someone submits <b>Payment Action</b> on the Support Dashboard (Master Admin or the tagged user).
+                                </Text>
+                              </Descriptions.Item>
+                            )}
                             {(interceptDetails?.tagged_user_2_name || interceptDetails?.tagged_user_2_email) && (
                               <Descriptions.Item label="Tag 2 (user)">
                                 {interceptDetails?.tagged_user_2_name || interceptDetails?.tagged_user_2_email || '—'}
