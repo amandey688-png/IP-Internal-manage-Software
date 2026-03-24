@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import {
   Button,
   Card,
   Collapse,
+  Col,
   InputNumber,
   Modal,
+  Row,
   Space,
   Table,
   Typography,
@@ -16,6 +18,18 @@ import { apiClient } from '../../api/axios'
 import { API_ENDPOINTS } from '../../utils/constants'
 
 const { Title, Text, Link } = Typography
+
+type KpiPair = { received: number; raised: number }
+
+type PaymentAgeingKpis = {
+  anchor_date: string
+  quarter_period_label: string
+  month_period_label: string
+  quarterly_genre_q: KpiPair
+  monthly_genre_m: KpiPair
+  overall_in_quarter: KpiPair
+  monthly_in_quarter: KpiPair
+}
 
 /** Must match backend PAYMENT_AGEING_QUARTER_COUNT (sheet: Q3 FY23-24 … Q4 FY25-26). */
 const QUARTER_COUNT = 10
@@ -67,10 +81,41 @@ type ReportPayload = {
       fy_24_25_q3: number
     }
   }
+  kpis?: PaymentAgeingKpis
 }
 
 const fmt = (n: number) => n.toLocaleString('en-IN')
 const fmtPct = (n: number) => (Number.isFinite(n) ? n.toFixed(2) : '0.00')
+
+function KpiSummaryCard({
+  heading,
+  period,
+  pair,
+  extra,
+}: {
+  heading: string
+  period: string
+  pair: KpiPair
+  extra?: ReactNode
+}) {
+  return (
+    <Card size="small" style={{ height: '100%' }}>
+      <Text strong style={{ display: 'block', marginBottom: 4 }}>
+        {heading}
+      </Text>
+      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+        {period}
+      </Text>
+      <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 4 }}>
+        {fmt(pair.received)} / {fmt(pair.raised)}
+      </div>
+      <Text type="secondary" style={{ fontSize: 11 }}>
+        Total received / Total raised (₹)
+      </Text>
+      {extra ? <div style={{ marginTop: 10 }}>{extra}</div> : null}
+    </Card>
+  )
+}
 
 function buildFilters(values: (string | number | null | undefined)[]) {
   const uniq = [...new Set(values.map((v) => (v === null || v === undefined ? '' : String(v))).filter(Boolean))]
@@ -277,28 +322,46 @@ export function PaymentAgeingReportPage() {
   ]
 
   const summaryTotals = data?.summary?.totals
+  const kpis = data?.kpis
 
   return (
     <div style={{ padding: 16 }}>
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <div>
-          <Title level={4} style={{ margin: 0 }}>
-            Payment Ageing Report
-          </Title>
-          <Text type="secondary">
-            Amount (Incl GST) is the sum of invoice amounts from Payment Management for each company. Edit quarter days per row; bucket
-            &quot;Median&quot; uses SUMIFS-style totals by median days (0–7, 8–14, …). The ageing summary below is computed from the same
-            rows. First-time setup: run{' '}
-            <Link href={SQL_FULL_HREF} target="_blank" rel="noopener noreferrer">
-              SUPABASE_PAYMENT_AGEING_FULL_SETUP.sql
-            </Link>{' '}
-            in Supabase (creates tables + loads companies). Tables only:{' '}
-            <Link href={SQL_SETUP_HREF} target="_blank" rel="noopener noreferrer">
-              SUPABASE_PAYMENT_AGEING_REPORT.sql
-            </Link>{' '}
-            (<Text code>docs/</Text> in repo).
-          </Text>
-        </div>
+        <Title level={4} style={{ margin: 0 }}>
+          Payment Ageing Report
+        </Title>
+
+        <Row gutter={[16, 16]}>
+          <Col xs={24} md={8}>
+            <KpiSummaryCard
+              heading="Quarterly amount"
+              period={kpis ? `${kpis.quarter_period_label} · genre Q (quarterly raises)` : '—'}
+              pair={kpis?.quarterly_genre_q ?? { received: 0, raised: 0 }}
+            />
+          </Col>
+          <Col xs={24} md={8}>
+            <KpiSummaryCard
+              heading="Monthly amount"
+              period={kpis ? `${kpis.month_period_label} · genre M (monthly raises)` : '—'}
+              pair={kpis?.monthly_genre_m ?? { received: 0, raised: 0 }}
+            />
+          </Col>
+          <Col xs={24} md={8}>
+            <KpiSummaryCard
+              heading="Overall"
+              period={kpis ? `${kpis.quarter_period_label} · all genres in this FY quarter` : '—'}
+              pair={kpis?.overall_in_quarter ?? { received: 0, raised: 0 }}
+              extra={
+                kpis ? (
+                  <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
+                    Monthly raises in this quarter: {fmt(kpis.monthly_in_quarter.received)} /{' '}
+                    {fmt(kpis.monthly_in_quarter.raised)} (received / raised)
+                  </Text>
+                ) : null
+              }
+            />
+          </Col>
+        </Row>
 
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
@@ -313,7 +376,7 @@ export function PaymentAgeingReportPage() {
             columns={columns}
             dataSource={data?.rows || []}
             scroll={{ x: 1200 + (data?.quarter_labels?.length || 0) * 90 }}
-            pagination={{ pageSize: 50, showSizeChanger: true }}
+            pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200'] }}
             size="small"
           />
         </Card>

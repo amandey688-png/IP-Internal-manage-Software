@@ -3576,6 +3576,61 @@ def _parse_invoice_amount(val) -> int:
     return int(s)
 
 
+def _compute_payment_ageing_kpis(pay_rows: list, allowed: frozenset[str] | None) -> dict:
+    """Raised vs received from Payment Management (genre Q = quarterly, M = monthly). Same company filter as report."""
+    import calendar
+    from datetime import date as date_cls
+
+    today = date_cls.today()
+    fy, q = _pa.fy_quarter_key(today)
+    q_start, q_end = _pa.quarter_date_bounds(fy, q)
+    m_start = date_cls(today.year, today.month, 1)
+    m_end = date_cls(today.year, today.month, calendar.monthrange(today.year, today.month)[1])
+
+    q_raised = q_received = 0
+    m_month_raised = m_month_received = 0
+    o_raised = o_received = 0
+    m_in_q_raised = m_in_q_received = 0
+
+    for row in pay_rows or []:
+        nm = _norm_name_company(row.get("company_name"))
+        if allowed and nm not in allowed:
+            continue
+        inv_d = _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
+        if not inv_d:
+            continue
+        amt = _parse_invoice_amount(row.get("invoice_amount"))
+        rec = amt if row.get("payment_received_date") else 0
+        g = (row.get("genre") or "").strip().upper()
+
+        if q_start <= inv_d <= q_end:
+            o_raised += amt
+            o_received += rec
+            if g == "Q":
+                q_raised += amt
+                q_received += rec
+            elif g == "M":
+                m_in_q_raised += amt
+                m_in_q_received += rec
+
+        if m_start <= inv_d <= m_end and g == "M":
+            m_month_raised += amt
+            m_month_received += rec
+
+    def pair(recv: int, raised: int) -> dict:
+        return {"received": int(recv), "raised": int(raised)}
+
+    return {
+        "anchor_date": today.isoformat(),
+        "quarter_period_label": _pa.quarter_label_from_key(fy, q),
+        "month_period_label": today.strftime("%b %Y"),
+        "quarterly_genre_q": pair(q_received, q_raised),
+        "monthly_genre_m": pair(m_month_received, m_month_raised),
+        "overall_in_quarter": pair(o_received, o_raised),
+        "monthly_in_quarter": pair(m_in_q_received, m_in_q_raised),
+    }
+
+
 def _payment_ageing_report_payload():
     """Build Payment Ageing Report: companies + amounts from raised invoices + saved quarter days."""
     _nq = _pa.PAYMENT_AGEING_QUARTER_COUNT
@@ -3784,12 +3839,15 @@ def _payment_ageing_report_payload():
         "fy_24_25_q3": sum(bucket_fy_q3),
     }
 
+    kpis = _compute_payment_ageing_kpis(pay_rows, allowed if allowed else None)
+
     return {
         "quarter_labels": quarter_labels,
         "quarter_keys": quarter_keys,
         "rows": out_rows,
         "summary": {"rows": summary_rows, "totals": totals},
         "summary_uploaded": summary_upload or [],
+        "kpis": kpis,
     }
 
 
