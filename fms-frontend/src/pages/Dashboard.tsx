@@ -1,5 +1,14 @@
 import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Spin, Tag, Form, Input, message } from 'antd'
 import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from 'recharts'
+import {
   FileTextOutlined,
   ClockCircleOutlined,
   WarningOutlined,
@@ -8,7 +17,7 @@ import {
 } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { dashboardApi, type DashboardDetailTicket } from '../api/dashboard'
+import { dashboardApi, type DashboardDetailTicket, type TrendPoint } from '../api/dashboard'
 import { ticketsApi } from '../api/tickets'
 import { leadsApi, type ActiveLeadRow } from '../api/leads'
 import { LoadingSpinner } from '../components/common/LoadingSpinner'
@@ -96,6 +105,7 @@ export const Dashboard = () => {
   } | null>(null)
   const [paymentActionSubmitting, setPaymentActionSubmitting] = useState(false)
   const [paymentActionForm] = Form.useForm<{ person: string; remarks: string }>()
+  const [trendPoints, setTrendPoints] = useState<TrendPoint[]>([])
 
   useEffect(() => {
     fetchData()
@@ -206,11 +216,17 @@ export const Dashboard = () => {
     setLoading(true)
     setError(null)
     try {
-      const [metricsRes, ticketsRes] = await Promise.allSettled([
+      const [metricsRes, ticketsRes, trendsRes] = await Promise.allSettled([
         dashboardApi.getMetrics(),
         ticketsApi.list({ limit: 100, types_in: 'chore,bug' }),
+        dashboardApi.getTrends(),
       ])
       setMetrics(metricsRes.status === 'fulfilled' ? metricsRes.value : null)
+      if (trendsRes.status === 'fulfilled' && trendsRes.value?.data?.length) {
+        setTrendPoints(trendsRes.value.data)
+      } else {
+        setTrendPoints([])
+      }
       const ticketsResVal = ticketsRes.status === 'fulfilled' ? ticketsRes.value : null
       const raw = ticketsResVal && typeof ticketsResVal === 'object' ? (ticketsResVal as { data?: unknown }).data : undefined
       const tickets: Ticket[] = Array.isArray(raw) ? raw as Ticket[] : []
@@ -433,30 +449,86 @@ export const Dashboard = () => {
         </>
       )}
 
-      {/* Trends row */}
+      {/* Trends row — data from GET /dashboard/trends (monthly Chores & Bug counts) */}
       <Row gutter={[20, 20]}>
         <Col xs={24} lg={12}>
           <Card
             title={<span style={{ color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>Response Delay Trend</span>}
             style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
-            bodyStyle={{ padding: 24, height: 200 }}
+            bodyStyle={{ padding: '12px 16px 16px', minHeight: 280 }}
           >
-            <Text style={{ fontSize: 12, color: '#64748b' }}>Monthly trend (Chores & Bug)</Text>
-            <div style={{ marginTop: 16, padding: 24, background: '#f8fafc', borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)' }}>
-              <Text style={{ color: '#64748b' }}>Chart placeholder — metrics loaded</Text>
-            </div>
+            <Text style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 8 }}>
+              Monthly trend (Chores & Bug) — tickets without assignee
+            </Text>
+            {trendPoints.length > 0 ? (
+              <div style={{ width: '100%', height: 220 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={trendPoints} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                    <YAxis allowDecimals={false} width={36} tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                    <Tooltip
+                      formatter={(v: number) => [v, 'Count']}
+                      labelStyle={{ color: '#334155' }}
+                      contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="response_delay"
+                      name="Response delay"
+                      stroke="#3b82f6"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: '#3b82f6' }}
+                      activeDot={{ r: 5 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div style={{ padding: 32, textAlign: 'center', background: '#f8fafc', borderRadius: 8 }}>
+                <Text type="secondary">No trend data yet (last 7 months).</Text>
+              </div>
+            )}
           </Card>
         </Col>
         <Col xs={24} lg={12}>
           <Card
             title={<span style={{ color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>Completion Delay Trend</span>}
             style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
-            bodyStyle={{ padding: 24, height: 200 }}
+            bodyStyle={{ padding: '12px 16px 16px', minHeight: 280 }}
           >
-            <Text style={{ fontSize: 12, color: '#64748b' }}>Monthly trend (Chores & Bug)</Text>
-            <div style={{ marginTop: 16, padding: 24, background: '#f8fafc', borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)' }}>
-              <Text style={{ color: '#64748b' }}>Chart placeholder — metrics loaded</Text>
-            </div>
+            <Text style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 8 }}>
+              Monthly trend (Chores & Bug) — Stage 2 delay (TAT exceeded after Stage 2 completed)
+            </Text>
+            {trendPoints.length > 0 ? (
+              <div style={{ width: '100%', height: 220 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={trendPoints} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                    <YAxis allowDecimals={false} width={36} tick={{ fontSize: 11 }} stroke="#94a3b8" />
+                    <Tooltip
+                      formatter={(v: number) => [v, 'Count']}
+                      labelStyle={{ color: '#334155' }}
+                      contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0' }}
+                    />
+                    <Line
+                      type="monotone"
+                      dataKey="completion_delay"
+                      name="Completion delay"
+                      stroke="#d97706"
+                      strokeWidth={2}
+                      dot={{ r: 3, fill: '#d97706' }}
+                      activeDot={{ r: 5 }}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : (
+              <div style={{ padding: 32, textAlign: 'center', background: '#f8fafc', borderRadius: 8 }}>
+                <Text type="secondary">No trend data yet (last 7 months).</Text>
+              </div>
+            )}
           </Card>
         </Col>
       </Row>

@@ -3165,27 +3165,64 @@ def support_dashboard_feature_tickets(
 
 @api_router.get("/dashboard/trends")
 def dashboard_trends(auth: dict = Depends(get_current_user)):
-    """Monthly trend data for charts (Chores & Bug only)."""
-    from datetime import timedelta
+    """Monthly trend data for charts (Chores & Bug only).
+
+    - response_delay: tickets with no assignee (same as dashboard cards).
+    - completion_delay: Stage 2 TAT breach — ``_has_completion_delay`` (planned/actual vs SLA), not Stage 4.
+    """
+    import calendar
+
     now = datetime.utcnow()
+    cur_y, cur_m = now.year, now.month
     data = []
     for i in range(6, -1, -1):
-        month_start = (now.replace(day=1) - timedelta(days=30 * i)).replace(hour=0, minute=0, second=0, microsecond=0)
-        month_end = month_start + timedelta(days=32)
-        month_end = month_end.replace(day=1) - timedelta(seconds=1)
+        ty, tm = cur_y, cur_m
+        tm -= i
+        while tm <= 0:
+            tm += 12
+            ty -= 1
+        while tm > 12:
+            tm -= 12
+            ty += 1
+        month_start = datetime(ty, tm, 1, 0, 0, 0)
+        last_d = calendar.monthrange(ty, tm)[1]
+        month_end = datetime(ty, tm, last_d, 23, 59, 59)
+        label = month_start.strftime("%b %Y")
         try:
-            q = supabase.table("tickets").select("id, assignee_id, created_at, status_4, actual_4").in_("type", ["chore", "bug"]).gte("created_at", month_start.isoformat()).lte("created_at", month_end.isoformat())
+            q = (
+                supabase.table("tickets")
+                .select(
+                    "id, assignee_id, created_at, type, resolved_at, planned_2, actual_2, actual_1, status_2"
+                )
+                .in_("type", ["chore", "bug"])
+                .gte("created_at", month_start.isoformat())
+                .lte("created_at", month_end.isoformat())
+            )
             r = q.execute()
             tickets = r.data or []
             response_delay = sum(1 for t in tickets if not t.get("assignee_id"))
-            completion_delay = sum(1 for t in tickets if _has_completion_delay_stage4(t)[0])
-            data.append({
-                "month": month_start.strftime("%b %Y"),
-                "response_delay": response_delay,
-                "completion_delay": completion_delay,
-            })
+            completion_delay = sum(
+                1
+                for t in tickets
+                if _has_completion_delay(
+                    t.get("resolved_at"),
+                    t.get("created_at"),
+                    t.get("type"),
+                    t.get("planned_2"),
+                    t.get("actual_2"),
+                    t.get("status_2"),
+                    t.get("actual_1"),
+                )[0]
+            )
+            data.append(
+                {
+                    "month": label,
+                    "response_delay": response_delay,
+                    "completion_delay": completion_delay,
+                }
+            )
         except Exception:
-            data.append({"month": month_start.strftime("%b %Y"), "response_delay": 0, "completion_delay": 0})
+            data.append({"month": label, "response_delay": 0, "completion_delay": 0})
     return {"data": data}
 
 
