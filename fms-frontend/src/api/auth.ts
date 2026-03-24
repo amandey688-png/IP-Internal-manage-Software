@@ -86,10 +86,11 @@ export const authApi = {
     data: LoginRequest
   ): Promise<ApiResponse<LoginResponse>> => {
     try {
+      // Backend may wait on Supabase wake-up (pre-check + retries); must exceed axios default 30s
       const response = await apiClient.post<LoginResponse>(
         '/auth/login',
         data,
-        { timeout: 90000 }
+        { timeout: 180000 }
       )
 
       return {
@@ -123,15 +124,102 @@ export const authApi = {
           },
         }
       }
+      const rawDetail = err.response?.data?.detail
+      const msg =
+        (typeof rawDetail === 'string'
+          ? rawDetail
+          : Array.isArray(rawDetail)
+            ? rawDetail[0]?.msg || rawDetail[0]?.message
+            : null) ||
+        err.response?.data?.message ||
+        'Login failed'
       return {
         data: undefined,
         error: {
-          message:
-            err.response?.data?.detail ||
-            err.response?.data?.message ||
-            'Login failed',
+          message: msg,
           code: err.response?.status?.toString(),
         },
+      }
+    }
+  },
+
+  /**
+   * Check if email exists in Supabase Auth (for in-app forgot password).
+   */
+  forgotPasswordLookup: async (email: string): Promise<ApiResponse<{ exists: boolean }>> => {
+    try {
+      const response = await apiClient.post<{ exists: boolean }>('/auth/forgot-password/lookup', { email })
+      return { data: response.data, error: undefined }
+    } catch (err: any) {
+      const rawDetail = err.response?.data?.detail
+      const msg =
+        (typeof rawDetail === 'string'
+          ? rawDetail
+          : Array.isArray(rawDetail)
+            ? rawDetail[0]?.msg
+            : null) ||
+        err.response?.data?.message ||
+        'Could not verify email'
+      return {
+        data: undefined,
+        error: { message: msg, code: err.response?.status?.toString() },
+      }
+    }
+  },
+
+  /**
+   * Set new password after lookup (admin API; no email link).
+   */
+  forgotPasswordComplete: async (
+    email: string,
+    password: string
+  ): Promise<ApiResponse<{ message: string }>> => {
+    try {
+      const response = await apiClient.post<{ message: string }>('/auth/forgot-password/complete', {
+        email,
+        password,
+      })
+      return { data: response.data, error: undefined }
+    } catch (err: any) {
+      const rawDetail = err.response?.data?.detail
+      const msg =
+        (typeof rawDetail === 'string'
+          ? rawDetail
+          : Array.isArray(rawDetail)
+            ? rawDetail[0]?.msg
+            : null) ||
+        err.response?.data?.message ||
+        'Could not update password'
+      return {
+        data: undefined,
+        error: { message: msg, code: err.response?.status?.toString() },
+      }
+    }
+  },
+
+  /**
+   * Set new password after opening email link (recovery session in Authorization header).
+   */
+  recoveryPassword: async (
+    recoveryAccessToken: string,
+    password: string
+  ): Promise<ApiResponse<{ message: string }>> => {
+    try {
+      const response = await apiClient.patch<{ message: string }>(
+        '/auth/recovery-password',
+        { password },
+        { headers: { Authorization: `Bearer ${recoveryAccessToken}` } }
+      )
+      return { data: response.data, error: undefined }
+    } catch (err: any) {
+      const rawDetail = err.response?.data?.detail
+      const msg =
+        typeof rawDetail === 'string'
+          ? rawDetail
+        : err.response?.data?.message || 'Could not update password'
+      return {
+        data: undefined,
+        error: { message: msg, code: err.response?.status?.toString() },
       }
     }
   },

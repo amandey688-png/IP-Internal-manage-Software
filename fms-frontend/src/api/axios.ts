@@ -77,7 +77,8 @@ export const apiClient = axios.create({
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
     const token = storage.getToken()
-    if (token && config.headers) {
+    // Do not overwrite explicit Authorization (e.g. Supabase recovery JWT on PATCH /auth/recovery-password)
+    if (token && config.headers && !config.headers.Authorization) {
       config.headers.Authorization = `Bearer ${token}`
     }
     if (config.data instanceof FormData && config.headers) {
@@ -129,6 +130,16 @@ apiClient.interceptors.response.use(
     }
 
     if (error.response?.status === 401 && originalRequest && !originalRequest._retry) {
+      const reqUrl = originalRequest.url || ""
+      // Wrong password / public auth — never treat as expired session or run refresh (avoids delays & bogus "timeout" UX)
+      const isPublicAuthEndpoint =
+        reqUrl.includes("/auth/login") ||
+        reqUrl.includes("/auth/register") ||
+        reqUrl.includes("/auth/verify-otp")
+      if (isPublicAuthEndpoint) {
+        return Promise.reject(error)
+      }
+
       const isRefreshRequest = originalRequest.url?.includes("/auth/refresh")
       if (isRefreshRequest) {
         storage.clear()
