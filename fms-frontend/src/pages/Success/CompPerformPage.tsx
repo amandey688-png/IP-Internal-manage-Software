@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Card, Typography, Select, Table, message, Modal, Alert, Descriptions } from 'antd'
 import { LineChartOutlined } from '@ant-design/icons'
 import { API_BASE_URL } from '../../api/axios'
+import { storage } from '../../utils/storage'
 import { sortPerformanceRefOptions } from '../../utils/performanceRefs'
 import { PerformanceTablePaginationBar } from '../../components/success/PerformanceTablePaginationBar'
 
@@ -71,7 +72,7 @@ export const CompPerformPage = () => {
   }
 
   const getAuthHeaders = () => ({
-    Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+    Authorization: `Bearer ${storage.getToken() ?? ''}`,
   })
 
   const loadItems = async () => {

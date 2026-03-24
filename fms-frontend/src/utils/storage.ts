@@ -1,10 +1,62 @@
 import { STORAGE_KEYS } from './constants'
 import { User } from '../types/auth'
 
+/**
+ * Auth state (token, refresh token, user) is stored in sessionStorage so it is cleared when the
+ * browsing session ends (all tabs/windows for this origin closed). Users must sign in again after
+ * reopening the browser. This applies per device; each browser profile has its own storage.
+ *
+ * Note: sessionStorage is not shared across tabs; opening the app in a new tab starts logged out
+ * unless the tab was duplicated from an existing session. OTP email remains in sessionStorage.
+ */
+
+const AUTH_KEYS = [STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.REFRESH_TOKEN, STORAGE_KEYS.USER] as const
+
+function getSession(): Storage | null {
+  if (typeof window === 'undefined') return null
+  try {
+    return window.sessionStorage
+  } catch {
+    return null
+  }
+}
+
+/** One-time move from pre–session-only builds (localStorage) into sessionStorage for this session. */
+let legacyAuthMigrated = false
+function ensureLegacyAuthMigrated(): void {
+  if (legacyAuthMigrated) return
+  legacyAuthMigrated = true
+  const sess = getSession()
+  if (!sess) return
+  try {
+    for (const key of AUTH_KEYS) {
+      if (sess.getItem(key)) continue
+      const legacy = localStorage.getItem(key)
+      if (legacy) {
+        sess.setItem(key, legacy)
+        localStorage.removeItem(key)
+      }
+    }
+  } catch {
+    // ignore
+  }
+}
+
+function removeLegacyAuthKeys(): void {
+  try {
+    for (const key of AUTH_KEYS) {
+      localStorage.removeItem(key)
+    }
+  } catch {
+    // ignore
+  }
+}
+
 export const storage = {
   getToken: (): string | null => {
     try {
-      return localStorage.getItem(STORAGE_KEYS.AUTH_TOKEN)
+      ensureLegacyAuthMigrated()
+      return getSession()?.getItem(STORAGE_KEYS.AUTH_TOKEN) ?? null
     } catch {
       return null
     }
@@ -12,7 +64,8 @@ export const storage = {
 
   setToken: (token: string): void => {
     try {
-      localStorage.setItem(STORAGE_KEYS.AUTH_TOKEN, token)
+      removeLegacyAuthKeys()
+      getSession()?.setItem(STORAGE_KEYS.AUTH_TOKEN, token)
     } catch (error) {
       console.error('Failed to save token:', error)
     }
@@ -20,6 +73,7 @@ export const storage = {
 
   removeToken: (): void => {
     try {
+      getSession()?.removeItem(STORAGE_KEYS.AUTH_TOKEN)
       localStorage.removeItem(STORAGE_KEYS.AUTH_TOKEN)
     } catch (error) {
       console.error('Failed to remove token:', error)
@@ -28,7 +82,8 @@ export const storage = {
 
   getRefreshToken: (): string | null => {
     try {
-      return localStorage.getItem(STORAGE_KEYS.REFRESH_TOKEN)
+      ensureLegacyAuthMigrated()
+      return getSession()?.getItem(STORAGE_KEYS.REFRESH_TOKEN) ?? null
     } catch {
       return null
     }
@@ -36,7 +91,8 @@ export const storage = {
 
   setRefreshToken: (token: string): void => {
     try {
-      localStorage.setItem(STORAGE_KEYS.REFRESH_TOKEN, token)
+      removeLegacyAuthKeys()
+      getSession()?.setItem(STORAGE_KEYS.REFRESH_TOKEN, token)
     } catch (error) {
       console.error('Failed to save refresh token:', error)
     }
@@ -44,6 +100,7 @@ export const storage = {
 
   removeRefreshToken: (): void => {
     try {
+      getSession()?.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
       localStorage.removeItem(STORAGE_KEYS.REFRESH_TOKEN)
     } catch (error) {
       console.error('Failed to remove refresh token:', error)
@@ -52,7 +109,8 @@ export const storage = {
 
   getUser: (): User | null => {
     try {
-      const userStr = localStorage.getItem(STORAGE_KEYS.USER)
+      ensureLegacyAuthMigrated()
+      const userStr = getSession()?.getItem(STORAGE_KEYS.USER)
       return userStr ? JSON.parse(userStr) : null
     } catch {
       return null
@@ -61,7 +119,8 @@ export const storage = {
 
   setUser: (user: User): void => {
     try {
-      localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user))
+      removeLegacyAuthKeys()
+      getSession()?.setItem(STORAGE_KEYS.USER, JSON.stringify(user))
     } catch (error) {
       console.error('Failed to save user:', error)
     }
@@ -69,6 +128,7 @@ export const storage = {
 
   removeUser: (): void => {
     try {
+      getSession()?.removeItem(STORAGE_KEYS.USER)
       localStorage.removeItem(STORAGE_KEYS.USER)
     } catch (error) {
       console.error('Failed to remove user:', error)
