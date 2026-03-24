@@ -113,7 +113,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const successItems: MenuProps['items'] = [
     { key: ROUTES.SUCCESS_PERFORMANCE, icon: <LineChartOutlined />, label: <Link to={ROUTES.SUCCESS_PERFORMANCE} style={linkStyle}>Performance Monitoring</Link>, sectionKey: 'success_performance' },
-    { key: ROUTES.SUCCESS_COMP_PERFORM, icon: <LineChartOutlined />, label: <Link to={ROUTES.SUCCESS_COMP_PERFORM} style={linkStyle}>Comp- Perform</Link>, sectionKey: 'success_performance' },
+    { key: ROUTES.SUCCESS_COMP_PERFORM, icon: <LineChartOutlined />, label: <Link to={ROUTES.SUCCESS_COMP_PERFORM} style={linkStyle}>Comp- Perform</Link>, sectionKey: 'success_comp_perform' },
   ]
   const filteredSuccessItems: MenuProps['items'] = successItems?.filter((item) => {
     const sectionKey = (item as { sectionKey?: string })?.sectionKey
@@ -149,6 +149,11 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const showDashboard = canViewSectionByKey('dashboard')
   const hasAnySupportSection = (supportItems?.length ?? 0) > 0
+  const showClientToLead = canViewSectionByKey('leads') || canViewSectionByKey('client_to_lead')
+  const showOnboarding = canViewSectionByKey('onboarding') || canViewSectionByKey('onboarding_payment_status')
+  const showTraining = canViewSectionByKey('training')
+  const showClientPayment = canViewSectionByKey('client_payment')
+  const showDbClient = canViewSectionByKey('db_client')
 
   const menuItems: MenuProps['items'] = [
     ...(showDashboard ? [{ key: ROUTES.DASHBOARD, icon: <DashboardOutlined />, label: <Link to={ROUTES.DASHBOARD} style={linkStyle}>Dashboard</Link> }] : []),
@@ -173,41 +178,61 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
       children: filteredSuccessItems,
       onTitleClick: () => setSuccessOpen(!successOpen),
     }] : []),
-    {
-      key: 'client-to-lead',
-      icon: <TeamOutlined />,
-      label: 'Client to Lead',
-      children: leadItems,
-      onTitleClick: () => setClientToLeadOpen(!clientToLeadOpen),
-    },
-    {
-      key: 'onboarding',
-      icon: <AuditOutlined />,
-      label: 'Onboarding',
-      children: onboardingItems,
-      onTitleClick: () => setOnboardingOpen(!onboardingOpen),
-    },
-    {
-      key: 'training',
-      icon: <ReadOutlined />,
-      label: 'Training',
-      children: trainingItems,
-      onTitleClick: () => setTrainingOpen(!trainingOpen),
-    },
-    {
-      key: 'client-payment',
-      icon: <FileTextOutlined />,
-      label: 'Client Payment',
-      children: clientPaymentItems,
-      onTitleClick: () => setClientPaymentOpen(!clientPaymentOpen),
-    },
-    {
-      key: 'db-client',
-      icon: <ReadOutlined />,
-      label: 'DB Client',
-      children: dbClientItems,
-      onTitleClick: () => setDbClientOpen(!dbClientOpen),
-    },
+    ...(showClientToLead
+      ? [
+          {
+            key: 'client-to-lead',
+            icon: <TeamOutlined />,
+            label: 'Client to Lead',
+            children: leadItems,
+            onTitleClick: () => setClientToLeadOpen(!clientToLeadOpen),
+          },
+        ]
+      : []),
+    ...(showOnboarding
+      ? [
+          {
+            key: 'onboarding',
+            icon: <AuditOutlined />,
+            label: 'Onboarding',
+            children: onboardingItems,
+            onTitleClick: () => setOnboardingOpen(!onboardingOpen),
+          },
+        ]
+      : []),
+    ...(showTraining
+      ? [
+          {
+            key: 'training',
+            icon: <ReadOutlined />,
+            label: 'Training',
+            children: trainingItems,
+            onTitleClick: () => setTrainingOpen(!trainingOpen),
+          },
+        ]
+      : []),
+    ...(showClientPayment
+      ? [
+          {
+            key: 'client-payment',
+            icon: <FileTextOutlined />,
+            label: 'Client Payment',
+            children: clientPaymentItems,
+            onTitleClick: () => setClientPaymentOpen(!clientPaymentOpen),
+          },
+        ]
+      : []),
+    ...(showDbClient
+      ? [
+          {
+            key: 'db-client',
+            icon: <ReadOutlined />,
+            label: 'DB Client',
+            children: dbClientItems,
+            onTitleClick: () => setDbClientOpen(!dbClientOpen),
+          },
+        ]
+      : []),
     ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: <Link to={ROUTES.USERS} style={linkStyle}>Users</Link> }] : []),
     ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: <Link to={ROUTES.SETTINGS} style={linkStyle}>Settings</Link> }] : []),
     {

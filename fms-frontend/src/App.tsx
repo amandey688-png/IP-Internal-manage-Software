@@ -33,8 +33,9 @@ import { PaymentStatusPage } from "./pages/Onboarding/PaymentStatusPage"
 import { ClientPaymentPage } from "./pages/Onboarding/ClientPaymentPage"
 import { PaymentAgeingReportPage } from "./pages/Onboarding/PaymentAgeingReportPage"
 import { ClientTrainingPage } from "./pages/Training/ClientTrainingPage"
+import { AccessDeniedPage } from "./pages/AccessDeniedPage"
 
-import { ROUTES, ROLES, APP_NAME } from "./utils/constants"
+import { ROUTES, ROLES, APP_NAME, TICKET_ROUTE_SECTION_KEYS } from "./utils/constants"
 
 function AppTitle() {
   const { pathname } = useLocation()
@@ -65,6 +66,7 @@ function AppTitle() {
       [ROUTES.DB_CLIENT_CLIENTS]: "DB Client – Clients",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
+      [ROUTES.ACCESS_DENIED]: "Access denied",
     }
     const page = titles[pathname] || (pathname.startsWith("/tickets") ? "Ticket" : pathname.startsWith("/client-to-lead/leads/") ? "Lead Detail" : pathname.startsWith("/onboarding") ? "Onboarding" : APP_NAME)
     document.title = `${APP_NAME} - ${page}`
@@ -114,9 +116,20 @@ function App() {
 
             {/* ================= PROTECTED ROUTES ================= */}
             <Route
-              path={ROUTES.DASHBOARD}
+              path={ROUTES.ACCESS_DENIED}
               element={
                 <ProtectedRoute>
+                  <AppLayout>
+                    <AccessDeniedPage />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path={ROUTES.DASHBOARD}
+              element={
+                <ProtectedRoute sectionKeys={["dashboard"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <Dashboard />
@@ -129,7 +142,7 @@ function App() {
             <Route
               path={ROUTES.DASHBOARD_KPI}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["dashboard"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <DashboardKPIPage />
@@ -142,7 +155,7 @@ function App() {
             <Route
               path={ROUTES.SUPPORT_DASHBOARD}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["support_dashboard"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <SupportDashboard />
@@ -155,7 +168,7 @@ function App() {
             <Route
               path={ROUTES.TICKETS}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={[...TICKET_ROUTE_SECTION_KEYS]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <TicketList />
@@ -168,7 +181,7 @@ function App() {
             <Route
               path={`${ROUTES.TICKETS}/:id`}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={[...TICKET_ROUTE_SECTION_KEYS]}>
                   <AppLayout>
                     <TicketDetail />
                   </AppLayout>
@@ -179,7 +192,7 @@ function App() {
             <Route
               path={ROUTES.SOLUTIONS.replace(":ticketId", ":ticketId")}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["solution"]}>
                   <AppLayout>
                     <SolutionList />
                   </AppLayout>
@@ -190,7 +203,7 @@ function App() {
             <Route
               path={ROUTES.STAGING}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["staging"]}>
                   <AppLayout>
                     <StagingList />
                   </AppLayout>
@@ -201,7 +214,7 @@ function App() {
             <Route
               path={ROUTES.CHECKLIST}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["task"]}>
                   <AppLayout>
                     <ChecklistPage />
                   </AppLayout>
@@ -212,7 +225,7 @@ function App() {
             <Route
               path={ROUTES.DELEGATION}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["task"]}>
                   <AppLayout>
                     <DelegationPage />
                   </AppLayout>
@@ -223,7 +236,7 @@ function App() {
             <Route
               path={ROUTES.SUCCESS_PERFORMANCE}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["success_performance"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <PerformanceMonitoringPage />
@@ -235,7 +248,7 @@ function App() {
             <Route
               path={ROUTES.SUCCESS_COMP_PERFORM}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["success_comp_perform"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <CompPerformPage />
@@ -248,7 +261,7 @@ function App() {
             <Route
               path={ROUTES.LEADS}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["leads", "client_to_lead"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <LeadListPage />
@@ -260,7 +273,7 @@ function App() {
             <Route
               path={ROUTES.LEAD_DETAIL}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["leads", "client_to_lead"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <LeadDetailPage />
@@ -272,7 +285,7 @@ function App() {
             <Route
               path={ROUTES.LEADS_IMPORT}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["leads", "client_to_lead"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <LeadImportPage />
@@ -284,7 +297,7 @@ function App() {
             <Route
               path={ROUTES.ONBOARDING_PAYMENT_STATUS}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["onboarding_payment_status", "onboarding"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <PaymentStatusPage />
@@ -296,7 +309,7 @@ function App() {
             <Route
               path={ROUTES.CLIENT_PAYMENT}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["client_payment"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <ClientPaymentPage />
@@ -305,13 +318,13 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path={ROUTES.CLIENT_PAYMENT_Q_COMP} element={<ProtectedRoute><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
-            <Route path={ROUTES.CLIENT_PAYMENT_M_COMP} element={<ProtectedRoute><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
-            <Route path={ROUTES.CLIENT_PAYMENT_HF_COMP} element={<ProtectedRoute><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
+            <Route path={ROUTES.CLIENT_PAYMENT_Q_COMP} element={<ProtectedRoute sectionKeys={["client_payment"]}><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
+            <Route path={ROUTES.CLIENT_PAYMENT_M_COMP} element={<ProtectedRoute sectionKeys={["client_payment"]}><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
+            <Route path={ROUTES.CLIENT_PAYMENT_HF_COMP} element={<ProtectedRoute sectionKeys={["client_payment"]}><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
             <Route
               path={ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["client_payment"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <PaymentAgeingReportPage />
@@ -323,7 +336,7 @@ function App() {
             <Route
               path={ROUTES.TRAINING_CLIENT}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["training"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <ClientTrainingPage />
@@ -335,7 +348,7 @@ function App() {
             <Route
               path={ROUTES.DB_CLIENT_CLIENTS}
               element={
-                <ProtectedRoute>
+                <ProtectedRoute sectionKeys={["db_client"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <ClientTrainingPage />
@@ -347,7 +360,7 @@ function App() {
             <Route
               path={ROUTES.USERS}
               element={
-                <ProtectedRoute requiredRole={ROLES.ADMIN}>
+                <ProtectedRoute requiredRole={ROLES.ADMIN} sectionKeys={["users"]}>
                   <AppLayout>
                     <UserList />
                   </AppLayout>
@@ -358,7 +371,7 @@ function App() {
             <Route
               path={ROUTES.SETTINGS}
               element={
-                <ProtectedRoute requiredRole={ROLES.ADMIN}>
+                <ProtectedRoute requiredRole={ROLES.ADMIN} sectionKeys={["settings"]}>
                   <AppLayout>
                     <SettingsPage />
                   </AppLayout>

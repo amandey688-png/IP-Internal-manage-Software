@@ -792,21 +792,14 @@ def login(payload: LoginRequest):
         role_name = role_row.data["name"] if role_row.data else "user"
         frontend_role = _normalize_role(role_name)
 
-        # Load section permissions for sidebar visibility
+        # Load section permissions for sidebar visibility (same rules as /users/me)
         section_permissions: list[dict] = []
         try:
             perm_r = supabase.table("user_section_permissions").select("section_key, can_view, can_edit").eq("user_id", user_id).execute()
             perm_rows = perm_r.data or []
-            by_key = {p["section_key"]: p for p in perm_rows}
-            for key in SECTION_KEYS:
-                p = by_key.get(key)
-                section_permissions.append({
-                    "section_key": key,
-                    "can_view": p["can_view"] if p else True,
-                    "can_edit": p["can_edit"] if p else False,
-                })
+            section_permissions = _build_section_permissions_list(frontend_role, perm_rows)
         except Exception:
-            section_permissions = [{"section_key": k, "can_view": True, "can_edit": False} for k in SECTION_KEYS]
+            section_permissions = [{"section_key": k, "can_view": False, "can_edit": False} for k in SECTION_KEYS]
 
         user = {
             "id": user_id,
@@ -865,16 +858,9 @@ def get_me(auth: dict = Depends(get_current_user)):
     try:
         perm_r = supabase.table("user_section_permissions").select("section_key, can_view, can_edit").eq("user_id", user_id).execute()
         perm_rows = perm_r.data or []
-        by_key = {p["section_key"]: p for p in perm_rows}
-        for key in SECTION_KEYS:
-            p = by_key.get(key)
-            section_permissions.append({
-                "section_key": key,
-                "can_view": p["can_view"] if p else True,
-                "can_edit": p["can_edit"] if p else False,
-            })
+        section_permissions = _build_section_permissions_list(frontend_role, perm_rows)
     except Exception:
-        section_permissions = [{"section_key": k, "can_view": True, "can_edit": False} for k in SECTION_KEYS]
+        section_permissions = [{"section_key": k, "can_view": False, "can_edit": False} for k in SECTION_KEYS]
 
     return {
         "id": user_id,
@@ -7302,12 +7288,41 @@ def _map_role(name: str) -> str:
     return _normalize_role(name)
 
 
-# Section keys for user_section_permissions (match sidebar sections)
+# Section keys for user_section_permissions (match frontend PERMISSION_SECTION_KEYS / Edit User matrix).
+# No row in DB => no access. New keys added here are unchecked until a Master Admin grants them.
 SECTION_KEYS = [
     "dashboard", "support_dashboard", "all_tickets", "chores_bugs", "staging", "feature",
     "approval_status", "completed_chores_bugs", "rejected_tickets", "completed_feature",
-    "solution", "task", "success_performance", "success_comp_perform", "settings", "users",
+    "solution", "task", "success_performance", "success_comp_perform",
+    "client_to_lead", "leads", "onboarding", "onboarding_payment_status", "client_payment",
+    "training", "db_client", "settings", "users",
 ]
+
+
+def _build_section_permissions_list(frontend_role: str, perm_rows: list[dict] | None) -> list[dict]:
+    """
+    Merge DB rows with SECTION_KEYS for API responses (login, /users/me, Edit User).
+
+    Admin / Master Admin / Approver with *no* rows in user_section_permissions yet get full
+    view+edit on every section (legacy). After any permission row is saved, the matrix applies
+    to everyone including elevated roles.
+    """
+    rows = perm_rows or []
+    elevated = frontend_role in ("master_admin", "admin", "approver")
+    if elevated and len(rows) == 0:
+        return [{"section_key": k, "can_view": True, "can_edit": True} for k in SECTION_KEYS]
+    by_key = {p["section_key"]: p for p in rows}
+    out: list[dict] = []
+    for key in SECTION_KEYS:
+        p = by_key.get(key)
+        out.append(
+            {
+                "section_key": key,
+                "can_view": bool(p["can_view"]) if p else False,
+                "can_edit": bool(p["can_edit"]) if p else False,
+            }
+        )
+    return out
 
 
 @api_router.get("/roles")
@@ -7461,18 +7476,14 @@ def get_section_permissions(
     auth: dict = Depends(require_roles(["master_admin"])),
 ):
     """Get section view/edit permissions for a user. Master Admin only."""
+    pr = supabase.table("user_profiles").select("role_id").eq("id", user_id).single().execute()
+    if not pr.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    role_row = supabase.table("roles").select("name").eq("id", pr.data["role_id"]).single().execute()
+    frontend_role = _map_role(role_row.data.get("name") if role_row.data else None)
     r = supabase.table("user_section_permissions").select("*").eq("user_id", user_id).execute()
     rows = r.data or []
-    # Merge with all section keys so frontend always has full list
-    by_key = {p["section_key"]: p for p in rows}
-    result = []
-    for key in SECTION_KEYS:
-        p = by_key.get(key)
-        result.append({
-            "section_key": key,
-            "can_view": p["can_view"] if p else True,
-            "can_edit": p["can_edit"] if p else False,
-        })
+    result = _build_section_permissions_list(frontend_role, rows)
     return {"data": result}
 
 
@@ -7490,11 +7501,17 @@ def update_section_permissions(
     for item in payload.permissions:
         if item.section_key not in SECTION_KEYS:
             continue
+        # Explicit-only: no row in DB means no access. Remove row when both false.
+        if not item.can_view and not item.can_edit:
+            try:
+                supabase.table("user_section_permissions").delete().eq("user_id", user_id).eq("section_key", item.section_key).execute()
+            except Exception:
+                pass
+            continue
         row = {"user_id": user_id, "section_key": item.section_key, "can_view": item.can_view, "can_edit": item.can_edit, "updated_at": now}
         try:
             supabase.table("user_section_permissions").upsert(row, on_conflict="user_id,section_key").execute()
         except Exception:
-            # Fallback: delete then insert if upsert fails (e.g. old Supabase client)
             supabase.table("user_section_permissions").delete().eq("user_id", user_id).eq("section_key", item.section_key).execute()
             supabase.table("user_section_permissions").insert(row).execute()
     return {"message": "Section permissions updated"}

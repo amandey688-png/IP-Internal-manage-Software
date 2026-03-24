@@ -1,5 +1,5 @@
-import { UserRole } from '../types/auth'
-import { ROLES } from './constants'
+import type { User, UserRole } from '../types/auth'
+import { ROLES, PERMISSION_SECTION_KEYS, ROUTES } from './constants'
 
 export const formatDate = (date: string | Date): string => {
   const d = typeof date === 'string' ? new Date(date) : date
@@ -354,45 +354,73 @@ export const canAccessSettings = (userRole: UserRole): boolean =>
 export const canAccessUsers = (userRole: UserRole): boolean =>
   userRole === ROLES.ADMIN || userRole === ROLES.MASTER_ADMIN
 
-/** Section key to route/sidebar mapping */
+/** Default path when opening the first section the user is allowed to view (order matches `PERMISSION_SECTION_KEYS`). */
 export const SECTION_KEY_TO_ROUTE: Record<string, string> = {
-  dashboard: '/dashboard',
-  support_dashboard: '/support/dashboard',
-  all_tickets: '/tickets',
+  dashboard: ROUTES.DASHBOARD,
+  support_dashboard: ROUTES.SUPPORT_DASHBOARD,
+  all_tickets: ROUTES.TICKETS,
   chores_bugs: '/tickets?section=chores-bugs',
-  staging: '/staging',
+  staging: ROUTES.STAGING,
   feature: '/tickets?type=feature',
   approval_status: '/tickets?type=feature&view=approval',
   completed_chores_bugs: '/tickets?section=completed-chores-bugs',
+  rejected_tickets: '/tickets?section=rejected-tickets',
   completed_feature: '/tickets?section=completed-feature',
   solution: '/tickets?section=solutions',
-  task: '/task/checklist',
-  settings: '/settings',
-  users: '/users',
+  task: ROUTES.CHECKLIST,
+  success_performance: ROUTES.SUCCESS_PERFORMANCE,
+  success_comp_perform: ROUTES.SUCCESS_COMP_PERFORM,
+  client_to_lead: ROUTES.CLIENT_TO_LEAD,
+  leads: ROUTES.LEADS,
+  onboarding: ROUTES.ONBOARDING,
+  onboarding_payment_status: ROUTES.ONBOARDING_PAYMENT_STATUS,
+  client_payment: ROUTES.CLIENT_PAYMENT,
+  training: ROUTES.TRAINING,
+  db_client: ROUTES.DB_CLIENT_CLIENTS,
+  settings: ROUTES.SETTINGS,
+  users: ROUTES.USERS,
 }
 
-/** Check if user can view a section. Master Admin/Admin/Approver always see all. User role uses section_permissions. */
+/** First route the user may open after login (by section permission order). Uses same rules as sidebar. */
+export function getFirstAllowedRoute(user: User): string | null {
+  const perms = user.section_permissions ?? []
+  for (const key of PERMISSION_SECTION_KEYS) {
+    const p = perms.find((s) => s.section_key === key)
+    if (p?.can_view === true) {
+      const path = SECTION_KEY_TO_ROUTE[key]
+      if (path) return path
+    }
+  }
+  return null
+}
+
+export function getDefaultLandingRoute(user: User): string {
+  return getFirstAllowedRoute(user) ?? ROUTES.ACCESS_DENIED
+}
+
+/**
+ * View access for a section. Driven by `user.section_permissions` from the API (includes legacy
+ * full access for admin roles when no DB rows exist). All roles use the same check.
+ */
 export const canViewSection = (
   sectionKey: string,
-  userRole: UserRole,
+  _userRole: UserRole,
   sectionPermissions?: { section_key: string; can_view: boolean; can_edit: boolean }[]
 ): boolean => {
-  if (userRole === ROLES.MASTER_ADMIN || userRole === ROLES.ADMIN || userRole === ROLES.APPROVER) return true
-  if (!sectionPermissions || sectionPermissions.length === 0) return true
+  if (!sectionPermissions || sectionPermissions.length === 0) return false
   const p = sectionPermissions.find((s) => s.section_key === sectionKey)
-  return p ? p.can_view : true
+  return p ? p.can_view === true : false
 }
 
-/** Check if user can edit in a section. Master Admin/Admin/Approver always can edit. User role uses section_permissions. */
+/** Edit access for a section; same rules as view (explicit can_edit from API). */
 export const canEditSection = (
   sectionKey: string,
-  userRole: UserRole,
+  _userRole: UserRole,
   sectionPermissions?: { section_key: string; can_view: boolean; can_edit: boolean }[]
 ): boolean => {
-  if (userRole === ROLES.MASTER_ADMIN || userRole === ROLES.ADMIN || userRole === ROLES.APPROVER) return true
-  if (!sectionPermissions || sectionPermissions.length === 0) return true
+  if (!sectionPermissions || sectionPermissions.length === 0) return false
   const p = sectionPermissions.find((s) => s.section_key === sectionKey)
-  return p ? p.can_edit : false
+  return p ? p.can_edit === true : false
 }
 
 export const canAccessRoute = (userRole: UserRole, route: string): boolean => {

@@ -23,11 +23,9 @@ import type { SectionPermission, RoleOption } from '../../api/users'
 import { PrintExport } from '../../components/common/PrintExport'
 import { formatDate } from '../../utils/helpers'
 import { useRole } from '../../hooks/useRole'
-import { ROLE_DISPLAY_NAMES, SECTION_LABELS } from '../../utils/constants'
+import { ROLE_DISPLAY_NAMES, SECTION_LABELS, PERMISSION_SECTION_KEYS } from '../../utils/constants'
 
 const { Title } = Typography
-
-const SECTION_KEYS = Object.keys(SECTION_LABELS)
 
 export const UserList = () => {
   const { isMasterAdmin } = useRole()
@@ -91,19 +89,17 @@ export const UserList = () => {
       role_id: userWithExtra.role_id,
     })
     try {
-      const [rolesRes, permRes] = await Promise.all([
+      const [rolesData, perms] = await Promise.all([
         usersApi.listRoles(),
         usersApi.getSectionPermissions(user.id),
       ])
-      const rolesData = (rolesRes?.data as { data?: RoleOption[] } | undefined)?.data
-      if (rolesData) setRoles(rolesData)
-      const perms = (permRes?.data as { data?: SectionPermission[] } | undefined)?.data ?? []
-      const permissionsInitial = SECTION_KEYS.map((key) => {
+      if (rolesData.length) setRoles(rolesData)
+      const permissionsInitial = PERMISSION_SECTION_KEYS.map((key) => {
         const p = perms.find((x: SectionPermission) => x.section_key === key)
         return {
           section_key: key,
-          can_view: Boolean(p?.can_view !== false),
-          can_edit: Boolean(p?.can_edit === true),
+          can_view: p?.can_view === true,
+          can_edit: p?.can_edit === true,
         }
       })
       form.setFieldsValue({
@@ -121,9 +117,9 @@ export const UserList = () => {
         if (rolesData) setRoles(rolesData)
       }
       form.setFieldsValue({
-        permissions: SECTION_KEYS.map((key) => ({
+        permissions: PERMISSION_SECTION_KEYS.map((key) => ({
           section_key: key,
-          can_view: true,
+          can_view: false,
           can_edit: false,
         })),
       })
@@ -147,15 +143,17 @@ export const UserList = () => {
         ...(role_id && { role_id }),
         is_active: is_active ?? selectedUser.is_active,
       })
-      if (Array.isArray(permissions) && permissions.length > 0) {
-        await usersApi.updateSectionPermissions(
-          selectedUser.id,
-          permissions.map((p: SectionPermission) => ({
-            section_key: String(p.section_key),
-            can_view: Boolean(p.can_view !== false),
-            can_edit: Boolean(p.can_edit === true),
-          }))
-        )
+      if (isMasterAdmin) {
+        const rows = Array.isArray(permissions) ? permissions : []
+        const normalized = PERMISSION_SECTION_KEYS.map((key, idx) => {
+          const row = rows.find((r: SectionPermission) => r?.section_key === key) ?? rows[idx]
+          return {
+            section_key: key,
+            can_view: Boolean(row?.can_view),
+            can_edit: Boolean(row?.can_edit),
+          }
+        })
+        await usersApi.updateSectionPermissions(selectedUser.id, normalized)
       }
       message.success('User updated')
       setEditModalOpen(false)
@@ -368,7 +366,7 @@ export const UserList = () => {
                 <Typography.Text strong style={{ display: 'block', marginBottom: 8 }}>
                   Section permissions (View / Edit)
                 </Typography.Text>
-                {SECTION_KEYS.map((key, idx) => (
+                {PERMISSION_SECTION_KEYS.map((key, idx) => (
                   <div
                     key={key}
                     style={{
