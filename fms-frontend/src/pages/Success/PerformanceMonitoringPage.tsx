@@ -18,6 +18,7 @@ import {
 import dayjs from 'dayjs'
 import { PlusOutlined, LineChartOutlined, EditOutlined, FormOutlined } from '@ant-design/icons'
 import { API_BASE_URL } from '../../api/axios'
+import { storage } from '../../utils/storage'
 import { sortPerformanceRefOptions } from '../../utils/performanceRefs'
 import { PerformanceTablePaginationBar } from '../../components/success/PerformanceTablePaginationBar'
 
@@ -136,10 +137,10 @@ export const PerformanceMonitoringPage = () => {
   }
 
   const getAuthHeaders = () => ({
-    Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+    Authorization: `Bearer ${storage.getToken() ?? ''}`,
   })
   const getAuthHeadersWithJson = () => ({
-    Authorization: `Bearer ${localStorage.getItem('auth_token')}`,
+    Authorization: `Bearer ${storage.getToken() ?? ''}`,
     'Content-Type': 'application/json',
   })
 
