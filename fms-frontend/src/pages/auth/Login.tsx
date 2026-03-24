@@ -7,6 +7,7 @@ import { validateEmail } from '../../utils/validation'
 import { storage } from '../../utils/storage'
 import { AuthLayout } from '../../components/auth/AuthLayout'
 import { ROUTES } from '../../utils/constants'
+import { getDefaultLandingRoute } from '../../utils/helpers'
 import { useAuth } from '../../hooks/useAuth'
 import { API_BASE_URL } from '../../api/axios'
 import type { LoginRequest } from '../../types/auth'
@@ -106,7 +107,7 @@ export const Login = () => {
           navigate(ROUTES.OTP)
         } else {
           login(access_token, user, refresh_token ?? undefined)
-          navigate(ROUTES.DASHBOARD)
+          navigate(getDefaultLandingRoute(user), { replace: true })
         }
       }
     } catch (error: any) {

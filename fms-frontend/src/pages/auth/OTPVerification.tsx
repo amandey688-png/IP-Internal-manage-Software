@@ -5,6 +5,7 @@ import { authApi } from '../../api/auth'
 import { OTPInput } from '../../components/forms/OTPInput'
 import { storage } from '../../utils/storage'
 import { ROUTES } from '../../utils/constants'
+import { getDefaultLandingRoute } from '../../utils/helpers'
 import { useAuth } from '../../hooks/useAuth'
 
 const { Title, Text } = Typography
@@ -50,9 +51,8 @@ export const OTPVerification = () => {
         const { access_token, refresh_token, user } = response.data
         verifyOTP(access_token, user, refresh_token ?? undefined)
         message.success('OTP verified successfully!')
-        
-        // Redirect based on role
-        navigate(ROUTES.DASHBOARD)
+
+        navigate(getDefaultLandingRoute(user), { replace: true })
       }
     } catch (error: any) {
       const errorMessage =

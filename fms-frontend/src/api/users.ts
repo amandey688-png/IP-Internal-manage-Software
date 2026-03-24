@@ -45,16 +45,18 @@ export const usersApi = {
     return response.data
   },
 
-  listRoles: async (): Promise<ApiResponse<{ data: RoleOption[] }>> => {
-    const response = await apiClient.get<ApiResponse<{ data: RoleOption[] }>>('/roles')
-    return response.data
+  /** Backend returns `{ data: RoleOption[] }` — return the inner array. */
+  listRoles: async (): Promise<RoleOption[]> => {
+    const response = await apiClient.get<{ data: RoleOption[] }>('/roles')
+    return response.data?.data ?? []
   },
 
-  getSectionPermissions: async (userId: string): Promise<ApiResponse<{ data: SectionPermission[] }>> => {
-    const response = await apiClient.get<ApiResponse<{ data: SectionPermission[] }>>(
+  /** Backend returns `{ data: SectionPermission[] }` — return the inner array. */
+  getSectionPermissions: async (userId: string): Promise<SectionPermission[]> => {
+    const response = await apiClient.get<{ data: SectionPermission[] }>(
       `/users/${userId}/section-permissions`
     )
-    return response.data
+    return response.data?.data ?? []
   },
 
   updateSectionPermissions: async (

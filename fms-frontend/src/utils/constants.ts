@@ -38,10 +38,53 @@ export const SECTION_LABELS: Record<string, string> = {
   onboarding: 'Onboarding',
   onboarding_payment_status: 'Payment Status',
   client_payment: 'Client Payment',
+  training: 'Training',
   db_client: 'DB Client',
   settings: 'Settings',
   users: 'Users',
 }
+
+/**
+ * Ordered list for Edit User → Section permissions. Must match backend `SECTION_KEYS` in `main.py`.
+ * New sections appear here unchecked until a Master Admin grants access.
+ */
+export const PERMISSION_SECTION_KEYS: readonly string[] = [
+  'dashboard',
+  'support_dashboard',
+  'all_tickets',
+  'chores_bugs',
+  'staging',
+  'feature',
+  'approval_status',
+  'completed_chores_bugs',
+  'rejected_tickets',
+  'completed_feature',
+  'solution',
+  'task',
+  'success_performance',
+  'success_comp_perform',
+  'client_to_lead',
+  'leads',
+  'onboarding',
+  'onboarding_payment_status',
+  'client_payment',
+  'training',
+  'db_client',
+  'settings',
+  'users',
+]
+
+/** Any of these grants access to `/tickets` and ticket detail (query selects subsection). */
+export const TICKET_ROUTE_SECTION_KEYS: readonly string[] = [
+  'all_tickets',
+  'chores_bugs',
+  'staging',
+  'feature',
+  'approval_status',
+  'completed_chores_bugs',
+  'rejected_tickets',
+  'completed_feature',
+]
 
 export const ROUTES = {
   REGISTER: '/register',
@@ -86,6 +129,8 @@ export const ROUTES = {
   DB_CLIENT_CLIENTS: '/db-client/clients',
   USERS: '/users',
   SETTINGS: '/settings',
+  /** Shown when user opens a URL for a section they are not allowed to view */
+  ACCESS_DENIED: '/access-denied',
 } as const
 
 export const API_ENDPOINTS = {
