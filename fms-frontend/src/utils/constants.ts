@@ -46,6 +46,8 @@ export const SECTION_LABELS: Record<string, string> = {
 export const ROUTES = {
   REGISTER: '/register',
   LOGIN: '/login',
+  /** Supabase password recovery redirect (hash with access_token) */
+  RESET_PASSWORD: '/reset-password',
   OTP: '/otp',
   CONFIRMATION_SUCCESS: '/confirmation-success',
   DASHBOARD: '/dashboard',

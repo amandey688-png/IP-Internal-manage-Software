@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Form, Input, Button, message, Alert } from 'antd'
+import { Form, Input, Button, message, Alert, Modal, Typography } from 'antd'
 import { MailOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { authApi } from '../../api/auth'
@@ -11,6 +11,8 @@ import { useAuth } from '../../hooks/useAuth'
 import { API_BASE_URL } from '../../api/axios'
 import type { LoginRequest } from '../../types/auth'
 
+const { Link: TextLink } = Typography
+
 const colors = {
   darkBlue: '#1e3a5f',
   lightBlue: '#7eb8da',
@@ -18,27 +20,66 @@ const colors = {
   accent: '#f59e0b',
 }
 
+/** User-facing copy for API / validation errors */
+const INVALID_CREDENTIALS_MSG = 'Please enter valid email / password.'
+
+function friendlyLoginError(raw: string): string {
+  const s = (raw || '').toLowerCase()
+  if (s.includes('no account found') && s.includes('email')) {
+    return 'No account found for this email. Check spelling or create an account.'
+  }
+  const isWrongLogin =
+    (s.includes('invalid') &&
+      (s.includes('password') || s.includes('email') || s.includes('credential'))) ||
+    s.includes('invalid login') ||
+    s.includes('wrong password') ||
+    s.includes('incorrect password')
+  if (isWrongLogin) {
+    return INVALID_CREDENTIALS_MSG
+  }
+  if (s.includes('inactive')) {
+    return 'Your account is inactive. Contact your administrator.'
+  }
+  if (s.includes('profile not found')) {
+    return raw
+  }
+  return raw || INVALID_CREDENTIALS_MSG
+}
+
 export const Login = () => {
   const [form] = Form.useForm()
   const [loading, setLoading] = useState(false)
   const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [forgotOpen, setForgotOpen] = useState(false)
+  const [forgotStep, setForgotStep] = useState<'email' | 'password'>('email')
+  const [forgotEmail, setForgotEmail] = useState('')
+  const [forgotPw, setForgotPw] = useState('')
+  const [forgotPw2, setForgotPw2] = useState('')
+  const [forgotLoading, setForgotLoading] = useState(false)
   const navigate = useNavigate()
   const { login } = useAuth()
 
-  const RETRY_DELAYS_MS = [8000, 25000] // First retry after 8s, second after 25s (handles Supabase wake-up)
+  const RETRY_DELAYS_MS = [8000, 25000]
 
   const attemptLogin = async (values: LoginRequest, retryCount = 0) => {
     setLoading(true)
-    if (retryCount === 0) setConnectionError(null)
+    if (retryCount === 0) {
+      setConnectionError(null)
+      setLoginError(null)
+    }
     try {
       const response = await authApi.login(values)
 
       if (response.error) {
         const msg = response.error.message || 'Invalid email or password'
-        message.error(msg)
         const isConnectionError =
-          response.error.code === '503' ||
-          (msg.includes('Cannot reach') && !msg.toLowerCase().includes('invalid login'))
+          response.error.code !== '401' &&
+          response.error.code !== '403' &&
+          response.error.code !== '404' &&
+          (response.error.code === '503' ||
+            response.error.code === 'NETWORK_ERROR' ||
+            (msg.includes('Cannot reach') && !msg.toLowerCase().includes('invalid login')))
         if (isConnectionError && retryCount < RETRY_DELAYS_MS.length) {
           setConnectionError(msg)
           setLoading(false)
@@ -47,7 +88,13 @@ export const Login = () => {
           setTimeout(() => attemptLogin(values, retryCount + 1), delay)
           return
         }
-        if (isConnectionError) setConnectionError(msg)
+        if (isConnectionError) {
+          setConnectionError(msg)
+        } else {
+          const friendly = friendlyLoginError(msg)
+          setLoginError(friendly)
+          message.error(friendly)
+        }
         return
       }
 
@@ -63,14 +110,21 @@ export const Login = () => {
         }
       }
     } catch (error: any) {
-      const errorMessage =
+      const raw =
         error.response?.data?.detail ||
-        error.response?.data?.error?.message ||
+        error.response?.data?.message ||
+        error.message ||
         'Login failed. Please check your credentials.'
-      message.error(errorMessage)
+      const errorMessage = typeof raw === 'string' ? raw : raw?.[0]?.msg || 'Login failed'
+      const status = error.response?.status
       const isConnectionError =
-        error.response?.status === 503 ||
-        (errorMessage.includes('Cannot reach') && !errorMessage.toLowerCase().includes('invalid login'))
+        status !== 401 &&
+        status !== 403 &&
+        status !== 404 &&
+        (status === 503 ||
+          status === 504 ||
+          error.code === 'ECONNABORTED' ||
+          (errorMessage.includes('Cannot reach') && !errorMessage.toLowerCase().includes('invalid login')))
       if (isConnectionError && retryCount < RETRY_DELAYS_MS.length) {
         setConnectionError(errorMessage)
         setLoading(false)
@@ -79,13 +133,78 @@ export const Login = () => {
         setTimeout(() => attemptLogin(values, retryCount + 1), delay)
         return
       }
-      if (isConnectionError) setConnectionError(errorMessage)
+      if (isConnectionError) {
+        setConnectionError(errorMessage)
+      } else {
+        const friendly = friendlyLoginError(errorMessage)
+        setLoginError(friendly)
+        message.error(friendly)
+      }
     } finally {
       setLoading(false)
     }
   }
 
   const onFinish = (values: LoginRequest) => attemptLogin(values, 0)
+
+  const openForgot = () => {
+    const e = form.getFieldValue('email') as string | undefined
+    setForgotEmail(e && validateEmail(e) ? e : '')
+    setForgotStep('email')
+    setForgotPw('')
+    setForgotPw2('')
+    setForgotOpen(true)
+  }
+
+  const closeForgot = () => {
+    setForgotOpen(false)
+    setForgotStep('email')
+    setForgotPw('')
+    setForgotPw2('')
+  }
+
+  /** Modal OK: step 1 = check Supabase; step 2 = update password. */
+  const handleForgotModalOk = async (): Promise<void> => {
+    const e = (forgotEmail || '').trim()
+    if (!e || !validateEmail(e)) {
+      message.warning('Enter a valid email address')
+      return Promise.reject()
+    }
+    if (forgotStep === 'email') {
+      setForgotLoading(true)
+      const res = await authApi.forgotPasswordLookup(e)
+      setForgotLoading(false)
+      if (res.error) {
+        message.error(res.error.message)
+        return Promise.reject()
+      }
+      if (!res.data?.exists) {
+        message.warning('No account found with this email. Check spelling or create an account.')
+        return Promise.reject()
+      }
+      setForgotStep('password')
+      setForgotPw('')
+      setForgotPw2('')
+      return Promise.reject()
+    }
+    if (forgotPw.length < 8) {
+      message.warning('Password must be at least 8 characters')
+      return Promise.reject()
+    }
+    if (forgotPw !== forgotPw2) {
+      message.error('New password and confirmation do not match')
+      return Promise.reject()
+    }
+    setForgotLoading(true)
+    const res = await authApi.forgotPasswordComplete(e, forgotPw)
+    setForgotLoading(false)
+    if (res.error) {
+      message.error(res.error.message)
+      return Promise.reject()
+    }
+    message.success(res.data?.message || 'Password updated. You can sign in now.')
+    closeForgot()
+  }
 
   return (
     <AuthLayout variant="login">
@@ -110,7 +229,7 @@ export const Login = () => {
                       const values = form.getFieldsValue()
                       if (values?.email && values?.password) {
                         setConnectionError(null)
-                        attemptLogin(values as LoginRequest, false)
+                        attemptLogin(values as LoginRequest, 0)
                       } else {
                         message.warning('Enter email and password first')
                       }
@@ -129,6 +248,19 @@ export const Login = () => {
             style={{ marginBottom: 24 }}
           />
         )}
+
+        {loginError && !connectionError && (
+          <Alert
+            type="error"
+            showIcon
+            message="Sign in failed"
+            description={loginError}
+            closable
+            onClose={() => setLoginError(null)}
+            style={{ marginBottom: 24 }}
+          />
+        )}
+
         <Form
           form={form}
           name="login"
@@ -166,7 +298,7 @@ export const Login = () => {
 
           <Form.Item
             name="password"
-            style={{ marginBottom: 24 }}
+            style={{ marginBottom: 8 }}
             rules={[{ required: true, message: 'Please enter your password' }]}
           >
             <Input.Password
@@ -181,6 +313,12 @@ export const Login = () => {
               }}
             />
           </Form.Item>
+
+          <div style={{ textAlign: 'right', marginBottom: 20 }}>
+            <TextLink onClick={openForgot} style={{ color: colors.lightBlue, fontSize: 15 }}>
+              Forgot password?
+            </TextLink>
+          </div>
 
           <Form.Item style={{ marginBottom: 20 }}>
             <Button
@@ -221,6 +359,58 @@ export const Login = () => {
           </Form.Item>
         </Form>
       </div>
+
+      <Modal
+        title={forgotStep === 'email' ? 'Forgot password' : 'Set new password'}
+        open={forgotOpen}
+        onCancel={closeForgot}
+        onOk={handleForgotModalOk}
+        confirmLoading={forgotLoading}
+        okText={forgotStep === 'email' ? 'Continue' : 'Update password'}
+        destroyOnClose
+        afterClose={() => {
+          setForgotStep('email')
+          setForgotPw('')
+          setForgotPw2('')
+        }}
+      >
+        {forgotStep === 'email' ? (
+          <>
+            <p style={{ marginBottom: 12, color: '#666' }}>
+              Enter your account email. We will check if it exists, then you can set a new password here.
+            </p>
+            <Input
+              type="email"
+              placeholder="Your e-mail"
+              value={forgotEmail}
+              onChange={(ev) => setForgotEmail(ev.target.value)}
+              size="large"
+              autoComplete="email"
+            />
+          </>
+        ) : (
+          <>
+            <p style={{ marginBottom: 12, color: '#666' }}>
+              Account found for <strong>{forgotEmail}</strong>. Enter your new password (min. 8 characters).
+            </p>
+            <Input.Password
+              placeholder="New password"
+              value={forgotPw}
+              onChange={(ev) => setForgotPw(ev.target.value)}
+              size="large"
+              style={{ marginBottom: 12 }}
+              autoComplete="new-password"
+            />
+            <Input.Password
+              placeholder="Confirm new password"
+              value={forgotPw2}
+              onChange={(ev) => setForgotPw2(ev.target.value)}
+              size="large"
+              autoComplete="new-password"
+            />
+          </>
+        )}
+      </Modal>
     </AuthLayout>
   )
 }

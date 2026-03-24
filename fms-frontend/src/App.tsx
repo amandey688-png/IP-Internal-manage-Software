@@ -7,6 +7,7 @@ import { ProtectedRoute } from "./components/layout/ProtectedRoute"
 
 import { Register } from "./pages/auth/Register"
 import { Login } from "./pages/auth/Login"
+import { ResetPassword } from "./pages/auth/ResetPassword"
 import { OTPVerification } from "./pages/auth/OTPVerification"
 import { ConfirmationSuccess } from "./pages/auth/ConfirmationSuccess"
 
@@ -40,6 +41,7 @@ function AppTitle() {
   useEffect(() => {
     const titles: Record<string, string> = {
       [ROUTES.LOGIN]: "Login",
+      [ROUTES.RESET_PASSWORD]: "Reset password",
       [ROUTES.REGISTER]: "Register",
       [ROUTES.DASHBOARD]: "Dashboard",
       [ROUTES.DASHBOARD_KPI]: "Dashboard - KPI",
@@ -96,6 +98,7 @@ function App() {
             {/* ================= PUBLIC ROUTES ================= */}
             <Route path={ROUTES.REGISTER} element={<Register />} />
             <Route path={ROUTES.LOGIN} element={<Login />} />
+            <Route path={ROUTES.RESET_PASSWORD} element={<ResetPassword />} />
             <Route path={ROUTES.OTP} element={<OTPVerification />} />
             <Route
               path={ROUTES.CONFIRMATION_SUCCESS}

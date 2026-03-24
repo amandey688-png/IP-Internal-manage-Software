@@ -28,7 +28,7 @@ from pydantic import BaseModel, EmailStr, field_validator, model_validator
 import uuid
 import re
 import httpx
-from app.supabase_client import supabase, supabase_auth
+from app.supabase_client import SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL, supabase, supabase_auth
 from app.auth_middleware import get_current_user, get_current_user_optional
 from app import payment_ageing as _pa
 
@@ -166,6 +166,9 @@ _RATE_LIMIT_PATHS = {
     "/auth/register",
     "/auth/refresh",
     "/auth/resend-confirmation",
+    "/auth/forgot-password/lookup",
+    "/auth/forgot-password/complete",
+    "/auth/recovery-password",
     "/approval/execute-by-token",
 }
 _rate_limit_hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
@@ -313,6 +316,33 @@ class RefreshRequest(BaseModel):
     refresh_token: str
 
 
+class ForgotPasswordLookupRequest(BaseModel):
+    email: EmailStr
+
+
+class ForgotPasswordCompleteRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
+
+
+class RecoveryPasswordRequest(BaseModel):
+    password: str
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        if len(v) < 8:
+            raise ValueError("Password must be at least 8 characters long")
+        return v
+
+
 # ---------- Routes ----------
 @app.get("/health")
 def health():
@@ -418,6 +448,47 @@ def check_user(email: str = ""):
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+def _find_auth_user_by_email(email: str):
+    """Find Supabase Auth user by email (admin API). Requires SUPABASE_SERVICE_ROLE_KEY."""
+    email = email.strip().lower()
+    if not (SUPABASE_SERVICE_ROLE_KEY or "").strip():
+        raise HTTPException(
+            status_code=503,
+            detail="Password reset is not configured. Set SUPABASE_SERVICE_ROLE_KEY in backend/.env.",
+        )
+    try:
+        resp = supabase.auth.admin.list_users(per_page=1000)
+    except Exception as e:
+        _log(f"_find_auth_user_by_email list_users: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Could not reach Supabase Auth. Check SUPABASE_SERVICE_ROLE_KEY and project status.",
+        )
+    users_iter = getattr(resp, "users", None)
+    if users_iter is None:
+        try:
+            users_iter = list(resp) if resp is not None else []
+        except TypeError:
+            users_iter = []
+    for u in users_iter:
+        em = (getattr(u, "email", None) or "").strip().lower()
+        if em == email:
+            return u
+    return None
+
+
+def _auth_user_exists_for_login(email: str) -> bool | None:
+    """True if email exists in Supabase Auth, False if not, None if check skipped (no service key) or lookup failed."""
+    if not (SUPABASE_SERVICE_ROLE_KEY or "").strip():
+        return None
+    try:
+        return _find_auth_user_by_email(email) is not None
+    except HTTPException:
+        return None
+    except Exception:
+        return None
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -668,6 +739,13 @@ def login(payload: LoginRequest):
                 else:
                     raise HTTPException(status_code=503, detail=_connection_error_detail(pre_e))
 
+    exists = _auth_user_exists_for_login(email)
+    if exists is False:
+        raise HTTPException(
+            status_code=401,
+            detail="No account found for this email. Check spelling or create an account.",
+        )
+
     try:
         # Try ANON_KEY client first (recommended for sign_in), with retries for connection issues
         result = _retry_supabase_call(
@@ -687,14 +765,11 @@ def login(payload: LoginRequest):
                 raise HTTPException(status_code=503, detail=_connection_error_detail(e2))
             err = str(e2).lower()
             if "invalid" in err or "login" in err or "credentials" in err:
-                raise HTTPException(
-                    status_code=401,
-                    detail=f"Invalid email or password. (Supabase: {str(e2)[:100]})",
-                )
+                raise HTTPException(status_code=401, detail="Invalid email or password")
             if "email" in err and "confirm" in err:
                 raise HTTPException(
                     status_code=401,
-                    detail="Email not confirmed. Add user with Auto Confirm in Supabase.",
+                    detail="Please confirm your email before signing in. Check your inbox or ask an administrator.",
                 )
             raise HTTPException(status_code=500, detail=str(e2))
 
@@ -835,6 +910,74 @@ def logout():
     No auth required - user may have expired token.
     """
     return {"message": "Logged out successfully"}
+
+
+@api_router.post("/auth/forgot-password/lookup")
+def forgot_password_lookup(payload: ForgotPasswordLookupRequest, request: Request):
+    """Check if email is registered in Supabase Auth (for in-app password reset without email link)."""
+    if _is_rate_limited(request):
+        raise HTTPException(429, "Too many requests. Please try again in a minute.")
+    email = payload.email.strip().lower()
+    auth_user = _find_auth_user_by_email(email)
+    return {"exists": auth_user is not None}
+
+
+@api_router.post("/auth/forgot-password/complete")
+def forgot_password_complete(payload: ForgotPasswordCompleteRequest, request: Request):
+    """Set new password for the user after lookup (admin API). No email link required."""
+    if _is_rate_limited(request):
+        raise HTTPException(429, "Too many requests. Please try again in a minute.")
+    email = payload.email.strip().lower()
+    auth_user = _find_auth_user_by_email(email)
+    if not auth_user:
+        raise HTTPException(404, "No account found with this email.")
+    user_id = str(getattr(auth_user, "id", "") or "")
+    if not user_id:
+        raise HTTPException(400, "Could not resolve user id.")
+    try:
+        supabase.auth.admin.update_user_by_id(user_id, {"password": payload.password})
+    except Exception as e:
+        _log(f"forgot_password_complete update_user_by_id: {e}")
+        raise HTTPException(400, f"Could not update password: {str(e)[:200]}")
+    return {"message": "Password updated successfully. You can sign in with your new password."}
+
+
+@api_router.patch("/auth/recovery-password")
+def recovery_password(payload: RecoveryPasswordRequest, request: Request):
+    """Set new password using the recovery access_token from the email link (Authorization: Bearer …)."""
+    if _is_rate_limited(request):
+        raise HTTPException(429, "Too many requests. Please try again in a minute.")
+    auth_header = (request.headers.get("authorization") or "").strip()
+    if not auth_header.lower().startswith("bearer "):
+        raise HTTPException(401, "Missing or invalid reset session. Open the link from your email again.")
+    token = auth_header[7:].strip()
+    if not token:
+        raise HTTPException(401, "Missing or invalid reset session. Open the link from your email again.")
+    apikey = (SUPABASE_ANON_KEY or "").strip()
+    if not apikey:
+        raise HTTPException(503, "Server configuration error: missing SUPABASE_ANON_KEY")
+    url = f"{SUPABASE_URL.rstrip('/')}/auth/v1/user"
+    try:
+        r = httpx.patch(
+            url,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "apikey": apikey,
+                "Content-Type": "application/json",
+            },
+            json={"password": payload.password},
+            timeout=45.0,
+        )
+    except Exception as e:
+        _log(f"recovery-password httpx: {e}")
+        raise HTTPException(503, "Could not reach authentication service. Try again later.")
+    if r.status_code >= 400:
+        _log(f"recovery-password: {r.status_code} {(r.text or '')[:400]}")
+        raise HTTPException(
+            status_code=400,
+            detail="Could not update password. The link may have expired. Request a new reset from the login page.",
+        )
+    return {"message": "Password updated successfully. You can sign in with your new password."}
 
 
 @api_router.post("/auth/refresh")
@@ -3341,6 +3484,7 @@ def list_client_payment(auth: dict = Depends(get_current_user), status: str = No
                 q = q.eq("genre", "HY")
             # Gener = General (Y or not M/Q/HY): filter in Python
         else:
+            # Open / Payment Management: unpaid only (payment_received_date IS NULL).
             q = q.is_("payment_received_date", "null")
         q = q.limit(_LIST_CLIENT_PAYMENT_LIMIT)
         r = q.execute()
@@ -3356,7 +3500,8 @@ def list_client_payment(auth: dict = Depends(get_current_user), status: str = No
         today = date.today()
         for row in items:
             inv_date = row.get("invoice_date")
-            paid_date = row.get("payment_received_date")
+            _pr = row.get("payment_received_date")
+            paid_date = None if _pr is None or (isinstance(_pr, str) and not str(_pr).strip()) else _pr
             row["status"] = "Completed" if paid_date else "Pending"
             aging_days = 0
             try:
