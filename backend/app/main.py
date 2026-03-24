@@ -479,18 +479,6 @@ def _find_auth_user_by_email(email: str):
     return None
 
 
-def _auth_user_exists_for_login(email: str) -> bool | None:
-    """True if email exists in Supabase Auth, False if not, None if check skipped (no service key) or lookup failed."""
-    if not (SUPABASE_SERVICE_ROLE_KEY or "").strip():
-        return None
-    try:
-        return _find_auth_user_by_email(email) is not None
-    except HTTPException:
-        return None
-    except Exception:
-        return None
-
-
 @app.get("/", response_class=HTMLResponse)
 def root():
     """Root endpoint - HTML page with proper tab title"""
@@ -670,6 +658,18 @@ def _is_connection_error(e: Exception) -> bool:
     )
 
 
+def _is_invalid_credentials_or_auth_reject(e: Exception) -> bool:
+    """Never retry these — wrong password, unconfirmed email, etc."""
+    err = str(e).lower()
+    if "invalid" in err and ("credential" in err or "login" in err or "password" in err):
+        return True
+    if "email not confirmed" in err or "confirm your email" in err:
+        return True
+    if "user_banned" in err or "banned" in err and "user" in err:
+        return True
+    return False
+
+
 def _supabase_unpause_link() -> str:
     """Direct link to unpause project (free tier pauses after inactivity)."""
     url = (os.getenv("SUPABASE_URL") or "").strip()
@@ -693,16 +693,24 @@ def _connection_error_detail(e: Exception) -> str:
 
 
 def _retry_supabase_call(fn, max_attempts: int = 5, delay_secs: list[float] | None = None):
-    """Retry a call that may fail due to transient connection issues (e.g. Supabase waking from pause). Silent retries; no per-attempt logs."""
+    """Retry only on transient network/connection failures — not wrong password, not auth errors.
+
+    Previously this retried *every* exception (including invalid credentials), adding ~65s+ of sleeps
+    on every failed login. Wrong email/password must fail in about one round-trip to Supabase.
+    """
     import time
     if delay_secs is None:
-        delay_secs = [5, 10, 20, 30]  # Waits after attempts 0..3; total ~65s for project wake-up
+        delay_secs = [2, 5, 10, 15]  # shorter waits; only used when _is_connection_error is true
     last_exc = None
     for attempt in range(max_attempts):
         try:
             return fn()
         except Exception as e:
             last_exc = e
+            if _is_invalid_credentials_or_auth_reject(e):
+                raise e
+            if not _is_connection_error(e):
+                raise e
             if attempt < max_attempts - 1 and attempt < len(delay_secs):
                 d = delay_secs[attempt]
                 if d > 0:
@@ -720,31 +728,8 @@ def login(payload: LoginRequest):
     password = payload.password
     result = None
 
-    # Pre-check: if Supabase is unreachable, return 503. Silent retries (no per-attempt logs).
-    url = (os.getenv("SUPABASE_URL") or "").strip()
-    if url and url.startswith("https://"):
-        import time
-        pre_delays = [0, 8, 20, 45]  # Waits between attempts; total ~73s for project wake-up
-        last_pre_e = None
-        for pre_attempt in range(4):
-            try:
-                httpx.get(f"{url.rstrip('/')}/rest/v1/", timeout=25.0)
-                break
-            except Exception as pre_e:
-                last_pre_e = pre_e
-                if not _is_connection_error(pre_e):
-                    raise HTTPException(status_code=503, detail=_connection_error_detail(pre_e))
-                if pre_attempt < 3:
-                    time.sleep(pre_delays[pre_attempt + 1])
-                else:
-                    raise HTTPException(status_code=503, detail=_connection_error_detail(pre_e))
-
-    exists = _auth_user_exists_for_login(email)
-    if exists is False:
-        raise HTTPException(
-            status_code=401,
-            detail="No account found for this email. Check spelling or create an account.",
-        )
+    # No slow pre-check or list_users() here — those added tens of seconds on every login (including
+    # wrong password). Reachability is handled by sign_in + _retry_supabase_call on real outages.
 
     try:
         # Try ANON_KEY client first (recommended for sign_in), with retries for connection issues
