@@ -53,10 +53,7 @@ export const Login = () => {
   const [connectionError, setConnectionError] = useState<string | null>(null)
   const [loginError, setLoginError] = useState<string | null>(null)
   const [forgotOpen, setForgotOpen] = useState(false)
-  const [forgotStep, setForgotStep] = useState<'email' | 'password'>('email')
   const [forgotEmail, setForgotEmail] = useState('')
-  const [forgotPw, setForgotPw] = useState('')
-  const [forgotPw2, setForgotPw2] = useState('')
   const [forgotLoading, setForgotLoading] = useState(false)
   const navigate = useNavigate()
   const { login } = useAuth()
@@ -151,59 +148,28 @@ export const Login = () => {
   const openForgot = () => {
     const e = form.getFieldValue('email') as string | undefined
     setForgotEmail(e && validateEmail(e) ? e : '')
-    setForgotStep('email')
-    setForgotPw('')
-    setForgotPw2('')
     setForgotOpen(true)
   }
 
   const closeForgot = () => {
     setForgotOpen(false)
-    setForgotStep('email')
-    setForgotPw('')
-    setForgotPw2('')
   }
 
-  /** Modal OK: step 1 = check Supabase; step 2 = update password. */
+  /** Modal OK: request reset email (do not update password directly). */
   const handleForgotModalOk = async (): Promise<void> => {
     const e = (forgotEmail || '').trim()
     if (!e || !validateEmail(e)) {
       message.warning('Enter a valid email address')
       return Promise.reject()
     }
-    if (forgotStep === 'email') {
-      setForgotLoading(true)
-      const res = await authApi.forgotPasswordLookup(e)
-      setForgotLoading(false)
-      if (res.error) {
-        message.error(res.error.message)
-        return Promise.reject()
-      }
-      if (!res.data?.exists) {
-        message.warning('No account found with this email. Check spelling or create an account.')
-        return Promise.reject()
-      }
-      setForgotStep('password')
-      setForgotPw('')
-      setForgotPw2('')
-      return Promise.reject()
-    }
-    if (forgotPw.length < 8) {
-      message.warning('Password must be at least 8 characters')
-      return Promise.reject()
-    }
-    if (forgotPw !== forgotPw2) {
-      message.error('New password and confirmation do not match')
-      return Promise.reject()
-    }
     setForgotLoading(true)
-    const res = await authApi.forgotPasswordComplete(e, forgotPw)
+    const res = await authApi.forgotPasswordLookup(e)
     setForgotLoading(false)
     if (res.error) {
       message.error(res.error.message)
       return Promise.reject()
     }
-    message.success(res.data?.message || 'Password updated. You can sign in now.')
+    message.success(res.data?.message || 'Check your email for a password reset link.')
     closeForgot()
   }
 
@@ -362,55 +328,28 @@ export const Login = () => {
       </div>
 
       <Modal
-        title={forgotStep === 'email' ? 'Forgot password' : 'Set new password'}
+        title="Forgot password"
         open={forgotOpen}
         onCancel={closeForgot}
         onOk={handleForgotModalOk}
         confirmLoading={forgotLoading}
-        okText={forgotStep === 'email' ? 'Continue' : 'Update password'}
+        okText="Send reset email"
         destroyOnClose
         afterClose={() => {
-          setForgotStep('email')
-          setForgotPw('')
-          setForgotPw2('')
+          setForgotEmail('')
         }}
       >
-        {forgotStep === 'email' ? (
-          <>
-            <p style={{ marginBottom: 12, color: '#666' }}>
-              Enter your account email. We will check if it exists, then you can set a new password here.
-            </p>
-            <Input
-              type="email"
-              placeholder="Your e-mail"
-              value={forgotEmail}
-              onChange={(ev) => setForgotEmail(ev.target.value)}
-              size="large"
-              autoComplete="email"
-            />
-          </>
-        ) : (
-          <>
-            <p style={{ marginBottom: 12, color: '#666' }}>
-              Account found for <strong>{forgotEmail}</strong>. Enter your new password (min. 8 characters).
-            </p>
-            <Input.Password
-              placeholder="New password"
-              value={forgotPw}
-              onChange={(ev) => setForgotPw(ev.target.value)}
-              size="large"
-              style={{ marginBottom: 12 }}
-              autoComplete="new-password"
-            />
-            <Input.Password
-              placeholder="Confirm new password"
-              value={forgotPw2}
-              onChange={(ev) => setForgotPw2(ev.target.value)}
-              size="large"
-              autoComplete="new-password"
-            />
-          </>
-        )}
+        <p style={{ marginBottom: 12, color: '#666' }}>
+          Enter your account email. If it exists, we will send a time-limited password reset link to your inbox.
+        </p>
+        <Input
+          type="email"
+          placeholder="Your e-mail"
+          value={forgotEmail}
+          onChange={(ev) => setForgotEmail(ev.target.value)}
+          size="large"
+          autoComplete="email"
+        />
       </Modal>
     </AuthLayout>
   )
