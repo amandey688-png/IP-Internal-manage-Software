@@ -66,11 +66,18 @@ const metricCardColors = [
   { borderLeft: '3px solid #22c55e', iconColor: '#22c55e', ...lightPanel },
   { borderLeft: '3px solid #3b82f6', iconColor: '#3b82f6', ...lightPanel },
   { borderLeft: '3px solid #8b5cf6', iconColor: '#8b5cf6', ...lightPanel },
+  { borderLeft: '3px solid #0ea5e9', iconColor: '#0ea5e9', ...lightPanel },
+  { borderLeft: '3px solid #14b8a6', iconColor: '#14b8a6', ...lightPanel },
+  { borderLeft: '3px solid #ef4444', iconColor: '#ef4444', ...lightPanel },
+  { borderLeft: '3px solid #8b5cf6', iconColor: '#8b5cf6', ...lightPanel },
+  { borderLeft: '3px solid #14b8a6', iconColor: '#14b8a6', ...lightPanel },
 ]
 
 export const Dashboard = () => {
   const navigate = useNavigate()
   const { user } = useAuth()
+  const customDashboardEmails = new Set(['ad@ip.com', 'ayush@industryprime.com'])
+  const isCustomDashboardUser = (user?.email || '').toLowerCase() ? customDashboardEmails.has(user?.email.toLowerCase() || '') : false
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
   const [allFetchedTickets, setAllFetchedTickets] = useState<Ticket[]>([])
@@ -80,6 +87,8 @@ export const Dashboard = () => {
   const [detailTitle, setDetailTitle] = useState('')
   const [detailData, setDetailData] = useState<DashboardDetailTicket[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
+  const hideCompanyColumnInDelegation =
+    detailMetric === 'custom_pending_delegation' || detailMetric === 'custom_total_rec_amount' || detailMetric === 'custom_total_due'
   const [activeLeads, setActiveLeads] = useState<ActiveLeadRow[]>([])
   const [activeLeadsLoading, setActiveLeadsLoading] = useState(false)
   const [paymentActions, setPaymentActions] = useState<
@@ -249,22 +258,58 @@ export const Dashboard = () => {
     total_pending_bug_till_date: 0,
     pending_till_date_exclude_demo_c: 0,
     pending_chores_include_demo_c: 0,
+    feature_excluding_demo_c: 0,
+    feature_with_demo_c: 0,
     response_delay: 0,
     completion_delay: 0,
     total_last_week: 0,
     pending_last_week: 0,
     staging_pending_feature: 0,
     staging_pending_chores_bugs: 0,
+    custom_received_monthly: 0,
+    custom_received_quarterly: 0,
+    custom_received_half_yearly: 0,
+    custom_total_due: 0,
+    custom_pending_delegation: 0,
   }
 
-  const metricCards = [
+  const customReceivedTotal = Number(safeMetrics.custom_received_monthly) + Number(safeMetrics.custom_received_quarterly) + Number(safeMetrics.custom_received_half_yearly)
+
+  const baseMetricCards = [
     { title: 'Total Pending Bug (till date)', metricKey: 'total_pending_bug', value: Number(safeMetrics.total_pending_bug_till_date) ?? 0, icon: <FileTextOutlined /> },
     { title: 'Response Delay', metricKey: 'response_delay', value: Number(safeMetrics.response_delay) || 0, icon: <ClockCircleOutlined /> },
     { title: 'Completion Delay', metricKey: 'completion_delay', value: Number(safeMetrics.completion_delay) || 0, icon: <WarningOutlined /> },
     { title: 'Total (Last Week)', metricKey: 'total_last_week', value: Number(safeMetrics.total_last_week) || 0, icon: <FileTextOutlined /> },
     { title: 'Pending (till date) Excl. Demo C', metricKey: 'pending_exclude_demo_c', value: Number(safeMetrics.pending_till_date_exclude_demo_c) ?? 0, icon: <CheckCircleOutlined /> },
     { title: 'Pending Chores (Demo C)', metricKey: 'pending_chores_demo_c', value: Number(safeMetrics.pending_chores_include_demo_c) ?? 0, icon: <CheckCircleOutlined /> },
+    { title: 'Feature Excluding Demo C', metricKey: 'feature_exclude_demo_c', value: Number(safeMetrics.feature_excluding_demo_c) ?? 0, icon: <RocketOutlined /> },
+    { title: 'Feature with Demo C', metricKey: 'feature_with_demo_c', value: Number(safeMetrics.feature_with_demo_c) ?? 0, icon: <RocketOutlined /> },
   ]
+
+  const customMetricCards = isCustomDashboardUser
+    ? [
+        {
+          title: 'Total Rec Ammount',
+          metricKey: 'custom_total_rec_amount',
+          value: Number(customReceivedTotal) || 0,
+          icon: <FileTextOutlined />,
+        },
+        {
+          title: 'Total Due',
+          metricKey: 'custom_total_due',
+          value: Number(safeMetrics.custom_total_due) || 0,
+          icon: <WarningOutlined />,
+        },
+        {
+          title: 'Total Pending Delegation',
+          metricKey: 'custom_pending_delegation',
+          value: Number(safeMetrics.custom_pending_delegation) || 0,
+          icon: <CheckCircleOutlined />,
+        },
+      ]
+    : []
+
+  const metricCards = [...baseMetricCards, ...customMetricCards]
 
   const stagingCards = [
     { title: 'Feature Pending', metricKey: 'staging_feature', value: Number(safeMetrics.staging_pending_feature) || 0, icon: <RocketOutlined />, color: '#3b82f6' },
@@ -290,6 +335,9 @@ export const Dashboard = () => {
   const openTicket = (t: DashboardDetailTicket) => {
     setDetailModalOpen(false)
     const type = (t.type || '').toLowerCase()
+    if (type === 'payment' || type === 'delegation') {
+      return
+    }
     if (type === 'feature') {
       navigate(ROUTES.TICKETS + '?type=feature', { state: { openTicketId: t.id, openTicketType: 'feature' } })
     } else {
@@ -335,17 +383,18 @@ export const Dashboard = () => {
       <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
         {metricCards.map((card, i) => {
           const cardStyle = metricCardColors[i] || metricCardColors[0]
+          const clickable = card.clickable !== false
           return (
             <Col xs={24} sm={12} md={8} lg={6} key={i}>
               <Card
-                onClick={() => loadDetail(card.metricKey, card.title)}
+                onClick={clickable ? () => loadDetail(card.metricKey, card.title) : undefined}
                 style={{
                   borderRadius: 8,
                   border: cardStyle.border,
                   borderLeft: cardStyle.borderLeft,
                   background: cardStyle.background,
                   boxShadow: cardStyle.boxShadow,
-                  cursor: 'pointer',
+                  cursor: clickable ? 'pointer' : 'default',
                 }}
                 bodyStyle={{ padding: 22 }}
               >
@@ -617,13 +666,17 @@ export const Dashboard = () => {
             pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `Total ${t} tickets` }}
             scroll={{ x: 'max-content' }}
             columns={[
-              {
-                title: 'Company',
-                dataIndex: 'company',
-                key: 'company',
-                width: 140,
-                onCell: () => ({ style: { whiteSpace: 'normal', wordBreak: 'break-word' } }),
-              },
+              ...(!hideCompanyColumnInDelegation
+                ? [
+                    {
+                      title: 'Company',
+                      dataIndex: 'company',
+                      key: 'company',
+                      width: 140,
+                      onCell: () => ({ style: { whiteSpace: 'normal', wordBreak: 'break-word' } }),
+                    },
+                  ]
+                : []),
               {
                 title: <span style={{ fontWeight: 600 }}>Title & Description</span>,
                 key: 'title_description',
@@ -650,9 +703,15 @@ export const Dashboard = () => {
                 width: 120,
                 onCell: () => ({ style: { whiteSpace: 'normal', wordBreak: 'break-word' } }),
                 render: (_: unknown, record: DashboardDetailTicket) => (
-                  <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openTicket(record)}>
-                    {record.referenceNo}
-                  </Button>
+                  (record.type || '').toLowerCase() === 'feature' ||
+                  (record.type || '').toLowerCase() === 'bug' ||
+                  (record.type || '').toLowerCase() === 'chore' ? (
+                    <Button type="link" size="small" style={{ padding: 0 }} onClick={() => openTicket(record)}>
+                      {record.referenceNo}
+                    </Button>
+                  ) : (
+                    <span>{record.referenceNo}</span>
+                  )
                 ),
               },
               {

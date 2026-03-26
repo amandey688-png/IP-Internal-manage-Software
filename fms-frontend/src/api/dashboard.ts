@@ -6,6 +6,13 @@ export interface DashboardMetrics {
   total_pending_bug_till_date: number
   pending_till_date_exclude_demo_c: number
   pending_chores_include_demo_c: number
+  feature_excluding_demo_c: number
+  feature_with_demo_c: number
+  custom_received_monthly?: number
+  custom_received_quarterly?: number
+  custom_received_half_yearly?: number
+  custom_total_due?: number
+  custom_pending_delegation?: number
   response_delay: number
   completion_delay: number
   total_last_week: number
