@@ -128,9 +128,27 @@ def require_roles(allowed_roles: list[str]):
     return _check
 
 
+def _redact_secrets(text: str) -> str:
+    """
+    Best-effort redaction of auth/server secrets that could otherwise leak via logs
+    or HTTP error details.
+    """
+    if not text:
+        return text
+    # JWTs (Supabase keys/tokens typically start with eyJ... and contain 3 dot-separated parts)
+    text = re.sub(
+        r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b",
+        "[REDACTED_JWT]",
+        text,
+    )
+    # Supabase "sb_secret_" / "sb_publishable_" style keys
+    text = re.sub(r"\bsb_(?:secret|publishable)_[A-Za-z0-9_-]+\b", "[REDACTED_KEY]", text)
+    return text
+
+
 def _log(msg: str):
     """Force log to terminal and log file - ASCII-safe for Windows"""
-    safe_msg = msg.encode("ascii", errors="replace").decode("ascii")
+    safe_msg = _redact_secrets(msg).encode("ascii", errors="replace").decode("ascii")
     print(safe_msg, flush=True)
     sys.stdout.flush()
     sys.stderr.flush()
@@ -551,48 +569,32 @@ def _do_register(payload: RegisterRequest):
         user_email = payload.email
         confirmation_sent = False
 
-        # Redirect URL after email confirmation (add to Supabase Auth URL config)
-        frontend_url = os.getenv("FRONTEND_URL", os.getenv("SITE_URL", "http://localhost:3000")).rstrip("/")
-        redirect_to = f"{frontend_url}/confirmation-success"
-
-        # Method 1: sign_up (anon) - sends confirmation email via Custom SMTP
         try:
-            _log("Trying sign_up (sends confirmation email)...")
-            result = supabase_auth.auth.sign_up({
+            # Security: always create user as unconfirmed so email verification is mandatory.
+            _log("Trying create_user (unconfirmed)...")
+            result = supabase.auth.admin.create_user({
                 "email": payload.email.strip().lower(),
                 "password": payload.password,
-                "options": {
-                    "data": {"full_name": payload.full_name},
-                    "emailRedirectTo": redirect_to,
-                },
+                "email_confirm": False,
+                "user_metadata": {"full_name": payload.full_name},
             })
             if result and getattr(result, "user", None):
                 user_id = str(result.user.id)
                 user_email = getattr(result.user, "email", None) or payload.email
-                # If session is None, Supabase sent confirmation email (Confirm email enabled)
-                confirmation_sent = getattr(result, "session", None) is None
-                _log(f"sign_up OK: {user_id} confirmation_sent={confirmation_sent}")
+
+            # Send confirmation email (requires Supabase email/SMTP configuration).
+            supabase_auth.auth.resend({"type": "signup", "email": payload.email.strip().lower()})
+            confirmation_sent = True
+            _log(f"create_user OK: {user_id}")
         except Exception as e1:
-            _log(f"sign_up failed: {type(e1).__name__}: {e1}")
-            # Method 2: create_user (service_role) - auto-confirm, no email
-            try:
-                _log("Trying create_user fallback...")
-                result = supabase.auth.admin.create_user({
-                    "email": payload.email.strip().lower(),
-                    "password": payload.password,
-                    "email_confirm": True,
-                    "user_metadata": {"full_name": payload.full_name},
-                })
-                if result and getattr(result, "user", None):
-                    user_id = str(result.user.id)
-                    user_email = getattr(result.user, "email", None) or payload.email
-                    _log(f"create_user OK: {user_id}")
-            except Exception as e2:
-                _log(f"create_user failed: {type(e2).__name__}: {e2}")
-                err = str(e2).lower()
-                if "already" in err or "exists" in err or "registered" in err:
-                    raise HTTPException(400, "This email is already registered. Please log in.")
-                raise HTTPException(400, f"Supabase error: {str(e2)[:200]}")
+            _log(f"create_user failed: {type(e1).__name__}")
+            err = str(e1).lower()
+            if "already" in err or "exists" in err or "registered" in err:
+                raise HTTPException(400, "This email is already registered. Please log in.")
+            raise HTTPException(
+                status_code=503,
+                detail="Registration failed. Email verification is required; check Supabase Auth email/SMTP configuration and retry.",
+            )
 
         if not user_id:
             raise HTTPException(400, "Registration failed: Could not create user.")
@@ -644,7 +646,7 @@ def _do_register(payload: RegisterRequest):
         elif "roles" in err or "user_profiles" in err or "relation" in err:
             return JSONResponse(status_code=503, content={"detail": "Run database/FRESH_SETUP.sql in Supabase SQL Editor."})
         # Return 400 directly - ASCII-safe for Windows
-        safe_msg = msg.encode("ascii", errors="replace").decode("ascii")
+        safe_msg = _redact_secrets(msg).encode("ascii", errors="replace").decode("ascii")
         return JSONResponse(status_code=400, content={"detail": safe_msg})
 
 
@@ -737,7 +739,7 @@ def login(payload: LoginRequest):
             lambda: supabase_auth.auth.sign_in_with_password({"email": email, "password": password})
         )
     except Exception as e1:
-        print(f"Login (anon) error: {e1}")
+        _log(f"Login (anon) error: {type(e1).__name__}")
         if _is_connection_error(e1):
             raise HTTPException(status_code=503, detail=_connection_error_detail(e1))
         try:
@@ -745,7 +747,7 @@ def login(payload: LoginRequest):
                 lambda: supabase.auth.sign_in_with_password({"email": email, "password": password})
             )
         except Exception as e2:
-            print(f"Login (service_role) error: {e2}")
+            _log(f"Login (service_role) error: {type(e2).__name__}")
             if _is_connection_error(e2):
                 raise HTTPException(status_code=503, detail=_connection_error_detail(e2))
             err = str(e2).lower()
@@ -756,7 +758,7 @@ def login(payload: LoginRequest):
                     status_code=401,
                     detail="Please confirm your email before signing in. Check your inbox or ask an administrator.",
                 )
-            raise HTTPException(status_code=500, detail=str(e2))
+            raise HTTPException(status_code=500, detail="Login failed. Please try again.")
 
     try:
         if not result.user or not result.session:
@@ -822,7 +824,7 @@ def login(payload: LoginRequest):
         raise
     except Exception as e:
         err = str(e).lower()
-        print(f"Login (profile) error: {e}")
+        _log(f"Login (profile) error: {type(e).__name__}")
         if _is_connection_error(e):
             raise HTTPException(status_code=503, detail=_connection_error_detail(e))
         if "invalid" in err or "login" in err or "credentials" in err:
@@ -832,7 +834,7 @@ def login(payload: LoginRequest):
                 status_code=404,
                 detail="User profile not found. Run database/FIX_USER_PROFILE.sql in Supabase.",
             )
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Login failed. Please try again.")
 
 
 @api_router.get("/me")
@@ -885,32 +887,36 @@ def logout():
 
 @api_router.post("/auth/forgot-password/lookup")
 def forgot_password_lookup(payload: ForgotPasswordLookupRequest, request: Request):
-    """Check if email is registered in Supabase Auth (for in-app password reset without email link)."""
+    """
+    Request a password reset email.
+
+    Security: do NOT reveal whether an email exists and do NOT update passwords
+    without a time-limited recovery token.
+    """
     if _is_rate_limited(request):
         raise HTTPException(429, "Too many requests. Please try again in a minute.")
     email = payload.email.strip().lower()
-    auth_user = _find_auth_user_by_email(email)
-    return {"exists": auth_user is not None}
+    frontend_url = os.getenv("FRONTEND_URL", os.getenv("SITE_URL", "http://localhost:3000")).rstrip("/")
+    redirect_to = f"{frontend_url}/reset-password"
+    try:
+        supabase_auth.auth.reset_password_for_email(email, {"redirectTo": redirect_to})
+    except Exception as e:
+        # Avoid leaking existence via error messages. Retry after transient issues.
+        _log(f"forgot-password request failed: {type(e).__name__}")
+        if _is_connection_error(e):
+            raise HTTPException(503, "Could not send password reset email. Try again later.")
+    return {"message": "If the account exists, you will receive an email with a password reset link."}
 
 
 @api_router.post("/auth/forgot-password/complete")
 def forgot_password_complete(payload: ForgotPasswordCompleteRequest, request: Request):
-    """Set new password for the user after lookup (admin API). No email link required."""
-    if _is_rate_limited(request):
-        raise HTTPException(429, "Too many requests. Please try again in a minute.")
-    email = payload.email.strip().lower()
-    auth_user = _find_auth_user_by_email(email)
-    if not auth_user:
-        raise HTTPException(404, "No account found with this email.")
-    user_id = str(getattr(auth_user, "id", "") or "")
-    if not user_id:
-        raise HTTPException(400, "Could not resolve user id.")
-    try:
-        supabase.auth.admin.update_user_by_id(user_id, {"password": payload.password})
-    except Exception as e:
-        _log(f"forgot_password_complete update_user_by_id: {e}")
-        raise HTTPException(400, f"Could not update password: {str(e)[:200]}")
-    return {"message": "Password updated successfully. You can sign in with your new password."}
+    """
+    Deprecated insecure endpoint.
+
+    Security: password must be reset only via time-limited recovery token
+    (see POST /auth/recovery-password).
+    """
+    raise HTTPException(status_code=410, detail="Use the password reset link from your email to set a new password.")
 
 
 @api_router.patch("/auth/recovery-password")
@@ -940,7 +946,7 @@ def recovery_password(payload: RecoveryPasswordRequest, request: Request):
             timeout=45.0,
         )
     except Exception as e:
-        _log(f"recovery-password httpx: {e}")
+        _log(f"recovery-password httpx error: {type(e).__name__}")
         raise HTTPException(503, "Could not reach authentication service. Try again later.")
     if r.status_code >= 400:
         _log(f"recovery-password: {r.status_code} {(r.text or '')[:400]}")
@@ -970,7 +976,7 @@ def refresh_token(payload: RefreshRequest):
         err = str(e).lower()
         if "invalid" in err or "expired" in err or "refresh" in err:
             raise HTTPException(401, "Refresh token invalid or expired. Please log in again.")
-        raise HTTPException(401, str(e)[:150])
+        raise HTTPException(401, "Refresh token invalid or expired. Please log in again.")
 
 
 @api_router.get("/auth/confirm")
@@ -998,7 +1004,7 @@ def resend_confirmation(payload: ResendConfirmRequest):
             return {"success": True, "message": "Your email is already confirmed. You can log in."}
         if "rate" in err or "limit" in err:
             raise HTTPException(429, "Please wait a few minutes before requesting another email.")
-        raise HTTPException(400, f"Could not resend: {str(e)[:150]}")
+        raise HTTPException(400, "Could not resend confirmation email. Please try again later.")
 
 
 # ---------- Tickets ----------
@@ -1856,12 +1862,14 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     """Live Supabase-powered dashboard metrics. Support Overview = Chores & Bug only."""
     from datetime import timedelta
     now = datetime.utcnow()
+    auth_email = (auth.get("email") or "").strip().lower()
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     week_ago = now - timedelta(days=7)
     week_start = week_ago.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Chores & Bug only for Support Overview
     types_chores_bugs = ["chore", "bug"]
+    types_feature = ["feature"]
 
     # Current month: total Chores & Bug tickets created this month
     try:
@@ -1954,12 +1962,96 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     except Exception:
         pass
 
+    # Feature pending split by Demo C / non Demo C (same pending logic as above)
+    try:
+        qf = supabase.table("tickets").select(
+            "id, type, status_4, quality_solution, staging_planned, live_review_status, company_name"
+        ).in_("type", types_feature)
+        rf = qf.execute()
+        all_feature = rf.data or []
+    except Exception:
+        all_feature = []
+
+    feature_excluding_demo_c = sum(1 for t in all_feature if _is_pending(t) and not _company_demo_c(t))
+    feature_with_demo_c = sum(1 for t in all_feature if _is_pending(t) and _company_demo_c(t))
+
+    # -----------------------------------------------------------------------
+    # Custom dashboard fields for specific emails
+    # -----------------------------------------------------------------------
+    custom_received_monthly = 0
+    custom_received_quarterly = 0
+    custom_received_half_yearly = 0
+    custom_total_due = 0
+    custom_pending_delegation = 0
+
+    custom_emails = {"ad@ip.com", "ayush@industryprime.com"}
+    if auth_email in custom_emails:
+        try:
+            # Current quarter bounds (used for genre split)
+            from datetime import date as date_cls
+            today = date_cls.today()
+            fy, q = _pa.fy_quarter_key(today)
+            q_start, q_end = _pa.quarter_date_bounds(fy, q)
+
+            def _parse_amt(val: object) -> int:
+                s = str(val).strip()
+                return int(s) if s.isdigit() else 0
+
+            pr = (
+                supabase.table("onboarding_client_payment")
+                .select("invoice_amount,invoice_date,timestamp,genre,payment_received_date")
+                .limit(5000)
+                .execute()
+            )
+            pay_rows = pr.data or []
+
+            for row in pay_rows:
+                inv_d = _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
+                if not inv_d or not (q_start <= inv_d <= q_end):
+                    continue
+
+                amt = _parse_amt(row.get("invoice_amount"))
+                g = (row.get("genre") or "").strip().upper()
+                paid_val = row.get("payment_received_date")
+                is_paid = paid_val is not None and str(paid_val).strip() != ""
+
+                if is_paid:
+                    if g == "M":
+                        custom_received_monthly += amt
+                    elif g == "Q":
+                        custom_received_quarterly += amt
+                    elif g == "HY":
+                        custom_received_half_yearly += amt
+                else:
+                    custom_total_due += amt
+        except Exception:
+            pass
+
+        try:
+            rdel = (
+                supabase.table("delegation_tasks")
+                .select("id", count="exact")
+                .in_("status", ["pending", "in_progress"])
+                .execute()
+            )
+            custom_pending_delegation = rdel.count or len(rdel.data or [])
+        except Exception:
+            custom_pending_delegation = 0
+
     return {
         "all_tickets": all_tickets,
         "pending_till_date": pending_till_date,
         "total_pending_bug_till_date": total_pending_bug_till_date,
         "pending_till_date_exclude_demo_c": pending_till_date_exclude_demo_c,
         "pending_chores_include_demo_c": pending_chores_include_demo_c,
+        "feature_excluding_demo_c": feature_excluding_demo_c,
+        "feature_with_demo_c": feature_with_demo_c,
+        # Custom dashboard (email-specific)
+        "custom_received_monthly": custom_received_monthly,
+        "custom_received_quarterly": custom_received_quarterly,
+        "custom_received_half_yearly": custom_received_half_yearly,
+        "custom_total_due": custom_total_due,
+        "custom_pending_delegation": custom_pending_delegation,
         "response_delay": response_delay,
         "completion_delay": completion_delay,
         "total_last_week": total_last_week,
@@ -1971,7 +2063,10 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
 
 @api_router.get("/dashboard/detail")
 def dashboard_detail(
-    metric: str = Query(..., description="total_pending_bug, response_delay, completion_delay, total_last_week, pending_exclude_demo_c, pending_chores_demo_c, staging_feature, staging_chores_bugs"),
+    metric: str = Query(
+        ...,
+        description="total_pending_bug, response_delay, completion_delay, total_last_week, pending_exclude_demo_c, pending_chores_demo_c, feature_exclude_demo_c, feature_with_demo_c, custom_total_rec_amount, custom_total_due, custom_pending_delegation, staging_feature, staging_chores_bugs",
+    ),
     auth: dict = Depends(get_current_user),
 ):
     """Return ticket list for a dashboard metric (clickable card). Same logic as dashboard metrics."""
@@ -1980,6 +2075,7 @@ def dashboard_detail(
     week_ago = now - timedelta(days=7)
     week_start = week_ago.replace(hour=0, minute=0, second=0, microsecond=0)
     types_cb = ["chore", "bug"]
+    types_feature = ["feature"]
     cols = "id, reference_no, title, description, type, status, company_name, company_id, assignee_id, created_at, query_arrival_at, query_response_at, status_4, quality_solution, staging_planned, live_review_status, actual_4"
     result = []
     try:
@@ -1988,6 +2084,12 @@ def dashboard_detail(
         all_cb = r.data or []
     except Exception:
         all_cb = []
+    try:
+        qf = supabase.table("tickets").select(cols).in_("type", types_feature)
+        rf = qf.execute()
+        all_feature = rf.data or []
+    except Exception:
+        all_feature = []
     try:
         qw = supabase.table("tickets").select(cols).in_("type", types_cb).gte("created_at", week_start.isoformat())
         rw = qw.execute()
@@ -2063,6 +2165,71 @@ def dashboard_detail(
         result = [row(t) for t in all_cb if _is_pending_ticket(t) and not _company_demo_c_t(t)]
     elif metric == "pending_chores_demo_c":
         result = [row(t) for t in all_cb if _is_pending_ticket(t) and t.get("type") == "chore" and _company_demo_c_t(t)]
+    elif metric == "feature_exclude_demo_c":
+        result = [row(t) for t in all_feature if _is_pending_ticket(t) and not _company_demo_c_t(t)]
+    elif metric == "feature_with_demo_c":
+        result = [row(t) for t in all_feature if _is_pending_ticket(t) and _company_demo_c_t(t)]
+    elif metric in ("custom_total_rec_amount", "custom_total_due"):
+        # Payment Management custom KPIs (Quarterly period) – show invoice rows in modal
+        from datetime import date as date_cls
+
+        def _parse_amt(val: object) -> int:
+            s = str(val).strip()
+            return int(s) if s.isdigit() else 0
+
+        today = date_cls.today()
+        fy, q = _pa.fy_quarter_key(today)
+        q_start, q_end = _pa.quarter_date_bounds(fy, q)
+
+        try:
+            base_q = (
+                supabase.table("onboarding_client_payment")
+                .select("id, reference_no, company_name, invoice_amount, invoice_date, timestamp, genre, payment_received_date")
+                .limit(5000)
+            )
+            if metric == "custom_total_due":
+                base_q = base_q.is_("payment_received_date", "null")
+            else:
+                base_q = base_q.not_.is_("payment_received_date", "null")
+            pr = base_q.execute()
+            pay_rows = pr.data or []
+        except Exception:
+            pay_rows = []
+
+        for rowp in pay_rows:
+            inv_d = _pa._parse_date(rowp.get("invoice_date")) or _pa._parse_date(rowp.get("timestamp"))
+            if not inv_d or not (q_start <= inv_d <= q_end):
+                continue
+
+            amt = _parse_amt(rowp.get("invoice_amount"))
+            g = (rowp.get("genre") or "").strip().upper()
+            paid_val = rowp.get("payment_received_date")
+            is_paid = paid_val is not None and str(paid_val).strip() != ""
+
+            if metric == "custom_total_rec_amount":
+                # Only genres that contribute to Monthly/Quarterly/Half-Yearly cards
+                if not is_paid or g not in ("M", "Q", "HY"):
+                    continue
+            else:
+                # custom_total_due: only unpaid invoices
+                if is_paid:
+                    continue
+
+            company_name = (rowp.get("company_name") or "").strip() or "Unknown"
+            reference_no = (rowp.get("reference_no") or "").strip() or str(rowp.get("id") or "N/A")
+            status = "Received" if is_paid else "Pending"
+
+            result.append(
+                {
+                    "id": str(rowp.get("id") or ""),
+                    "referenceNo": reference_no,
+                    "title": company_name,
+                    "description": f"Genre: {g or '—'} | Amount: {amt} | Invoice Date: {inv_d.isoformat()}",
+                    "type": "payment",
+                    "company": company_name,
+                    "status": status,
+                }
+            )
     elif metric in ("staging_feature", "staging_chores_bugs"):
         try:
             r = supabase.table("staging_deployments").select("ticket_id").eq("status", "pending").execute()
@@ -2087,6 +2254,37 @@ def dashboard_detail(
                     result = [row(t) for t in staging_tickets if t.get("type") in ("chore", "bug")]
         except Exception:
             pass
+    elif metric == "custom_pending_delegation":
+        # Delegation pending tasks (all users)
+        try:
+            r = (
+                supabase.table("delegation_tasks")
+                .select("id, reference_no, title, status, due_date, delegation_on")
+                .in_("status", ["pending", "in_progress"])
+                .order("due_date", desc=False)
+                .limit(200)
+                .execute()
+            )
+            rows = r.data or []
+        except Exception:
+            rows = []
+
+        for t in rows:
+            reference_no = (t.get("reference_no") or "").strip() or str(t.get("id") or "N/A")
+            due = t.get("due_date") or t.get("delegation_on") or ""
+            due_str = str(due).split("T")[0] if due else ""
+            title = (t.get("title") or "").strip() or "Delegation Task"
+            result.append(
+                {
+                    "id": str(t.get("id") or ""),
+                    "referenceNo": reference_no,
+                    "title": title,
+                    "description": f"Due: {due_str or '—'}",
+                    "type": "delegation",
+                    "company": "—",
+                    "status": t.get("status") or "",
+                }
+            )
     return {"success": True, "metric": metric, "tickets": result, "total": len(result)}
 
 
@@ -8123,6 +8321,7 @@ LEAD_STAGE_ORDER = [
     "brochure",
     "demo_schedule",
     "demo_completed",
+    "google_form",
     "offer_letter",
     "po",
     "performa_invoice",
@@ -8131,6 +8330,7 @@ LEAD_STAGE_ORDER = [
     "setup_data",
     "account_setup",
     "item_setup",
+    "training_stage",
     "first_invoice",
     "first_invoice_payment",
     "final_closing",

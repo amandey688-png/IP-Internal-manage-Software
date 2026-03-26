@@ -144,11 +144,11 @@ export const authApi = {
   },
 
   /**
-   * Check if email exists in Supabase Auth (for in-app forgot password).
+   * Request password reset email (time-limited recovery link).
    */
-  forgotPasswordLookup: async (email: string): Promise<ApiResponse<{ exists: boolean }>> => {
+  forgotPasswordLookup: async (email: string): Promise<ApiResponse<{ message: string }>> => {
     try {
-      const response = await apiClient.post<{ exists: boolean }>('/auth/forgot-password/lookup', { email })
+      const response = await apiClient.post<{ message: string }>('/auth/forgot-password/lookup', { email })
       return { data: response.data, error: undefined }
     } catch (err: any) {
       const rawDetail = err.response?.data?.detail
@@ -159,37 +159,7 @@ export const authApi = {
             ? rawDetail[0]?.msg
             : null) ||
         err.response?.data?.message ||
-        'Could not verify email'
-      return {
-        data: undefined,
-        error: { message: msg, code: err.response?.status?.toString() },
-      }
-    }
-  },
-
-  /**
-   * Set new password after lookup (admin API; no email link).
-   */
-  forgotPasswordComplete: async (
-    email: string,
-    password: string
-  ): Promise<ApiResponse<{ message: string }>> => {
-    try {
-      const response = await apiClient.post<{ message: string }>('/auth/forgot-password/complete', {
-        email,
-        password,
-      })
-      return { data: response.data, error: undefined }
-    } catch (err: any) {
-      const rawDetail = err.response?.data?.detail
-      const msg =
-        (typeof rawDetail === 'string'
-          ? rawDetail
-          : Array.isArray(rawDetail)
-            ? rawDetail[0]?.msg
-            : null) ||
-        err.response?.data?.message ||
-        'Could not update password'
+        'Could not request password reset'
       return {
         data: undefined,
         error: { message: msg, code: err.response?.status?.toString() },
