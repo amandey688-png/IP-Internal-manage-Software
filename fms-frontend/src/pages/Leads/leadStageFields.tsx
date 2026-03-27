@@ -40,11 +40,18 @@ export const STAGE_FIELDS: Record<
   demo_completed: [
     { name: 'demo_status', label: 'Demo Status', type: 'select', options: [{ label: 'Done', value: 'Done' }, { label: 'Not Done', value: 'Not Done' }] },
     { name: 'demo_date', label: 'Demo Date', type: 'date' },
+    { name: 'demo_conducted_by', label: 'Demo Conducted By', type: 'text' },
     { name: 'attendee_names', label: 'Attendee Names', type: 'text' },
     { name: 'video_recorded', label: 'Video Recorded', type: 'select', options: [{ label: 'Yes', value: 'Yes' }, { label: 'No', value: 'No' }] },
     { name: 'video_uploaded', label: 'Video Uploaded', type: 'select', options: [{ label: 'Yes', value: 'Yes' }, { label: 'No', value: 'No' }] },
     { name: 'demo_duration', label: 'Demo Duration', type: 'text' },
     { name: 'interest_shown', label: 'Interest Shown', type: 'text' },
+  ],
+  google_form: [
+    { name: 'google_form_sent', label: 'Google Form Sent?', type: 'select', options: [{ label: 'Yes', value: 'Yes' }, { label: 'No', value: 'No' }] },
+    { name: 'google_form_sent_date', label: 'Google Form Sent Date', type: 'date' },
+    { name: 'google_form_filled', label: 'Google Form Filled', type: 'text' },
+    { name: 'google_form_filled_date', label: 'Google Form Filled Date', type: 'date' },
   ],
   offer_letter: [
     { name: 'offer_letter_sent', label: 'Offer Letter Sent?', type: 'select', options: [{ label: 'Yes', value: 'Yes' }, { label: 'No', value: 'No' }] },
@@ -88,6 +95,11 @@ export const STAGE_FIELDS: Record<
     { name: 'uploaded_on_portal', label: 'Uploaded on Portal?', type: 'select', options: [{ label: 'Yes', value: 'Yes' }, { label: 'No', value: 'No' }] },
     { name: 'upload_date', label: 'Upload Date', type: 'date' },
   ],
+  training_stage: [
+    { name: 'start_date', label: 'Start Date', type: 'date' },
+    { name: 'end_date', label: 'End Date', type: 'date' },
+    { name: 'f_status', label: 'FStatus', type: 'text' },
+  ],
   first_invoice: [
     { name: 'invoice_raised', label: 'Invoice Raised?', type: 'select', options: [{ label: 'Yes', value: 'Yes' }, { label: 'No', value: 'No' }] },
     { name: 'invoice_generated_date', label: 'Invoice Generated Date', type: 'date' },
@@ -97,7 +109,7 @@ export const STAGE_FIELDS: Record<
     { name: 'final_payment_received_date', label: 'Final Payment Received Date', type: 'date' },
   ],
   final_closing: [
-    { name: 'last_contact_date', label: 'Last Contact Date', type: 'date' },
+    { name: 'last_contact_date', label: 'Last Contacted On', type: 'date' },
     { name: 'remark', label: 'Remark', type: 'textarea' },
   ],
 }

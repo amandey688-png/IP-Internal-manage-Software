@@ -1984,7 +1984,9 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     custom_total_due = 0
     custom_pending_delegation = 0
 
-    custom_emails = {"ad@ip.com", "ayush@industryprime.com"}
+    custom_full_emails = {"ad@ip.com", "ayush@industryprime.com"}
+    custom_payment_only_emails = {"ea@industryprime.com"}
+    custom_emails = custom_full_emails | custom_payment_only_emails
     if auth_email in custom_emails:
         try:
             # Current quarter bounds (used for genre split)
@@ -2027,16 +2029,17 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
         except Exception:
             pass
 
-        try:
-            rdel = (
-                supabase.table("delegation_tasks")
-                .select("id", count="exact")
-                .in_("status", ["pending", "in_progress"])
-                .execute()
-            )
-            custom_pending_delegation = rdel.count or len(rdel.data or [])
-        except Exception:
-            custom_pending_delegation = 0
+        if auth_email in custom_full_emails:
+            try:
+                rdel = (
+                    supabase.table("delegation_tasks")
+                    .select("id", count="exact")
+                    .in_("status", ["pending", "in_progress"])
+                    .execute()
+                )
+                custom_pending_delegation = rdel.count or len(rdel.data or [])
+            except Exception:
+                custom_pending_delegation = 0
 
     return {
         "all_tickets": all_tickets,
@@ -2070,6 +2073,8 @@ def dashboard_detail(
     auth: dict = Depends(get_current_user),
 ):
     """Return ticket list for a dashboard metric (clickable card). Same logic as dashboard metrics."""
+    auth_email_detail = (auth.get("email") or "").strip().lower()
+    custom_full_dashboard_emails = {"ad@ip.com", "ayush@industryprime.com"}
     from datetime import timedelta
     now = datetime.utcnow()
     week_ago = now - timedelta(days=7)
@@ -2255,6 +2260,8 @@ def dashboard_detail(
         except Exception:
             pass
     elif metric == "custom_pending_delegation":
+        if auth_email_detail not in custom_full_dashboard_emails:
+            raise HTTPException(403, "Not available for this user")
         # Delegation pending tasks (all users)
         try:
             r = (

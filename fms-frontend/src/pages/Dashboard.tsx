@@ -76,8 +76,14 @@ const metricCardColors = [
 export const Dashboard = () => {
   const navigate = useNavigate()
   const { user } = useAuth()
-  const customDashboardEmails = new Set(['ad@ip.com', 'ayush@industryprime.com'])
-  const isCustomDashboardUser = (user?.email || '').toLowerCase() ? customDashboardEmails.has(user?.email.toLowerCase() || '') : false
+  const emailLower = (user?.email || '').trim().toLowerCase()
+  /** Full custom KPIs: payments + delegation */
+  const customDashboardFullEmails = new Set(['ad@ip.com', 'ayush@industryprime.com'])
+  /** Payment KPIs only (Total Rec Amount + Total Due) */
+  const customDashboardPaymentOnlyEmails = new Set(['ea@industryprime.com'])
+  const isCustomDashboardFullUser = emailLower ? customDashboardFullEmails.has(emailLower) : false
+  const isCustomDashboardPaymentOnlyUser = emailLower ? customDashboardPaymentOnlyEmails.has(emailLower) : false
+  const isCustomDashboardUser = isCustomDashboardFullUser || isCustomDashboardPaymentOnlyUser
   const [loading, setLoading] = useState(true)
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
   const [allFetchedTickets, setAllFetchedTickets] = useState<Ticket[]>([])
@@ -286,28 +292,31 @@ export const Dashboard = () => {
     { title: 'Feature with Demo C', metricKey: 'feature_with_demo_c', value: Number(safeMetrics.feature_with_demo_c) ?? 0, icon: <RocketOutlined /> },
   ]
 
-  const customMetricCards = isCustomDashboardUser
-    ? [
-        {
-          title: 'Total Rec Ammount',
-          metricKey: 'custom_total_rec_amount',
-          value: Number(customReceivedTotal) || 0,
-          icon: <FileTextOutlined />,
-        },
-        {
-          title: 'Total Due',
-          metricKey: 'custom_total_due',
-          value: Number(safeMetrics.custom_total_due) || 0,
-          icon: <WarningOutlined />,
-        },
-        {
-          title: 'Total Pending Delegation',
-          metricKey: 'custom_pending_delegation',
-          value: Number(safeMetrics.custom_pending_delegation) || 0,
-          icon: <CheckCircleOutlined />,
-        },
-      ]
-    : []
+  const paymentOnlyCards = [
+    {
+      title: 'Total Rec Ammount',
+      metricKey: 'custom_total_rec_amount',
+      value: Number(customReceivedTotal) || 0,
+      icon: <FileTextOutlined />,
+    },
+    {
+      title: 'Total Due',
+      metricKey: 'custom_total_due',
+      value: Number(safeMetrics.custom_total_due) || 0,
+      icon: <WarningOutlined />,
+    },
+  ]
+  const delegationCard = {
+    title: 'Total Pending Delegation',
+    metricKey: 'custom_pending_delegation',
+    value: Number(safeMetrics.custom_pending_delegation) || 0,
+    icon: <CheckCircleOutlined />,
+  }
+  const customMetricCards = isCustomDashboardPaymentOnlyUser
+    ? paymentOnlyCards
+    : isCustomDashboardFullUser
+      ? [...paymentOnlyCards, delegationCard]
+      : []
 
   const metricCards = [...baseMetricCards, ...customMetricCards]
 

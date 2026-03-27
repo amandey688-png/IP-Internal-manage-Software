@@ -68,7 +68,8 @@ export const LeadDetailPage = () => {
     setStageModal({ slug, title })
     const data = lead?.stage_data?.[slug]?.data as Record<string, unknown> | undefined
     const initial = getInitialValuesFromData(data, slug)
-    if (slug === 'demo_completed' && user?.full_name) (initial as Record<string, string>)['demo_conducted_by'] = user.full_name
+    if (slug === 'demo_completed' && user?.full_name && !(initial as Record<string, string>)['demo_conducted_by'])
+      (initial as Record<string, string>)['demo_conducted_by'] = user.full_name
     form.setFieldsValue(initial)
   }
 
@@ -76,7 +77,7 @@ export const LeadDetailPage = () => {
     if (!id || !lead || !stageModal || !canEditLead) return
     form.validateFields().then((values) => {
       const payload = getStageFormValuesForPayload(values, stageModal.slug)
-      if (stageModal.slug === 'demo_completed' && user?.full_name)
+      if (stageModal.slug === 'demo_completed' && user?.full_name && !payload['demo_conducted_by'])
         payload['demo_conducted_by'] = user.full_name
       setSubmitLoading(true)
       leadsApi
