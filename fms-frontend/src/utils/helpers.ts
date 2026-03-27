@@ -368,6 +368,7 @@ export const SECTION_KEY_TO_ROUTE: Record<string, string> = {
   completed_feature: '/tickets?section=completed-feature',
   solution: '/tickets?section=solutions',
   task: ROUTES.CHECKLIST,
+  success_dashboard: ROUTES.SUCCESS_DASHBOARD,
   success_performance: ROUTES.SUCCESS_PERFORMANCE,
   success_comp_perform: ROUTES.SUCCESS_COMP_PERFORM,
   client_to_lead: ROUTES.CLIENT_TO_LEAD,
@@ -467,6 +468,7 @@ const COMM_LABELS: Record<string, string> = {
   phone: 'Phone',
   mail: 'Mail',
   whatsapp: 'WhatsApp',
+  mom: 'MOM',
 }
 
 function getTypeLabel(type?: string): string {
