@@ -40,6 +40,7 @@ const getCommIcon = (v: string) => {
   if (v === 'phone') return <PhoneOutlined title="Phone" />
   if (v === 'mail') return <MailOutlined title="Mail" />
   if (v === 'whatsapp') return <MessageOutlined title="WhatsApp" />
+  if (v === 'mom') return <MessageOutlined title="MOM" />
   return '-'
 }
 

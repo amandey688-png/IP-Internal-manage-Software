@@ -387,6 +387,7 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
               { value: 'phone', label: 'Phone' },
               { value: 'mail', label: 'Mail' },
               { value: 'whatsapp', label: 'WhatsApp' },
+              { value: 'mom', label: 'MOM' },
             ]}
           />
         </Form.Item>
