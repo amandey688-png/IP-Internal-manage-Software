@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import {
   Card,
   Typography,
@@ -20,6 +20,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { useRole } from '../../hooks/useRole'
 import { delegationApi, type DelegationTask } from '../../api/delegation'
 import { uploadAttachment } from '../../api/upload'
+import { PrintExport } from '../../components/common/PrintExport'
 
 const { Title, Text } = Typography
 const { Dragger } = Upload
@@ -87,6 +88,44 @@ export const DelegationPage = () => {
   const displayTasks = referenceNoFilter && referenceNoFilter !== '__all__'
     ? tasks.filter((t) => t.reference_no === referenceNoFilter)
     : tasks
+
+  const delegationExportData = useMemo(() => {
+    const fmt = (d: string | undefined) => (d ? dayjs(d).format('DD/MM/YYYY') : '')
+    const rows = displayTasks.map((t) => ({
+      reference_no: t.reference_no || '',
+      task_name: t.title || '',
+      delegation_on: fmt(t.delegation_on),
+      submission_date: fmt(t.submission_date),
+      document: t.has_document ? t.has_document.charAt(0).toUpperCase() + t.has_document.slice(1) : '',
+      submitted_attachment: t.document_url || '',
+      submitted_by: t.submitted_by_name || (t.submitted_by ? String(t.submitted_by).slice(0, 8) : ''),
+      status: t.status || 'pending',
+    }))
+    return {
+      columns: [
+        { key: 'reference_no', label: 'Reference No' },
+        { key: 'task_name', label: 'Task Name' },
+        { key: 'delegation_on', label: 'Delegation On' },
+        { key: 'submission_date', label: 'Submission Date' },
+        { key: 'document', label: 'Document' },
+        { key: 'submitted_attachment', label: 'Submitted Attachment' },
+        { key: 'submitted_by', label: 'Submitted By' },
+        { key: 'status', label: 'Status' },
+      ],
+      rows,
+    }
+  }, [displayTasks])
+
+  const delegationExportFilename = useMemo(() => {
+    const parts = ['delegation', statusFilter]
+    if (referenceNoFilter && referenceNoFilter !== '__all__') parts.push(referenceNoFilter.replace(/[^a-zA-Z0-9_-]+/g, '_'))
+    if (canManage && userFilter && userFilter !== '__all__') {
+      const u = users.find((x) => x.id === userFilter)
+      if (u?.full_name) parts.push(u.full_name.replace(/\s+/g, '_').slice(0, 40))
+    }
+    return parts.join('_')
+  }, [statusFilter, referenceNoFilter, userFilter, canManage, users])
+
   const referenceNoOptions = [
     { value: '__all__', label: 'All' },
     ...Array.from(new Set(tasks.map((t) => t.reference_no).filter(Boolean)))
@@ -351,6 +390,11 @@ export const DelegationPage = () => {
         <Text type="secondary" style={{ display: 'block', marginTop: 8 }}>
           Manage delegation tasks. By default pending tasks are shown.
         </Text>
+        <PrintExport
+          pageTitle="Delegation"
+          exportData={delegationExportData}
+          exportFilename={delegationExportFilename}
+        />
         <Table
           dataSource={displayTasks}
           columns={columns}

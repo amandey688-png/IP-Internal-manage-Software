@@ -108,6 +108,10 @@ export const TicketList = () => {
   /** Chores & Bugs only: filter by Type of Request (chore | bug) */
   const [typeOfRequestFilter, setTypeOfRequestFilter] = useState<string>('')
 
+  /** Safety guard: Chores & Bugs sections must never show Feature rows. */
+  const keepOnlyChoresAndBugs = (list: Ticket[]): Ticket[] =>
+    list.filter((t) => t.type === 'chore' || t.type === 'bug')
+
   useEffect(() => {
     if (sectionFromUrl !== 'chores-bugs') setStatus2Filter('')
   }, [sectionFromUrl])
@@ -244,8 +248,12 @@ export const TicketList = () => {
         sort_order: filters.sort_order,
       })
       const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
-      setTickets(Array.isArray(raw) ? raw : [])
-      setTotal((response as { total?: number })?.total ?? 0)
+      let list = Array.isArray(raw) ? raw : []
+      if (isChoresBugs) {
+        list = keepOnlyChoresAndBugs(list)
+      }
+      setTickets(list)
+      setTotal(isChoresBugs ? list.length : ((response as { total?: number })?.total ?? 0))
     } catch (error) {
       console.error('Failed to fetch tickets:', error)
     } finally {
@@ -284,9 +292,13 @@ export const TicketList = () => {
         sort_order: filters.sort_order,
       })
       const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
-      const pageTickets: Ticket[] = Array.isArray(raw) ? raw : []
+      const rawTickets: Ticket[] = Array.isArray(raw) ? raw : []
+      let pageTickets: Ticket[] = rawTickets
+      if (isChoresBugs) {
+        pageTickets = keepOnlyChoresAndBugs(pageTickets)
+      }
       allTickets.push(...pageTickets)
-      hasMore = pageTickets.length === limit
+      hasMore = rawTickets.length === limit
       currentPage++
     }
     return allTickets

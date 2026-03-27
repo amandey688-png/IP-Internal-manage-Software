@@ -127,18 +127,6 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
     }
   }
 
-  const handleApprovalToggle = async () => {
-    if (!ticketId || !ticket) return
-    const next = ticket.approval_status === 'approved' ? 'unapproved' : 'approved'
-    try {
-      await ticketsApi.update(ticketId, { approval_status: next })
-      setTicket((t) => (t ? { ...t, approval_status: next } : null))
-      onUpdate?.()
-    } catch {
-      message.error('Failed to update approval')
-    }
-  }
-
   const handleApprove = async () => {
     if (!ticketId) return
     setApprovalActionLoading(true)
@@ -238,11 +226,6 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
                     <div style={{ marginTop: 4 }}>
                       <Text type="secondary">Unapproved at: {formatDateTable(ticket.unapproval_actual_at)}</Text>
                     </div>
-                  )}
-                  {!readOnly && !approvalMode && ticket.approval_status != null && (
-                    <Button type="link" size="small" onClick={handleApprovalToggle} style={{ marginLeft: 8 }}>
-                      Toggle
-                    </Button>
                   )}
                 </Descriptions.Item>
                 {approvalMode && (!isUser || isMasterAdmin) && (ticket.approval_status == null || ticket.approval_status === undefined) && (
