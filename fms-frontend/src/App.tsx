@@ -22,6 +22,7 @@ import { ChecklistPage } from "./pages/Task/ChecklistPage"
 import { DelegationPage } from "./pages/Task/DelegationPage"
 import { PerformanceMonitoringPage } from "./pages/Success/PerformanceMonitoringPage"
 import { CompPerformPage } from "./pages/Success/CompPerformPage"
+import { DashboardPage as SuccessDashboardPage } from "./pages/Success/DashboardPage"
 import { UserList } from "./pages/Users/UserList"
 import { SettingsPage } from "./pages/Settings/SettingsPage"
 import { ApprovalConfirmPage } from "./pages/Approval/ApprovalConfirmPage"
@@ -46,7 +47,9 @@ function AppTitle() {
       [ROUTES.REGISTER]: "Register",
       [ROUTES.DASHBOARD]: "Dashboard",
       [ROUTES.DASHBOARD_KPI]: "Dashboard - KPI",
+      [ROUTES.SUCCESS_DASHBOARD]: "Success Dashboard",
       [ROUTES.SUPPORT_DASHBOARD]: "Support Dashboard",
+      [ROUTES.SU_DASH]: "Su -Dash",
       [ROUTES.TICKETS]: "Tickets",
       [ROUTES.STAGING]: "Staging",
       [ROUTES.CHECKLIST]: "Checklist",
@@ -166,6 +169,19 @@ function App() {
             />
 
             <Route
+              path={ROUTES.SU_DASH}
+              element={
+                <ProtectedRoute sectionKeys={["support_dashboard"]}>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <SuccessDashboardPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
               path={ROUTES.TICKETS}
               element={
                 <ProtectedRoute sectionKeys={[...TICKET_ROUTE_SECTION_KEYS]}>
@@ -228,6 +244,19 @@ function App() {
                 <ProtectedRoute sectionKeys={["task"]}>
                   <AppLayout>
                     <DelegationPage />
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path={ROUTES.SUCCESS_DASHBOARD}
+              element={
+                <ProtectedRoute sectionKeys={["success_performance"]}>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <DashboardKPIPage forceOpen defaultPerson="Shreyasi" />
+                    </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>
               }

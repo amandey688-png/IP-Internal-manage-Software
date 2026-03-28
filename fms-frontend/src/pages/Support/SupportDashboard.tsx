@@ -11,10 +11,25 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supportDashboardApi, type SupportDashboardStats, type WeekData } from '../../api/supportDashboard'
 import { LoadingSpinner } from '../../components/common/LoadingSpinner'
-import { formatDateWeekly } from '../../utils/helpers'
+import { formatDateWeekly, truncateTitleDescCell } from '../../utils/helpers'
 import { ROUTES } from '../../utils/constants'
 
 const { Title, Text } = Typography
+
+function renderModalTitleDescription(_: unknown, r: Record<string, unknown>) {
+  const t = String(r.title ?? '').trim()
+  const d = String(r.description ?? '').trim()
+  if (!t && !d) return <span>-</span>
+  const tShow = t ? truncateTitleDescCell(t) : ''
+  const dShow = d ? truncateTitleDescCell(d) : ''
+  return (
+    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: 180 }}>
+      {tShow ? <strong>{tShow}</strong> : null}
+      {tShow && dShow ? '\n' : null}
+      {dShow ? <span style={{ fontWeight: 'normal' }}>{dShow}</span> : null}
+    </div>
+  )
+}
 
 const weekBoxColors = [
   { bg: 'linear-gradient(135deg, #4CAF50, #45a049)', border: '#ffc107' },
@@ -436,18 +451,7 @@ export const SupportDashboard = () => {
                 title: 'Title & Description',
                 key: 'titleDescription',
                 ellipsis: false,
-                render: (_: unknown, r: Record<string, unknown>) => {
-                  const t = String(r.title ?? '').trim()
-                  const d = String(r.description ?? '').trim()
-                  return (
-                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: 180 }}>
-                      {t ? <strong>{t}</strong> : null}
-                      {t && d ? '\n' : null}
-                      {d ? <span style={{ fontWeight: 'normal' }}>{d}</span> : null}
-                      {!t && !d ? '-' : null}
-                    </div>
-                  )
-                },
+                render: renderModalTitleDescription,
               },
               {
                 title: 'Req Per',
@@ -598,18 +602,7 @@ export const SupportDashboard = () => {
                     title: 'Title & Description',
                     key: 'titleDescription',
                     width: 380,
-                    render: (_: unknown, r: Record<string, unknown>) => {
-                      const t = String(r.title ?? '').trim()
-                      const d = String(r.description ?? '').trim()
-                      if (!t && !d) return <span>-</span>
-                      return (
-                        <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: 320 }}>
-                          {t && <strong>{t}</strong>}
-                          {t && d && '\n'}
-                          {d}
-                        </div>
-                      )
-                    },
+                    render: renderModalTitleDescription,
                   },
                   {
                     title: 'Reference',
@@ -705,18 +698,7 @@ export const SupportDashboard = () => {
                 title: 'Title & Description',
                 key: 'titleDescription',
                 ellipsis: false,
-                render: (_: unknown, r: Record<string, unknown>) => {
-                  const t = String(r.title ?? '').trim()
-                  const d = String(r.description ?? '').trim()
-                  return (
-                    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: 200 }}>
-                      {t ? <strong>{t}</strong> : null}
-                      {t && d ? '\n' : null}
-                      {d ? <span style={{ fontWeight: 'normal' }}>{d}</span> : null}
-                      {!t && !d ? '-' : null}
-                    </div>
-                  )
-                },
+                render: renderModalTitleDescription,
               },
               {
                 title: 'Reference',

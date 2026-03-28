@@ -18,7 +18,17 @@ import { supportApi } from '../../api/support'
 import { TicketDetailDrawer } from '../../components/tickets/TicketDetailDrawer'
 import { ChoresBugsDetailDrawer } from '../../components/tickets/ChoresBugsDetailDrawer'
 import { PrintExport } from '../../components/common/PrintExport'
-import { formatDateTable, formatDuration, formatReplySla, getChoresBugsCurrentStage, getFeatureCurrentStage, getTicketTimeDelayDisplay, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
+import {
+  formatDateTable,
+  formatDuration,
+  formatReplySla,
+  getChoresBugsCurrentStage,
+  getFeatureCurrentStage,
+  getTicketTimeDelayDisplay,
+  TICKET_EXPORT_COLUMNS,
+  buildTicketExportRow,
+  truncateTitleDescCell,
+} from '../../utils/helpers'
 import { useRole } from '../../hooks/useRole'
 import type { Ticket } from '../../api/tickets'
 import type { Company } from '../../api/support'
@@ -47,14 +57,6 @@ const getCommIcon = (v: string) => {
 const truncate = (text: string | undefined, len = 40) => {
   if (!text) return '-'
   return text.length > len ? `${text.slice(0, len)}...` : text
-}
-
-/** Truncate to max words (for Description column: show 25 words in table; full details on ticket click). */
-const truncateWords = (text: string | undefined, maxWords = 25) => {
-  if (!text || !String(text).trim()) return '-'
-  const words = String(text).trim().split(/\s+/)
-  if (words.length <= maxWords) return text
-  return words.slice(0, maxWords).join(' ') + '...'
 }
 
 export const TicketList = () => {
@@ -552,7 +554,7 @@ export const TicketList = () => {
       key: 'title',
       width: 200,
       ellipsis: false,
-      render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
+      render: (v: string) => <span style={wrapStyle}>{truncateTitleDescCell(v || undefined)}</span>,
     },
     {
       title: 'Description',
@@ -560,7 +562,7 @@ export const TicketList = () => {
       key: 'description',
       width: 220,
       ellipsis: false,
-      render: (v: string) => <span style={wrapStyle} title={v || undefined}>{truncateWords(v, 25)}</span>,
+      render: (v: string) => <span style={wrapStyle}>{truncateTitleDescCell(v || undefined)}</span>,
     },
     {
       title: 'Type of Request',

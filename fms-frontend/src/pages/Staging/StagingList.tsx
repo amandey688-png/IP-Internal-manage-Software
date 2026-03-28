@@ -3,7 +3,14 @@ import { useSearchParams } from 'react-router-dom'
 import { Table, Card, Typography, Tag, Select, Space, Input } from 'antd'
 import { PhoneOutlined, MailOutlined, MessageOutlined, LinkOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
-import { formatDateTable, formatReplySla, getStagingCurrentStage, TICKET_EXPORT_COLUMNS, buildTicketExportRow } from '../../utils/helpers'
+import {
+  formatDateTable,
+  formatReplySla,
+  getStagingCurrentStage,
+  TICKET_EXPORT_COLUMNS,
+  buildTicketExportRow,
+  truncateTitleDescCell,
+} from '../../utils/helpers'
 import type { Ticket } from '../../api/tickets'
 import { StagingDetailDrawer } from '../../components/tickets/StagingDetailDrawer'
 import { PrintExport } from '../../components/common/PrintExport'
@@ -111,7 +118,7 @@ const stagingTicketColumns = [
     key: 'title',
     width: 200,
     ellipsis: false,
-    render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
+    render: (v: string) => <span style={wrapStyle}>{truncateTitleDescCell(v || undefined)}</span>,
   },
   {
     title: 'Description',
@@ -119,7 +126,7 @@ const stagingTicketColumns = [
     key: 'description',
     width: 220,
     ellipsis: false,
-    render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
+    render: (v: string) => <span style={wrapStyle}>{truncateTitleDescCell(v || undefined)}</span>,
   },
   {
     title: 'Type of Request',

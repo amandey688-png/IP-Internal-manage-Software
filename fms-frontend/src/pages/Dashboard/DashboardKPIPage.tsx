@@ -26,6 +26,13 @@ import { weekOfMonth } from './kpiWeekUtils'
 
 const { Title, Text } = Typography
 
+interface DashboardKPIPageProps {
+  /** Open dashboard directly without dashboard chooser cards. */
+  forceOpen?: boolean
+  /** Default person when forceOpen is enabled. */
+  defaultPerson?: DashboardKpiPerson
+}
+
 const DASHBOARD_OPTIONS: { key: DashboardKpiPerson; label: string }[] = [
   { key: 'Shreyasi', label: 'Shreyasi Dashboard' },
   { key: 'Rimpa', label: 'Rimpa Dashboard' },
@@ -49,8 +56,8 @@ const getPerformanceLevel = (value?: number) => {
   return { label: 'Low', background: 'rgba(220,53,69,0.15)', color: '#DC3545' }
 }
 
-export const DashboardKPIPage = () => {
-  const [selectedPerson, setSelectedPerson] = useState<DashboardKpiPerson | null>(null)
+export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi' }: DashboardKPIPageProps) => {
+  const [selectedPerson, setSelectedPerson] = useState<DashboardKpiPerson | null>(forceOpen ? defaultPerson : null)
   const [month, setMonth] = useState<string>(MONTHS[dayjs().month()])
   const [year, setYear] = useState<string>(String(dayjs().year()))
   const [week, setWeek] = useState<string>('week 2')
@@ -96,7 +103,7 @@ export const DashboardKPIPage = () => {
   }, [selectedPerson, loadData])
 
   // List view: show Shreyasi & Rimpa cards
-  if (selectedPerson === null) {
+  if (!forceOpen && selectedPerson === null) {
     return (
       <div className="dashboard-kpi-page">
         <div className="dashboard-kpi-hero">
@@ -157,11 +164,13 @@ export const DashboardKPIPage = () => {
   return (
     <div className="dashboard-kpi-page">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-        <Space wrap>
-          <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => setSelectedPerson(null)}>
-            Back to dashboards
-          </Button>
-        </Space>
+        {!forceOpen && (
+          <Space wrap>
+            <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => setSelectedPerson(null)}>
+              Back to dashboards
+            </Button>
+          </Space>
+        )}
 
         <Title level={4} style={{ marginBottom: 0 }}>
           {selectedPerson} Dashboard
