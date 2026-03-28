@@ -38,6 +38,19 @@ export const formatDateWeekly = (date: string | Date | null | undefined): string
   return `${day}/${month}/${year} ${hr}:${min}`
 }
 
+/** Max characters shown per Title / Description cell in Support ticket tables; open ticket for full text. */
+export const TICKET_TABLE_TITLE_DESC_MAX_CHARS = 20
+
+export function truncateTitleDescCell(
+  text: string | undefined,
+  maxChars = TICKET_TABLE_TITLE_DESC_MAX_CHARS
+): string {
+  if (!text || !String(text).trim()) return '-'
+  const s = String(text).trim()
+  if (s.length <= maxChars) return s
+  return `${s.slice(0, maxChars)}...`
+}
+
 /** Format actual_time_seconds to human readable (e.g. 2h 30m) */
 export const formatDuration = (seconds: number | null | undefined): string => {
   if (seconds == null || seconds < 0) return '-'

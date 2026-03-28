@@ -1,0 +1,134 @@
+.su-dash-page {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 8px 0 24px;
+}
+
+.su-dash-toolbar {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 14px;
+  background: #f6f4dd;
+  border: 1px solid #e7e5c8;
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.su-dash-title {
+  margin: 0 !important;
+  text-align: center;
+  font-weight: 700 !important;
+  color: #2b2b2b !important;
+}
+
+.su-loading-wrap {
+  background: #fff;
+  border: 1px solid #ececec;
+  border-radius: 10px;
+  padding: 20px;
+}
+
+.su-week-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.su-week-card {
+  background: #f2f2ea;
+  border: 1px solid #d8d8d2;
+  border-radius: 8px;
+  overflow: hidden;
+  min-height: 220px;
+}
+
+.su-week-card__header {
+  background: #97d39a;
+  color: #153818;
+  font-weight: 700;
+  text-align: center;
+  padding: 6px 10px;
+  letter-spacing: 0.3px;
+}
+
+.su-table-wrap {
+  padding: 8px;
+}
+
+.su-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  background: #fff;
+}
+
+.su-table th,
+.su-table td {
+  border: 1px solid #e8e8e8;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: #2f2f2f;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.su-table--compact th {
+  background: #f0f4da;
+  font-weight: 700;
+}
+
+.su-main-table-card {
+  background: #fff;
+  border: 1px solid #dddddd;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.su-main-table-scroll {
+  max-height: 380px;
+  overflow: auto;
+}
+
+.su-table--main thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #ffbf00;
+  color: #2b2b2b;
+  font-weight: 700;
+}
+
+.su-table--main tbody tr:hover {
+  background: #faf7e3;
+}
+
+.su-empty-cell {
+  padding: 18px 8px;
+  text-align: center;
+  color: #8b8b8b;
+  font-size: 13px;
+}
+
+.su-empty-cell--large {
+  height: 280px;
+}
+
+@media (max-width: 1200px) {
+  .su-week-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .su-dash-title {
+    text-align: center;
+  }
+}
+
+@media (max-width: 700px) {
+  .su-week-grid {
+    grid-template-columns: 1fr;
+  }
+}

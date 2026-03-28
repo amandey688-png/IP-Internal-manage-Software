@@ -32,7 +32,7 @@ const isTaskPage = (pathname: string) =>
   pathname === ROUTES.CHECKLIST || pathname === ROUTES.DELEGATION
 
 const isSuccessPage = (pathname: string) =>
-  pathname === ROUTES.SUCCESS_PERFORMANCE || pathname === ROUTES.SUCCESS_COMP_PERFORM
+  pathname === ROUTES.SUCCESS_DASHBOARD || pathname === ROUTES.SUCCESS_PERFORMANCE || pathname === ROUTES.SUCCESS_COMP_PERFORM || pathname === ROUTES.SU_DASH
 
 const isClientToLeadPage = (pathname: string) =>
   pathname === ROUTES.LEADS || pathname.startsWith(ROUTES.LEADS + '/') || pathname === ROUTES.LEADS_IMPORT
@@ -112,6 +112,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   ]
 
   const successItems: MenuProps['items'] = [
+    { key: ROUTES.SU_DASH, icon: <DashboardOutlined />, label: <Link to={ROUTES.SU_DASH} style={linkStyle}>Su -Dash</Link>, sectionKey: 'success_performance' },
     { key: ROUTES.SUCCESS_PERFORMANCE, icon: <LineChartOutlined />, label: <Link to={ROUTES.SUCCESS_PERFORMANCE} style={linkStyle}>Performance Monitoring</Link>, sectionKey: 'success_performance' },
     { key: ROUTES.SUCCESS_COMP_PERFORM, icon: <LineChartOutlined />, label: <Link to={ROUTES.SUCCESS_COMP_PERFORM} style={linkStyle}>Comp- Perform</Link>, sectionKey: 'success_comp_perform' },
   ]

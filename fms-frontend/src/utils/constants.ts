@@ -96,6 +96,7 @@ export const ROUTES = {
   DASHBOARD: '/dashboard',
   DASHBOARD_KPI: '/dashboard/kpi',
   SUPPORT_DASHBOARD: '/support/dashboard',
+  SU_DASH: '/success/su-dash',
   TICKETS: '/tickets',
   TICKET_DETAIL: '/tickets/:id',
   SOLUTIONS: '/solutions/:ticketId',
@@ -104,6 +105,7 @@ export const ROUTES = {
   CHECKLIST: '/task/checklist',
   DELEGATION: '/task/delegation',
   /** Success module */
+  SUCCESS_DASHBOARD: '/success/dashboard',
   SUCCESS_PERFORMANCE: '/success/performance',
   SUCCESS_COMP_PERFORM: '/success/comp-perform',
   /** Client to Lead module */
