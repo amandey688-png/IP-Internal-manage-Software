@@ -53,42 +53,94 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     return () => document.removeEventListener('visibilitychange', onVisibilityChange)
   }, [token, user, doProactiveRefresh])
 
-  // Initialize auth state from storage
+  // Initialize auth state from storage (sessionStorage survives same-tab refresh; cleared when browser session ends)
   useEffect(() => {
     const initAuth = async () => {
       const storedToken = storage.getToken()
       const storedUser = storage.getUser()
 
-      if (storedToken && storedUser) {
-        setToken(storedToken)
-        setUser(storedUser)
+      if (!storedToken || !storedUser) {
+        setIsLoading(false)
+        return
+      }
 
-        // Verify token is still valid by fetching current user (or refresh will run on 401)
-        try {
-          const response = await authApi.getCurrentUser()
-          if (response.data) {
-            if (response.data.is_active === false) {
-              storage.clear()
-              setToken(null)
-              setUser(null)
-            } else {
-              setUser(response.data)
-              storage.setUser(response.data)
-              // Sync token state (interceptor may have refreshed and updated storage)
-              const currentToken = storage.getToken()
-              if (currentToken) setToken(currentToken)
-            }
-          } else {
+      setToken(storedToken)
+      setUser(storedUser)
+
+      try {
+        const response = await authApi.getCurrentUser()
+        if (response.data) {
+          if (response.data.is_active === false) {
             storage.clear()
             setToken(null)
             setUser(null)
+          } else {
+            setUser(response.data)
+            storage.setUser(response.data)
+            const currentToken = storage.getToken()
+            if (currentToken) setToken(currentToken)
           }
-        } catch (error) {
-          // Token invalid and refresh failed (or no refresh token); clear storage
+          setIsLoading(false)
+          return
+        }
+
+        const code = response.error?.code
+        const msg = (response.error?.message || '').toLowerCase()
+
+        const isNetworkOrUnreachable =
+          code === 'NETWORK_ERROR' ||
+          !code ||
+          msg.includes('network error') ||
+          msg.includes('timeout')
+
+        const isTransientServer =
+          code === '503' || code === '502' || code === '504' || (code?.startsWith('5') ?? false)
+
+        if (isNetworkOrUnreachable || isTransientServer) {
+          // Keep session: refresh/F5 must not log the user out when the API is briefly unreachable
+          setIsLoading(false)
+          return
+        }
+
+        if (code === '403') {
+          storage.clear()
+          setToken(null)
+          setUser(null)
+          setIsLoading(false)
+          return
+        }
+
+        if (code === '401') {
+          const refreshed = await authApi.refresh()
+          if (refreshed?.access_token) {
+            storage.setToken(refreshed.access_token)
+            if (refreshed.refresh_token) storage.setRefreshToken(refreshed.refresh_token)
+            setToken(refreshed.access_token)
+            const retry = await authApi.getCurrentUser()
+            if (retry.data && retry.data.is_active !== false) {
+              setUser(retry.data)
+              storage.setUser(retry.data)
+              const ct = storage.getToken()
+              if (ct) setToken(ct)
+              setIsLoading(false)
+              return
+            }
+          }
+          storage.clear()
+          setToken(null)
+          setUser(null)
+          setIsLoading(false)
+          return
+        }
+
+        if (code === '404') {
           storage.clear()
           setToken(null)
           setUser(null)
         }
+        // Other errors: keep cached session so a stray API issue does not force logout on reload
+      } catch {
+        // Unexpected: keep stored session
       }
 
       setIsLoading(false)

@@ -8,6 +8,7 @@ import { draftsApi } from '../../api/drafts'
 import { uploadAttachment } from '../../api/upload'
 import { useAuth } from '../../hooks/useAuth'
 import type { Company, Page, Division } from '../../api/support'
+import { dedupeCompaniesForSelect } from '../../utils/companiesDedupe'
 const { TextArea } = Input
 const { Dragger } = Upload
 
@@ -117,7 +118,10 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
   useEffect(() => {
     if (open) {
       setAttachmentUrl(null)
-      supportApi.getCompanies().then(setCompanies).catch(() => setCompanies([]))
+      supportApi
+        .getCompanies()
+        .then((list) => setCompanies(dedupeCompaniesForSelect(list)))
+        .catch(() => setCompanies([]))
       supportApi.getPages().then(setPages).catch(() => setPages([]))
       form.setFieldsValue({ submitted_by: user?.full_name ?? '' })
       skipDraftSaveRef.current = true

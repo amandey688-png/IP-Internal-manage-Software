@@ -202,11 +202,22 @@ export const authApi = {
       const response = await apiClient.get<User>('/users/me')
       return { data: response.data, error: undefined }
     } catch (err: any) {
+      const status = err.response?.status
+      const noResponse = !err.response
+      const isNetwork =
+        noResponse &&
+        (err.code === 'ERR_NETWORK' ||
+          err.code === 'ECONNREFUSED' ||
+          err.code === 'ECONNABORTED' ||
+          err.message === 'Network Error')
       return {
         data: undefined,
         error: {
-          message: err.response?.data?.detail || 'Failed to get user',
-          code: err.response?.status?.toString(),
+          message:
+            (typeof err.response?.data?.detail === 'string'
+              ? err.response.data.detail
+              : err.response?.data?.message) || err.message || 'Failed to get user',
+          code: isNetwork ? 'NETWORK_ERROR' : status?.toString(),
         },
       }
     }
