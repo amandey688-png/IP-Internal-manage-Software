@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, DatePicker, Select, Table, Typography, message } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
@@ -9,6 +9,7 @@ import './PendingPaymentDetailsPage.css'
 
 const { Title } = Typography
 const { RangePicker } = DatePicker
+const REFRESH_INTERVAL_MS = 30000
 
 type PendingPaymentRow = {
   id: string
@@ -45,14 +46,20 @@ export function PendingPaymentDetailsPage() {
   const [loading, setLoading] = useState(false)
   const [setupError, setSetupError] = useState<string | null>(null)
   const [rows, setRows] = useState<PendingPaymentRow[]>([])
+  const inFlightRef = useRef(false)
 
+  // Default: wide range so "Pending Payment Details" shows all pending rows.
+  // User can still narrow it using the picker.
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>([
-    dayjs().startOf('month'),
-    dayjs().endOf('month'),
+    dayjs('2000-01-01').startOf('day'),
+    dayjs('2099-12-31').endOf('day'),
   ])
   const [companyFilter, setCompanyFilter] = useState<string>('')
 
   const fetchRows = useCallback(async () => {
+    if (inFlightRef.current) return
+    inFlightRef.current = true
+    // Prevent overlapping requests when interval + visibility trigger fire together.
     setLoading(true)
     setSetupError(null)
     try {
@@ -64,11 +71,30 @@ export function PendingPaymentDetailsPage() {
       setRows([])
     } finally {
       setLoading(false)
+      inFlightRef.current = false
     }
   }, [])
 
   useEffect(() => {
     fetchRows()
+  }, [fetchRows])
+
+  useEffect(() => {
+    // Real-time feel: poll + refresh when tab becomes visible.
+    const id = window.setInterval(() => {
+      // Avoid hammering while user is typing/filtering; keep it simple.
+      fetchRows()
+    }, REFRESH_INTERVAL_MS)
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') fetchRows()
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+
+    return () => {
+      window.clearInterval(id)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [fetchRows])
 
   const companyOptions = useMemo(() => {
@@ -120,13 +146,14 @@ export function PendingPaymentDetailsPage() {
     return filteredRows.reduce((sum, r) => sum + parseNum(r.invoice_amount), 0)
   }, [filteredRows])
 
-  const columns: ColumnsType<PendingPaymentRow & { sr: number }> = [
+  const columns: ColumnsType<PendingPaymentRow> = [
     {
-      title: 'S.No',
-      key: 'sr',
-      width: 70,
-      align: 'center',
-      render: (_, __, idx) => idx + 1,
+      title: 'Reference No',
+      dataIndex: 'reference_no',
+      key: 'reference_no',
+      width: 200,
+      ellipsis: true,
+      render: (v) => v || '-',
     },
     {
       title: 'Company Name',
@@ -175,7 +202,7 @@ export function PendingPaymentDetailsPage() {
     },
   ]
 
-  const tableData = filteredRows.map((r, idx) => ({ ...r, sr: idx + 1 }))
+  const tableData = filteredRows
 
   return (
     <div className="ppd-page">
