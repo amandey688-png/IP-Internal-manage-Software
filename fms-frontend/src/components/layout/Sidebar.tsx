@@ -19,7 +19,8 @@ import {
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useRole } from '../../hooks/useRole'
-import { ROUTES } from '../../utils/constants'
+import { useAuth } from '../../hooks/useAuth'
+import { ROUTES, canViewPendingPaymentDetails } from '../../utils/constants'
 import { useState, useEffect } from 'react'
 
 
@@ -56,6 +57,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const navigate = useNavigate()
   const location = useLocation()
   const { canAccessApproval, canAccessSettings, canAccessUsers, canViewSectionByKey } = useRole()
+  const { user } = useAuth()
   const [supportOpen, setSupportOpen] = useState(isSupportPage(location.pathname))
   const [taskOpen, setTaskOpen] = useState(isTaskPage(location.pathname))
   const [successOpen, setSuccessOpen] = useState(isSuccessPage(location.pathname))
@@ -135,6 +137,15 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   ]
 
   const clientPaymentItems: MenuProps['items'] = [
+    ...(canViewPendingPaymentDetails(user?.email)
+      ? [
+          {
+            key: ROUTES.CLIENT_PAYMENT_PENDING_DETAILS,
+            icon: <FileTextOutlined />,
+            label: <Link to={ROUTES.CLIENT_PAYMENT_PENDING_DETAILS} style={linkStyle}>PENDING PAYMENT DETAILS</Link>,
+          },
+        ]
+      : []),
     { key: ROUTES.CLIENT_PAYMENT, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT} style={linkStyle}>Payment Management</Link> },
     { key: ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING} style={linkStyle}>Payment Ageing Report</Link> },
     { key: ROUTES.CLIENT_PAYMENT_Q_COMP, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_Q_COMP} style={linkStyle}>Q-Comp</Link> },

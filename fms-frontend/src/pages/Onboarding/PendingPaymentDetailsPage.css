@@ -1,0 +1,95 @@
+.ppd-page {
+  padding: 16px;
+}
+
+.ppd-title-box {
+  border: 2px solid #e74c3c;
+  background: #f6d7cf;
+  border-radius: 4px;
+  padding: 10px 12px;
+  margin-bottom: 14px;
+}
+
+.ppd-title {
+  background: #7dbb45;
+  color: #ffffff;
+  font-weight: 800;
+  text-align: center;
+  padding: 8px 14px;
+  border-radius: 6px;
+  letter-spacing: 0.2px;
+}
+
+.ppd-controls {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+
+.ppd-control {
+  background: #ffffff;
+  border: 1px solid #ededed;
+  border-radius: 6px;
+  padding: 10px 12px;
+  min-width: 220px;
+}
+
+.ppd-control-label {
+  font-size: 12px;
+  color: #666;
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.ppd-top-right {
+  flex: 1 1 320px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 320px;
+}
+
+.ppd-kpi {
+  background: #ffffff;
+  border: 1px solid #ededed;
+  border-radius: 6px;
+  padding: 10px 14px;
+  min-width: 210px;
+}
+
+.ppd-kpi-label {
+  font-size: 12px;
+  color: #444;
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+
+.ppd-kpi-value {
+  font-size: 22px;
+  font-weight: 900;
+  color: #e74c3c;
+}
+
+.ppd-btn {
+  font-weight: 700;
+}
+
+.ppd-table-wrap {
+  margin-top: 12px;
+  background: #ffffff;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.ppd-table .ant-table-thead > tr > th {
+  background: #f5c64a !important;
+  color: #111 !important;
+  font-weight: 800;
+}
+
+.ppd-table .ant-table-tbody > tr > td {
+  vertical-align: middle;
+}
+

@@ -254,6 +254,35 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
             )}
           </Descriptions>
 
+          {ticket.type === 'feature' ? (
+            <Descriptions column={1} size="small" bordered style={{ marginBottom: 24 }}>
+              <Descriptions.Item label="Title">{ticket.title || '-'}</Descriptions.Item>
+              <Descriptions.Item label="Description">
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {ticket.description || '-'}
+                </div>
+              </Descriptions.Item>
+              <Descriptions.Item label="Customer Questions">
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {ticket.customer_questions || '-'}
+                </div>
+              </Descriptions.Item>
+              <Descriptions.Item label="Why Feature?">
+                <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                  {ticket.why_feature || '-'}
+                </div>
+              </Descriptions.Item>
+            </Descriptions>
+          ) : (
+            <>
+              <Text strong>Description</Text>
+              <div style={{ marginBottom: 24, marginTop: 4 }}>{ticket.description || '-'}</div>
+
+              <Text strong>Customer Questions</Text>
+              <div style={{ marginBottom: 24, marginTop: 4 }}>{ticket.customer_questions || '-'}</div>
+            </>
+          )}
+
           {ticket.type === 'feature' && (
             <>
               <Divider orientation="left">Stage</Divider>
@@ -315,19 +344,6 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
                   readOnly={readOnly || approvalMode || (!!ticket?.feature_stage_2_edit_used && !isMasterAdmin)}
                 />
               )}
-            </>
-          )}
-
-          <Text strong>Description</Text>
-          <div style={{ marginBottom: 24, marginTop: 4 }}>{ticket.description || '-'}</div>
-
-          <Text strong>Customer Questions</Text>
-          <div style={{ marginBottom: 24, marginTop: 4 }}>{ticket.customer_questions || '-'}</div>
-
-          {ticket.type === 'feature' && ticket.why_feature && (
-            <>
-              <Text strong>Why Feature?</Text>
-              <div style={{ marginBottom: 24, marginTop: 4 }}>{ticket.why_feature}</div>
             </>
           )}
 

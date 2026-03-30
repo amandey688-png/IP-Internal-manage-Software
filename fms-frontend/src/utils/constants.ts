@@ -124,6 +124,8 @@ export const ROUTES = {
   CLIENT_PAYMENT_HF_COMP: '/onboarding/client-payment/completed/HF-Comp',
   /** Payment Ageing Report (grid + summary; data from API) */
   CLIENT_PAYMENT_PAYMENT_AGEING: '/onboarding/client-payment/payment-ageing',
+  /** Pending payment list (unpaid invoices with overdue) */
+  CLIENT_PAYMENT_PENDING_DETAILS: '/onboarding/client-payment/pending-payment-details',
   /** Training module */
   TRAINING: '/training',
   TRAINING_CLIENT: '/training/client-training',
@@ -134,6 +136,19 @@ export const ROUTES = {
   /** Shown when user opens a URL for a section they are not allowed to view */
   ACCESS_DENIED: '/access-denied',
 } as const
+
+/** PENDING PAYMENT DETAILS route + menu: only these sign-in emails may open it. */
+export const PENDING_PAYMENT_DETAILS_ALLOWED_EMAILS: readonly string[] = [
+  'ayush@industryprime.com',
+  'ea@industryprime.com',
+  'ad@ip.com',
+]
+
+export function canViewPendingPaymentDetails(email: string | null | undefined): boolean {
+  const e = (email ?? '').trim().toLowerCase()
+  if (!e) return false
+  return PENDING_PAYMENT_DETAILS_ALLOWED_EMAILS.some((a) => a.toLowerCase() === e)
+}
 
 export const API_ENDPOINTS = {
   AUTH: {
