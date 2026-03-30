@@ -137,6 +137,19 @@ export const ROUTES = {
   ACCESS_DENIED: '/access-denied',
 } as const
 
+/** PENDING PAYMENT DETAILS route + menu: only these sign-in emails may open it. */
+export const PENDING_PAYMENT_DETAILS_ALLOWED_EMAILS: readonly string[] = [
+  'ayush@industryprime.com',
+  'ea@industryprime.com',
+  'ad@ip.com',
+]
+
+export function canViewPendingPaymentDetails(email: string | null | undefined): boolean {
+  const e = (email ?? '').trim().toLowerCase()
+  if (!e) return false
+  return PENDING_PAYMENT_DETAILS_ALLOWED_EMAILS.some((a) => a.toLowerCase() === e)
+}
+
 export const API_ENDPOINTS = {
   AUTH: {
     REGISTER: '/auth/register',

@@ -4,8 +4,9 @@ import type { MenuProps } from 'antd'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { useAuth } from '../../hooks/useAuth'
-import { getInitials } from '../../utils/helpers'
+import { getInitials, canViewSection } from '../../utils/helpers'
 import { ROUTES } from '../../utils/constants'
+import type { UserRole } from '../../types/auth'
 import { dashboardApi } from '../../api/dashboard'
 
 const { Header: AntHeader } = Layout
@@ -26,6 +27,10 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
   const section = searchParams.get('section')
   const viewApproval = searchParams.get('view') === 'approval'
   const hideAddNew = section === 'completed-chores-bugs' || section === 'completed-feature' || section === 'solutions' || location.pathname === ROUTES.STAGING || location.pathname === ROUTES.CHECKLIST || location.pathname === ROUTES.DELEGATION || viewApproval
+
+  const canViewDashboard = user
+    ? canViewSection('dashboard', user.role as UserRole, user.section_permissions)
+    : false
 
   useEffect(() => {
     dashboardApi.getActivityCount().then(setActivityCount).catch(() => setActivityCount(0))
@@ -104,14 +109,16 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
         </Space>
       </Space>
       <Space size="middle">
-        <Button
-          type="default"
-          icon={<DashboardOutlined />}
-          onClick={() => navigate(ROUTES.DASHBOARD_KPI)}
-          style={{ fontWeight: 500 }}
-        >
-          Dashboard - KPI
-        </Button>
+        {canViewDashboard ? (
+          <Button
+            type="default"
+            icon={<DashboardOutlined />}
+            onClick={() => navigate(ROUTES.DASHBOARD_KPI)}
+            style={{ fontWeight: 500 }}
+          >
+            Dashboard - KPI
+          </Button>
+        ) : null}
         {!hideAddNew && onAddNew && (
           <Button
             type="primary"

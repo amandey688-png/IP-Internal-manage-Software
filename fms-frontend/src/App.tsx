@@ -37,7 +37,13 @@ import { PendingPaymentDetailsPage } from "./pages/Onboarding/PendingPaymentDeta
 import { ClientTrainingPage } from "./pages/Training/ClientTrainingPage"
 import { AccessDeniedPage } from "./pages/AccessDeniedPage"
 
-import { ROUTES, ROLES, APP_NAME, TICKET_ROUTE_SECTION_KEYS } from "./utils/constants"
+import {
+  ROUTES,
+  ROLES,
+  APP_NAME,
+  TICKET_ROUTE_SECTION_KEYS,
+  PENDING_PAYMENT_DETAILS_ALLOWED_EMAILS,
+} from "./utils/constants"
 
 function AppTitle() {
   const { pathname } = useLocation()
@@ -352,7 +358,10 @@ function App() {
             <Route
               path={ROUTES.CLIENT_PAYMENT_PENDING_DETAILS}
               element={
-                <ProtectedRoute sectionKeys={["client_payment"]}>
+                <ProtectedRoute
+                  sectionKeys={["client_payment"]}
+                  emailAllowlist={PENDING_PAYMENT_DETAILS_ALLOWED_EMAILS}
+                >
                   <AppLayout>
                     <ErrorBoundary>
                       <PendingPaymentDetailsPage />

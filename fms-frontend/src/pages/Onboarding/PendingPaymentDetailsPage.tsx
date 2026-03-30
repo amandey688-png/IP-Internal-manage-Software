@@ -42,18 +42,22 @@ function parseNum(v: string | number | null | undefined): number {
   return Number.isFinite(num) ? num : 0
 }
 
+function getCurrentQuarterRange(): [Dayjs, Dayjs] {
+  const now = dayjs()
+  const qStartMonth = Math.floor(now.month() / 3) * 3
+  const start = now.month(qStartMonth).startOf('month').startOf('day')
+  const end = start.add(2, 'month').endOf('month').endOf('day')
+  return [start, end]
+}
+
 export function PendingPaymentDetailsPage() {
   const [loading, setLoading] = useState(false)
   const [setupError, setSetupError] = useState<string | null>(null)
   const [rows, setRows] = useState<PendingPaymentRow[]>([])
   const inFlightRef = useRef(false)
 
-  // Default: wide range so "Pending Payment Details" shows all pending rows.
-  // User can still narrow it using the picker.
-  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>([
-    dayjs('2000-01-01').startOf('day'),
-    dayjs('2099-12-31').endOf('day'),
-  ])
+  // Default: current quarter date range.
+  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(getCurrentQuarterRange())
   const [companyFilter, setCompanyFilter] = useState<string>('')
 
   const fetchRows = useCallback(async () => {
