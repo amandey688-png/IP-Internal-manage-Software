@@ -135,6 +135,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   ]
 
   const clientPaymentItems: MenuProps['items'] = [
+    { key: ROUTES.CLIENT_PAYMENT_PENDING_DETAILS, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_PENDING_DETAILS} style={linkStyle}>PENDING PAYMENT DETAILS</Link> },
     { key: ROUTES.CLIENT_PAYMENT, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT} style={linkStyle}>Payment Management</Link> },
     { key: ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING} style={linkStyle}>Payment Ageing Report</Link> },
     { key: ROUTES.CLIENT_PAYMENT_Q_COMP, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_Q_COMP} style={linkStyle}>Q-Comp</Link> },

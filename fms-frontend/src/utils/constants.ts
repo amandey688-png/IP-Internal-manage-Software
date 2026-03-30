@@ -124,6 +124,8 @@ export const ROUTES = {
   CLIENT_PAYMENT_HF_COMP: '/onboarding/client-payment/completed/HF-Comp',
   /** Payment Ageing Report (grid + summary; data from API) */
   CLIENT_PAYMENT_PAYMENT_AGEING: '/onboarding/client-payment/payment-ageing',
+  /** Pending payment list (unpaid invoices with overdue) */
+  CLIENT_PAYMENT_PENDING_DETAILS: '/onboarding/client-payment/pending-payment-details',
   /** Training module */
   TRAINING: '/training',
   TRAINING_CLIENT: '/training/client-training',
