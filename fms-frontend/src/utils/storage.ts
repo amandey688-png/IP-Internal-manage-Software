@@ -2,12 +2,13 @@ import { STORAGE_KEYS } from './constants'
 import { User } from '../types/auth'
 
 /**
- * Auth state (token, refresh token, user) is stored in sessionStorage so it is cleared when the
- * browsing session ends (all tabs/windows for this origin closed). Users must sign in again after
- * reopening the browser. This applies per device; each browser profile has its own storage.
+ * Auth state (token, refresh token, user) is stored in sessionStorage:
+ * - Survives normal reload/refresh in the same tab (session is not wiped on F5).
+ * - Clears when the tab/window is closed (and when the browser session ends), so users sign in again
+ *   after fully closing the browser, matching “stay logged in until I close the browser”.
  *
- * Note: sessionStorage is not shared across tabs; opening the app in a new tab starts logged out
- * unless the tab was duplicated from an existing session. OTP email remains in sessionStorage.
+ * sessionStorage is not shared across tabs; a brand-new tab to the same URL starts without auth
+ * unless opened via duplicate tab. OTP email uses the same sessionStorage.
  */
 
 const AUTH_KEYS = [STORAGE_KEYS.AUTH_TOKEN, STORAGE_KEYS.REFRESH_TOKEN, STORAGE_KEYS.USER] as const

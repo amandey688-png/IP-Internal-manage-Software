@@ -7012,16 +7012,21 @@ def list_performance_poc(
         ticket_ids = [row.get("id") for row in rows if row.get("id")]
         # Enrich with training total_percentage and feature count (batched; no per-row _compute_current_stage)
         training_map = {}
+        training_schedule_map: dict = {}
         feature_count_map = {}
         training_rows: list = []
         tf_rows: list = []
         if ticket_ids:
             try:
-                tr = supabase.table("performance_training").select("id, performance_id, total_percentage").in_("performance_id", ticket_ids).execute()
+                tr = supabase.table("performance_training").select(
+                    "id, performance_id, total_percentage, training_schedule_date"
+                ).in_("performance_id", ticket_ids).execute()
                 training_rows = tr.data or []
                 for t in training_rows:
                     if t.get("performance_id"):
                         training_map[t["performance_id"]] = t.get("total_percentage")
+                        if t.get("training_schedule_date"):
+                            training_schedule_map[t["performance_id"]] = t.get("training_schedule_date")
                 training_ids = [t["id"] for t in training_rows if t.get("id")]
                 if training_ids:
                     tf = supabase.table("ticket_features").select("id, feature_id, training_id").in_("training_id", training_ids).execute()
@@ -7049,6 +7054,7 @@ def list_performance_poc(
             row["total_percentage"] = training_map.get(row.get("id"))
             row["has_training"] = row.get("id") in training_map
             row["feature_count"] = feature_count_map.get(row.get("id"), 0)
+            row["training_schedule_date"] = training_schedule_map.get(row.get("id"))
         _sort_performance_list_rows(rows)
         return {"items": rows}
     except Exception as e:

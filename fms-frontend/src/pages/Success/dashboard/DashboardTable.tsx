@@ -11,6 +11,7 @@ export function DashboardTable({ rows }: DashboardTableProps) {
         <table className="su-table su-table--main">
           <thead>
             <tr>
+              <th>Reference number</th>
               <th>Company Name</th>
               <th>Score %</th>
               <th>Not Using Feature</th>
@@ -23,7 +24,8 @@ export function DashboardTable({ rows }: DashboardTableProps) {
           <tbody>
             {rows.length ? (
               rows.map((row, idx) => (
-                <tr key={`${row.companyName}-${idx}`}>
+                <tr key={`${row.referenceNo}-${row.companyName}-${idx}`}>
+                  <td>{row.referenceNo}</td>
                   <td>{row.companyName}</td>
                   <td>{row.scorePercent}</td>
                   <td>{row.notUsingFeature}</td>
@@ -35,7 +37,7 @@ export function DashboardTable({ rows }: DashboardTableProps) {
               ))
             ) : (
               <tr>
-                <td colSpan={7} className="su-empty-cell su-empty-cell--large">
+                <td colSpan={8} className="su-empty-cell su-empty-cell--large">
                   No data
                 </td>
               </tr>
