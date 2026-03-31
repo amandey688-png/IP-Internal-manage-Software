@@ -2589,7 +2589,9 @@ def dashboard_kpi(
                 status = t.get("status") or ""
                 if _is_pending(status) and not _is_resolved(status, t.get("status_4")):
                     pending_count += 1
-                    pending_details.append(row_item)
+                    pending_details.append(
+                        {**row_item, "delay_time": _stage2_delay_text_for_ticket(t)}
+                    )
 
             # Completion delay (Stage 2): bucket by week of actual_2 (when Stage 2 completed), not ticket creation week.
             # So CH-0265 / CH-0264 appear in the week they crossed Stage 2 TAT, even if created earlier.
@@ -2930,6 +2932,45 @@ def _has_completion_delay(
         return False, ""
     except Exception:
         return False, ""
+
+
+def _format_seconds_duration(sec: float) -> str:
+    """Human-readable overdue duration (similar style to frontend formatDelay)."""
+    s = int(max(0, sec))
+    d = s // 86400
+    h = (s % 86400) // 3600
+    m = (s % 3600) // 60
+    parts: list[str] = []
+    if d:
+        parts.append(f"{d} day{'s' if d != 1 else ''}")
+    if h:
+        parts.append(f"{h} hr")
+    if m and d == 0:
+        parts.append(f"{m} min")
+    return " ".join(parts) if parts else "< 1 min"
+
+
+def _stage2_delay_text_for_ticket(ticket: dict) -> str:
+    """Pending Chores/Bugs delay = now - submit timestamp with 24h SLA.
+    Submit timestamp preference: query_arrival_at, then created_at.
+    """
+    if str(ticket.get("type") or "").lower() not in ("chore", "bug"):
+        return "—"
+    submitted_at = ticket.get("query_arrival_at") or ticket.get("created_at")
+    if not submitted_at:
+        return "—"
+    try:
+        submitted = datetime.fromisoformat(str(submitted_at).replace("Z", "+00:00"))
+        if submitted.tzinfo is None:
+            submitted = submitted.replace(tzinfo=timezone.utc)
+    except Exception:
+        return "—"
+    sla_sec = 24.0 * 3600.0  # 1 day
+    now = datetime.now(timezone.utc)
+    over = (now - submitted).total_seconds() - sla_sec
+    if over > 0:
+        return f"Delay: {_format_seconds_duration(over)}"
+    return "Within 1 day"
 
 
 def _has_completion_delay_stage4(ticket: dict) -> tuple[bool, str]:
