@@ -359,7 +359,6 @@ function App() {
               path={ROUTES.CLIENT_PAYMENT_PENDING_DETAILS}
               element={
                 <ProtectedRoute
-                  sectionKeys={["client_payment"]}
                   emailAllowlist={PENDING_PAYMENT_DETAILS_ALLOWED_EMAILS}
                 >
                   <AppLayout>
