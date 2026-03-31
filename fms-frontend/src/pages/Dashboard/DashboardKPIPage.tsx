@@ -854,6 +854,17 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                       ),
                     },
                     { title: 'Query Arrival', dataIndex: 'query_arrival', key: 'query_arrival', width: 160, render: (v: string) => formatQueryArrival(v) },
+                    ...(detailModal.title.startsWith('Pending Chores')
+                      ? [
+                          {
+                            title: 'Delay (Stage 2)',
+                            dataIndex: 'delay_time',
+                            key: 'stage2_delay',
+                            width: 140,
+                            render: (v: string) => v ?? '—',
+                          },
+                        ]
+                      : []),
                     ...(detailModal.title.startsWith('Response Delay') || detailModal.title.startsWith('Completion Delay')
                       ? [{ title: 'Delay / Note', dataIndex: 'delay_time', key: 'delay_time', width: 120, render: (v: string) => v ?? '—' }]
                       : []),
