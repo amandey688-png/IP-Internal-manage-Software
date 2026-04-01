@@ -15,12 +15,13 @@ import {
   UserAddOutlined,
   AuditOutlined,
   ReadOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
 import { useRole } from '../../hooks/useRole'
 import { useAuth } from '../../hooks/useAuth'
-import { ROUTES, canViewPendingPaymentDetails } from '../../utils/constants'
+import { ROUTES, canViewDbClientDbDash, canViewPendingPaymentDetails } from '../../utils/constants'
 import { useState, useEffect } from 'react'
 
 
@@ -40,6 +41,8 @@ const isClientToLeadPage = (pathname: string) =>
 
 const isOnboardingPage = (pathname: string) =>
   pathname.startsWith(ROUTES.ONBOARDING)
+
+const isDbClientPage = (pathname: string) => pathname.startsWith('/db-client')
 
 const isTrainingPage = (pathname: string) =>
   pathname.startsWith(ROUTES.TRAINING)
@@ -64,7 +67,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const [clientToLeadOpen, setClientToLeadOpen] = useState(isClientToLeadPage(location.pathname))
   const [onboardingOpen, setOnboardingOpen] = useState(isOnboardingPage(location.pathname))
   const [trainingOpen, setTrainingOpen] = useState(isTrainingPage(location.pathname))
-  const [dbClientOpen, setDbClientOpen] = useState(false)
+  const [dbClientOpen, setDbClientOpen] = useState(isDbClientPage(location.pathname))
   const [clientPaymentOpen, setClientPaymentOpen] = useState(isClientPaymentPage(location.pathname))
   useEffect(() => {
     if (isSupportPage(location.pathname)) setSupportOpen(true)
@@ -86,6 +89,9 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   }, [location.pathname])
   useEffect(() => {
     if (isTrainingPage(location.pathname)) setTrainingOpen(true)
+  }, [location.pathname])
+  useEffect(() => {
+    if (isDbClientPage(location.pathname)) setDbClientOpen(true)
   }, [location.pathname])
 
   const linkStyle = { color: 'inherit', display: 'block' }
@@ -133,7 +139,21 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   ]
 
   const dbClientItems: MenuProps['items'] = [
-    { key: ROUTES.DB_CLIENT_CLIENTS, icon: <ReadOutlined />, label: <Link to={ROUTES.DB_CLIENT_CLIENTS} style={linkStyle}>Clients (New)</Link> },
+    ...(canViewDbClientDbDash(user?.email)
+      ? [
+          {
+            key: ROUTES.DB_CLIENT_DB_DASH,
+            icon: <DashboardOutlined />,
+            label: <Link to={ROUTES.DB_CLIENT_DB_DASH} style={linkStyle}>DB- Dash</Link>,
+          },
+        ]
+      : []),
+    { key: ROUTES.DB_CLIENT_CLIENT_ONB, icon: <AuditOutlined />, label: <Link to={ROUTES.DB_CLIENT_CLIENT_ONB} style={linkStyle}>Client ONB</Link> },
+    {
+      key: ROUTES.DB_CLIENT_CLIENT_ONB_INACTIVE,
+      icon: <StopOutlined />,
+      label: <Link to={ROUTES.DB_CLIENT_CLIENT_ONB_INACTIVE} style={linkStyle}>Inactive clients</Link>,
+    },
   ]
 
   const canViewClientPaymentSection = canViewSectionByKey('client_payment')
@@ -248,7 +268,11 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
             icon: <ReadOutlined />,
             label: 'DB Client',
             children: dbClientItems,
-            onTitleClick: () => setDbClientOpen(!dbClientOpen),
+            onTitleClick: () => {
+              const next = !dbClientOpen
+              setDbClientOpen(next)
+              if (next && showOnboarding) setOnboardingOpen(true)
+            },
           },
         ]
       : []),
@@ -277,6 +301,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     ...(onboardingOpen ? ['onboarding'] : []),
     ...(trainingOpen ? ['training'] : []),
     ...(clientPaymentOpen ? ['client-payment'] : []),
+    ...(dbClientOpen ? ['db-client'] : []),
   ]
 
   const handleOpenChange = (keys: string[]) => {
@@ -288,6 +313,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     setTrainingOpen(keys.includes('training'))
     setDbClientOpen(keys.includes('db-client'))
     setClientPaymentOpen(keys.includes('client-payment'))
+    if (keys.includes('db-client') && showOnboarding) setOnboardingOpen(true)
   }
 
   const menuContent = (

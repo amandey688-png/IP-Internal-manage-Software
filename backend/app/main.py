@@ -3616,6 +3616,409 @@ def create_onboarding_payment_status(payload: OnboardingPaymentStatusCreate, aut
         raise HTTPException(400, str(e)[:200])
 
 
+# ---------- DB Client > Client ONB ----------
+def _generate_client_onb_reference() -> str:
+    """Sequential reference EX-ONB-IMP-0001, EX-ONB-IMP-0002, …"""
+    try:
+        r = supabase.table("db_client_client_onb").select("reference_no").execute()
+        nums = []
+        for row in (r.data or []):
+            ref = str((row or {}).get("reference_no") or "")
+            ru = ref.upper()
+            if ru.startswith("EX-ONB-IMP-") and len(ref) > 11:
+                suffix = ref[11:]
+                if suffix.isdigit():
+                    nums.append(int(suffix))
+                    continue
+            # Backward compatibility: older records may still be ONB-0001 style.
+            if ru.startswith("ONB-") and len(ref) > 4:
+                suffix = ref[4:]
+                if suffix.isdigit():
+                    nums.append(int(suffix))
+        next_num = max(nums, default=0) + 1
+        return f"EX-ONB-IMP-{next_num:04d}"
+    except Exception as e:
+        _log(f"client onb reference: {e}")
+        return f"EX-ONB-IMP-{int(datetime.now(timezone.utc).timestamp()) % 100000:05d}"
+
+
+def _format_client_duration_days(since: date | None, till: date | None) -> str | None:
+    if not since or not till:
+        return None
+    try:
+        d = (till - since).days
+        if d < 0:
+            return None
+        return f"{d} day{'s' if d != 1 else ''}"
+    except Exception:
+        return None
+
+
+class ClientOnbCreate(BaseModel):
+    """All fields required on create (validated + non-empty after strip)."""
+
+    organization_name: str
+    company_name: str
+    contact_person: str
+    mobile_no: str
+    email_id: str
+    paid_divisions: str
+    division_abbreviation: str
+    name_of_divisions_cost_details: str
+    amount_paid_per_division: str
+    total_amount_paid_per_month: str
+    payment_frequency: str
+    client_since: date
+    client_till: date
+    client_duration: str
+    total_amount_paid_till_date: str
+    tds_percent: str
+    client_location_city: str
+    client_location_state: str
+    remarks: str
+    whatsapp_group_details: str
+
+    @model_validator(mode="after")
+    def strip_and_require_nonempty(self):
+        str_names = (
+            "organization_name",
+            "company_name",
+            "contact_person",
+            "mobile_no",
+            "email_id",
+            "paid_divisions",
+            "division_abbreviation",
+            "name_of_divisions_cost_details",
+            "amount_paid_per_division",
+            "total_amount_paid_per_month",
+            "payment_frequency",
+            "client_duration",
+            "total_amount_paid_till_date",
+            "tds_percent",
+            "client_location_city",
+            "client_location_state",
+            "remarks",
+            "whatsapp_group_details",
+        )
+        for name in str_names:
+            raw = getattr(self, name)
+            if raw is None:
+                raise ValueError(f"{name} is required")
+            s = str(raw).strip()
+            if not s:
+                raise ValueError(f"{name} is required")
+            setattr(self, name, s)
+        return self
+
+
+class ClientOnbUpdate(BaseModel):
+    organization_name: str | None = None
+    company_name: str | None = None
+    contact_person: str | None = None
+    mobile_no: str | None = None
+    email_id: str | None = None
+    paid_divisions: str | None = None
+    division_abbreviation: str | None = None
+    name_of_divisions_cost_details: str | None = None
+    amount_paid_per_division: str | None = None
+    total_amount_paid_per_month: str | None = None
+    payment_frequency: str | None = None
+    client_since: date | None = None
+    client_till: date | None = None
+    client_duration: str | None = None
+    total_amount_paid_till_date: str | None = None
+    tds_percent: str | None = None
+    client_location_city: str | None = None
+    client_location_state: str | None = None
+    remarks: str | None = None
+    whatsapp_group_details: str | None = None
+    last_contacted_on: date | None = None
+    remarks_2: str | None = None
+    follow_up_needed: str | None = None
+
+
+class ClientOnbFollowUpPayload(BaseModel):
+    last_contacted_on: date | None = None
+    remarks_2: str | None = None
+    follow_up_needed: str | None = None
+
+    @field_validator("follow_up_needed")
+    @classmethod
+    def normalize_follow_up(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        s = str(v).strip()
+        if not s:
+            return None
+        low = s.lower()
+        if low in ("yes", "y"):
+            return "Yes"
+        if low in ("no", "n"):
+            return "No"
+        return s
+
+
+class ClientOnbStatusPayload(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        x = (v or "").strip().lower()
+        if x not in ("active", "inactive"):
+            raise ValueError("status must be 'active' or 'inactive'")
+        return x
+
+
+def _client_onb_strip(s: str | None) -> str | None:
+    t = (s or "").strip()
+    return t if t else None
+
+
+@api_router.get("/db-client/client-onb")
+def list_db_client_client_onb(auth: dict = Depends(get_current_user)):
+    """List Client ONB rows, newest first."""
+    try:
+        r = supabase.table("db_client_client_onb").select("*").order("timestamp", desc=True).execute()
+        rows = r.data or []
+        for row in rows:
+            st = row.get("status")
+            if not st or str(st).strip().lower() not in ("active", "inactive"):
+                row["status"] = "active"
+            else:
+                row["status"] = str(st).strip().lower()
+            if not row.get("client_duration"):
+                cs, ct = row.get("client_since"), row.get("client_till")
+                if cs and ct:
+                    try:
+                        d1 = date.fromisoformat(str(cs)[:10])
+                        d2 = date.fromisoformat(str(ct)[:10])
+                        row["client_duration"] = _format_client_duration_days(d1, d2)
+                    except Exception:
+                        pass
+        return {"items": rows}
+    except Exception as e:
+        _log(f"db client onb list: {e}")
+        return {"items": []}
+
+
+@api_router.get("/db-client/client-onb/status-column-check")
+def client_onb_status_column_check(auth: dict = Depends(get_current_user)):
+    """Returns ok=true if `db_client_client_onb.status` exists (needed for Active/Inactive)."""
+    try:
+        supabase.table("db_client_client_onb").select("id, status").limit(1).execute()
+        return {"ok": True}
+    except Exception as e:
+        err = str(e)
+        _log(f"db client onb status column check: {e}")
+        low = err.lower()
+        if "status" in low or "column" in low or "42703" in err or "pgrst" in low:
+            return {
+                "ok": False,
+                "hint": "Run docs/SUPABASE_DB_CLIENT_CLIENT_ONB_ADD_STATUS.sql in the Supabase SQL Editor, then refresh.",
+            }
+        return {"ok": False, "hint": err[:240]}
+
+
+@api_router.post("/db-client/client-onb")
+def create_db_client_client_onb(payload: ClientOnbCreate, auth: dict = Depends(get_current_user)):
+    """Create Client ONB. All fields required. Auto timestamp, reference_no; status active."""
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    ref = _generate_client_onb_reference()
+    since, till = payload.client_since, payload.client_till
+    row = {
+        "timestamp": now,
+        "reference_no": ref,
+        "organization_name": payload.organization_name,
+        "company_name": payload.company_name,
+        "contact_person": payload.contact_person,
+        "mobile_no": payload.mobile_no,
+        "email_id": payload.email_id,
+        "paid_divisions": payload.paid_divisions,
+        "division_abbreviation": payload.division_abbreviation,
+        "name_of_divisions_cost_details": payload.name_of_divisions_cost_details,
+        "amount_paid_per_division": payload.amount_paid_per_division,
+        "total_amount_paid_per_month": payload.total_amount_paid_per_month,
+        "payment_frequency": payload.payment_frequency,
+        "client_since": since.isoformat(),
+        "client_till": till.isoformat(),
+        "client_duration": payload.client_duration,
+        "total_amount_paid_till_date": payload.total_amount_paid_till_date,
+        "tds_percent": payload.tds_percent,
+        "client_location_city": payload.client_location_city,
+        "client_location_state": payload.client_location_state,
+        "remarks": payload.remarks,
+        "whatsapp_group_details": payload.whatsapp_group_details,
+        "updated_at": now,
+        "status": "active",
+    }
+    try:
+        ins = supabase.table("db_client_client_onb").insert(row).execute()
+        created = (ins.data or [{}])[0]
+        return created
+    except Exception as e:
+        _log(f"db client onb create: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.patch("/db-client/client-onb/{row_id}/status")
+def patch_db_client_client_onb_status(
+    row_id: str,
+    payload: ClientOnbStatusPayload,
+    _auth: dict = Depends(get_current_user),
+):
+    """Set Active / Inactive. Any authenticated user (same as list access)."""
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        ex = supabase.table("db_client_client_onb").select("id").eq("id", row_id).limit(1).execute()
+        if not (ex.data or []):
+            raise HTTPException(404, "Record not found")
+        supabase.table("db_client_client_onb").update({"status": payload.status, "updated_at": now}).eq("id", row_id).execute()
+        r2 = supabase.table("db_client_client_onb").select("*").eq("id", row_id).limit(1).execute()
+        return (r2.data or [{}])[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"db client onb status: {e}")
+        err = str(e)
+        low = err.lower()
+        if "status" in low and ("column" in low or "does not exist" in low or "42703" in err):
+            raise HTTPException(
+                503,
+                "Database column `status` is missing. In Supabase → SQL Editor, run the script in docs/SUPABASE_DB_CLIENT_CLIENT_ONB_ADD_STATUS.sql, then try again.",
+            )
+        raise HTTPException(400, err[:200])
+
+
+@api_router.patch("/db-client/client-onb/{row_id}/follow-up")
+def patch_db_client_client_onb_follow_up(
+    row_id: str,
+    payload: ClientOnbFollowUpPayload,
+    _auth: dict = Depends(get_current_user),
+):
+    """Update Last contacted / Remarks2 / Follow-up (Inactive clients workflow)."""
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    pdata = payload.model_dump(exclude_unset=True)
+    updates: dict = {"updated_at": now}
+    if "last_contacted_on" in pdata:
+        lc = pdata["last_contacted_on"]
+        updates["last_contacted_on"] = lc.isoformat() if isinstance(lc, date) else lc
+    if "remarks_2" in pdata:
+        updates["remarks_2"] = _client_onb_strip(pdata["remarks_2"]) if pdata["remarks_2"] is not None else None
+    if "follow_up_needed" in pdata:
+        updates["follow_up_needed"] = pdata["follow_up_needed"]
+    try:
+        ex = supabase.table("db_client_client_onb").select("id").eq("id", row_id).limit(1).execute()
+        if not (ex.data or []):
+            raise HTTPException(404, "Record not found")
+        if len(updates) == 1:
+            r0 = supabase.table("db_client_client_onb").select("*").eq("id", row_id).limit(1).execute()
+            return (r0.data or [{}])[0]
+        supabase.table("db_client_client_onb").update(updates).eq("id", row_id).execute()
+        r2 = supabase.table("db_client_client_onb").select("*").eq("id", row_id).limit(1).execute()
+        return (r2.data or [{}])[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"db client onb follow-up: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
+@api_router.put("/db-client/client-onb/{row_id}")
+def update_db_client_client_onb(
+    row_id: str,
+    payload: ClientOnbUpdate,
+    _master: dict = Depends(require_roles(["master_admin"])),
+):
+    """Update a Client ONB row. Master Admin only."""
+    try:
+        ex = supabase.table("db_client_client_onb").select("*").eq("id", row_id).limit(1).execute()
+        cur = (ex.data or [None])[0]
+        if not cur:
+            raise HTTPException(404, "Record not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"db client onb fetch: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+    updates: dict = {}
+    fields = [
+        "organization_name",
+        "company_name",
+        "contact_person",
+        "mobile_no",
+        "email_id",
+        "paid_divisions",
+        "division_abbreviation",
+        "name_of_divisions_cost_details",
+        "amount_paid_per_division",
+        "total_amount_paid_per_month",
+        "payment_frequency",
+        "total_amount_paid_till_date",
+        "tds_percent",
+        "client_location_city",
+        "client_location_state",
+        "remarks",
+        "whatsapp_group_details",
+        "client_duration",
+        "remarks_2",
+        "follow_up_needed",
+    ]
+    pdata = payload.model_dump(exclude_unset=True)
+    for f in fields:
+        if f not in pdata:
+            continue
+        v = pdata[f]
+        if v is None:
+            updates[f] = None
+        elif isinstance(v, str):
+            updates[f] = _client_onb_strip(v)
+        else:
+            updates[f] = v
+
+    if "client_since" in pdata:
+        cs = pdata["client_since"]
+        updates["client_since"] = cs.isoformat() if isinstance(cs, date) else cs
+    if "client_till" in pdata:
+        ct = pdata["client_till"]
+        updates["client_till"] = ct.isoformat() if isinstance(ct, date) else ct
+    if "last_contacted_on" in pdata:
+        lc = pdata["last_contacted_on"]
+        updates["last_contacted_on"] = lc.isoformat() if isinstance(lc, date) else lc
+
+    merged_org = updates.get("organization_name", cur.get("organization_name"))
+    merged_comp = updates.get("company_name", cur.get("company_name"))
+    if not (str(merged_org or "").strip() or str(merged_comp or "").strip()):
+        raise HTTPException(400, "organization_name or company_name is required")
+
+    since = updates.get("client_since", cur.get("client_since"))
+    till = updates.get("client_till", cur.get("client_till"))
+    since_s = str(since)[:10] if since else ""
+    till_s = str(till)[:10] if till else ""
+
+    if "client_duration" not in updates and since_s and till_s:
+        try:
+            d1 = date.fromisoformat(since_s)
+            d2 = date.fromisoformat(till_s)
+            updates["client_duration"] = _format_client_duration_days(d1, d2)
+        except Exception:
+            pass
+
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    updates["updated_at"] = now
+    if len(updates) == 1:
+        return cur
+
+    try:
+        supabase.table("db_client_client_onb").update(updates).eq("id", row_id).execute()
+        r2 = supabase.table("db_client_client_onb").select("*").eq("id", row_id).limit(1).execute()
+        return (r2.data or [cur])[0]
+    except Exception as e:
+        _log(f"db client onb update: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
 # PostgREST URL limits + large IN lists: batch id filters (Raised Invoices list).
 _OCP_ID_IN_BATCH = 120
 

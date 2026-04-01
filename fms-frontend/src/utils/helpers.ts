@@ -390,7 +390,7 @@ export const SECTION_KEY_TO_ROUTE: Record<string, string> = {
   onboarding_payment_status: ROUTES.ONBOARDING_PAYMENT_STATUS,
   client_payment: ROUTES.CLIENT_PAYMENT,
   training: ROUTES.TRAINING,
-  db_client: ROUTES.DB_CLIENT_CLIENTS,
+  db_client: ROUTES.DB_CLIENT_CLIENT_ONB,
   settings: ROUTES.SETTINGS,
   users: ROUTES.USERS,
 }
