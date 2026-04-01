@@ -549,7 +549,12 @@ export function ClientPaymentPage() {
 
   const openPaymRec = () => {
     if (!selectedRecord) return
-    paymRecForm.setFieldsValue({ party_name: '', invoice_number: selectedRecord.invoice_number ?? '', amount: selectedRecord.invoice_amount ?? '', payment_date: null })
+    paymRecForm.setFieldsValue({
+      party_name: selectedRecord.company_name ?? '',
+      invoice_number: selectedRecord.invoice_number ?? '',
+      amount: selectedRecord.invoice_amount ?? '',
+      payment_date: null,
+    })
     setPaymRecModalOpen(true)
   }
   const handlePaymRecSubmit = () => {
@@ -1134,7 +1139,9 @@ export function ClientPaymentPage() {
 
       <Modal title="Payment Receive Details (Paym-Rec)" open={paymRecModalOpen} onCancel={() => setPaymRecModalOpen(false)} footer={null} destroyOnClose width={520}>
         <Form form={paymRecForm} layout="vertical" style={{ marginTop: 16 }} onFinish={handlePaymRecSubmit}>
-          <Form.Item name="party_name" label="Party Name" rules={[{ required: true, message: 'Required' }]}><Input placeholder="Party name" /></Form.Item>
+          <Form.Item name="party_name" label="Party Name" rules={[{ required: true, message: 'Required' }]}>
+            <Input placeholder="Auto from company name" disabled />
+          </Form.Item>
           <Form.Item name="invoice_number" label="Invoice Number"><Input placeholder="Auto from invoice" disabled /></Form.Item>
           <Form.Item name="amount" label="Amount" rules={[{ required: true, message: 'Required' }]}><InputNumber style={{ width: '100%' }} min={0} /></Form.Item>
           <Form.Item name="payment_date" label="Date of Payment" rules={[{ required: true, message: 'Required' }]}><DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" /></Form.Item>
