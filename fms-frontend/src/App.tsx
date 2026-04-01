@@ -35,6 +35,8 @@ import { ClientPaymentPage } from "./pages/Onboarding/ClientPaymentPage"
 import { PaymentAgeingReportPage } from "./pages/Onboarding/PaymentAgeingReportPage"
 import { PendingPaymentDetailsPage } from "./pages/Onboarding/PendingPaymentDetailsPage"
 import { ClientTrainingPage } from "./pages/Training/ClientTrainingPage"
+import { ClientOnbPage } from "./pages/DbClient/ClientOnbPage"
+import { DbDashPage } from "./pages/DbClient/DbDashPage"
 import { AccessDeniedPage } from "./pages/AccessDeniedPage"
 
 import {
@@ -42,6 +44,7 @@ import {
   ROLES,
   APP_NAME,
   TICKET_ROUTE_SECTION_KEYS,
+  DB_CLIENT_DB_DASH_ALLOWED_EMAILS,
   PENDING_PAYMENT_DETAILS_ALLOWED_EMAILS,
 } from "./utils/constants"
 
@@ -74,7 +77,9 @@ function AppTitle() {
       [ROUTES.CLIENT_PAYMENT_HF_COMP]: "Client Payment – HF-Comp",
       [ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING]: "Client Payment – Payment Ageing Report",
       [ROUTES.TRAINING_CLIENT]: "Client Training",
-      [ROUTES.DB_CLIENT_CLIENTS]: "DB Client – Clients",
+      [ROUTES.DB_CLIENT_CLIENT_ONB]: "DB Client – Client ONB",
+      [ROUTES.DB_CLIENT_CLIENT_ONB_INACTIVE]: "DB Client – Inactive clients",
+      [ROUTES.DB_CLIENT_DB_DASH]: "DB Client – DB- Dash",
       [ROUTES.USERS]: "Users",
       [ROUTES.SETTINGS]: "Settings",
       [ROUTES.ACCESS_DENIED]: "Access denied",
@@ -396,13 +401,41 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route path="/db-client/clients" element={<Navigate to={ROUTES.DB_CLIENT_CLIENT_ONB} replace />} />
             <Route
-              path={ROUTES.DB_CLIENT_CLIENTS}
+              path={ROUTES.DB_CLIENT_DB_DASH}
+              element={
+                <ProtectedRoute
+                  sectionKeys={["db_client"]}
+                  emailAllowlist={DB_CLIENT_DB_DASH_ALLOWED_EMAILS}
+                >
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <DbDashPage />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={ROUTES.DB_CLIENT_CLIENT_ONB_INACTIVE}
               element={
                 <ProtectedRoute sectionKeys={["db_client"]}>
                   <AppLayout>
                     <ErrorBoundary>
-                      <ClientTrainingPage />
+                      <ClientOnbPage mode="inactive" />
+                    </ErrorBoundary>
+                  </AppLayout>
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path={ROUTES.DB_CLIENT_CLIENT_ONB}
+              element={
+                <ProtectedRoute sectionKeys={["db_client"]}>
+                  <AppLayout>
+                    <ErrorBoundary>
+                      <ClientOnbPage mode="active" />
                     </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>

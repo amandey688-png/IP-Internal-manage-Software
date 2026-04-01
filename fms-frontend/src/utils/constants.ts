@@ -130,7 +130,9 @@ export const ROUTES = {
   TRAINING: '/training',
   TRAINING_CLIENT: '/training/client-training',
   /** DB Client module */
-  DB_CLIENT_CLIENTS: '/db-client/clients',
+  DB_CLIENT_CLIENT_ONB: '/db-client/client-onb',
+  DB_CLIENT_CLIENT_ONB_INACTIVE: '/db-client/client-onb/inactive',
+  DB_CLIENT_DB_DASH: '/db-client/db-dash',
   USERS: '/users',
   SETTINGS: '/settings',
   /** Shown when user opens a URL for a section they are not allowed to view */
@@ -148,6 +150,20 @@ export function canViewPendingPaymentDetails(email: string | null | undefined): 
   const e = (email ?? '').trim().toLowerCase()
   if (!e) return false
   return PENDING_PAYMENT_DETAILS_ALLOWED_EMAILS.some((a) => a.toLowerCase() === e)
+}
+
+/** DB Client dashboard route + menu: only these sign-in emails may open it. */
+export const DB_CLIENT_DB_DASH_ALLOWED_EMAILS: readonly string[] = [
+  'ayush@industryprime.com',
+  'ea@industryprime.com',
+  'sk@industryprime.com',
+  'ad@ip.com',
+]
+
+export function canViewDbClientDbDash(email: string | null | undefined): boolean {
+  const e = (email ?? '').trim().toLowerCase()
+  if (!e) return false
+  return DB_CLIENT_DB_DASH_ALLOWED_EMAILS.some((a) => a.toLowerCase() === e)
 }
 
 export const API_ENDPOINTS = {
@@ -212,6 +228,13 @@ export const API_ENDPOINTS = {
     DETAIL: (id: string) => `/leads/${id}`,
     BY_REFERENCE: (ref: string) => `/leads/by-reference/${ref}`,
     STAGE: (id: string, slug: string) => `/leads/${id}/stages/${slug}`,
+  },
+  DB_CLIENT: {
+    CLIENT_ONB_LIST: '/db-client/client-onb',
+    CLIENT_ONB_STATUS_COLUMN_CHECK: '/db-client/client-onb/status-column-check',
+    CLIENT_ONB_UPDATE: (id: string) => `/db-client/client-onb/${id}`,
+    CLIENT_ONB_STATUS: (id: string) => `/db-client/client-onb/${id}/status`,
+    CLIENT_ONB_FOLLOW_UP: (id: string) => `/db-client/client-onb/${id}/follow-up`,
   },
   TRAINING: {
     CLIENTS: '/training/clients',
