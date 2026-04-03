@@ -10,6 +10,7 @@ import { ROUTES } from '../../utils/constants'
 import { getDefaultLandingRoute } from '../../utils/helpers'
 import { useAuth } from '../../hooks/useAuth'
 import { API_BASE_URL } from '../../api/axios'
+import { getLocalUvicornStartCommand } from '../../utils/localBackend'
 import type { LoginRequest } from '../../types/auth'
 
 const { Link: TextLink } = Typography
@@ -26,6 +27,12 @@ const INVALID_CREDENTIALS_MSG = 'Please enter valid email / password.'
 
 function friendlyLoginError(raw: string): string {
   const s = (raw || '').toLowerCase()
+  if (s.trim() === 'not found') {
+    return (
+      'Login API was not found (404). Another app may be on that port, or this is not the FMS backend. ' +
+      `Check fms-frontend/.env — VITE_API_BASE_URL must match uvicorn (same port). Restart npm run dev after changing it. Then: ${getLocalUvicornStartCommand()}`
+    )
+  }
   if (s.includes('no account found') && s.includes('email')) {
     return 'No account found for this email. Check spelling or create an account.'
   }

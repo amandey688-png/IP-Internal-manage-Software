@@ -13,6 +13,8 @@ import { supportDashboardApi, type SupportDashboardStats, type WeekData } from '
 import { LoadingSpinner } from '../../components/common/LoadingSpinner'
 import { formatDateWeekly, truncateTitleDescCell } from '../../utils/helpers'
 import { ROUTES } from '../../utils/constants'
+import { isLocalBackend } from '../../api/axios'
+import { getLocalUvicornStartCommand } from '../../utils/localBackend'
 
 const { Title, Text } = Typography
 
@@ -70,7 +72,9 @@ export const SupportDashboard = () => {
       const msg = backendMsg
         ? String(backendMsg)
         : isNetworkError
-          ? 'Backend not reachable. Start it from the backend folder: uvicorn app.main:app --reload --host 127.0.0.1 --port 8000'
+          ? isLocalBackend
+            ? `Backend not reachable. ${getLocalUvicornStartCommand()}`
+            : 'Backend not reachable. Check your connection or API URL.'
           : ax?.message ? String(ax.message) : 'Unknown error'
       setError(`Failed to load Support Dashboard: ${msg}`)
     } finally {
