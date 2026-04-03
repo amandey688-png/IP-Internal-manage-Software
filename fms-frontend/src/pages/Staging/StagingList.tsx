@@ -10,6 +10,7 @@ import {
   TICKET_EXPORT_COLUMNS,
   buildTicketExportRow,
   truncateTitleDescCell,
+  TICKET_TABLE_QA_PREVIEW_MAX_CHARS,
 } from '../../utils/helpers'
 import type { Ticket } from '../../api/tickets'
 import { StagingDetailDrawer } from '../../components/tickets/StagingDetailDrawer'
@@ -54,9 +55,9 @@ const stagingTicketColumns = [
     title: 'Company Name',
     dataIndex: 'company_name',
     key: 'company_name',
-    width: 120,
-    ellipsis: true,
-    render: (v: string) => v || '-',
+    width: 140,
+    ellipsis: false,
+    render: (v: string) => <span style={wrapStyle}>{v?.trim() ? v : '-'}</span>,
   },
   {
     title: 'User Name',
@@ -163,17 +164,25 @@ const stagingTicketColumns = [
     title: 'Quality of Response',
     dataIndex: 'quality_of_response',
     key: 'quality_of_response',
-    width: 220,
+    width: 140,
     ellipsis: false,
-    render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
+    render: (v: string) => (
+      <span style={wrapStyle} title={v?.trim() ? String(v) : undefined}>
+        {truncateTitleDescCell(v || undefined, TICKET_TABLE_QA_PREVIEW_MAX_CHARS)}
+      </span>
+    ),
   },
   {
     title: 'Customer Questions',
     dataIndex: 'customer_questions',
     key: 'customer_questions',
-    width: 220,
+    width: 140,
     ellipsis: false,
-    render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
+    render: (v: string) => (
+      <span style={wrapStyle} title={v?.trim() ? String(v) : undefined}>
+        {truncateTitleDescCell(v || undefined, TICKET_TABLE_QA_PREVIEW_MAX_CHARS)}
+      </span>
+    ),
   },
   {
     title: 'Query Response',

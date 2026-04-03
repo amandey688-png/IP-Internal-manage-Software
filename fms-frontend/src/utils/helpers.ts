@@ -41,6 +41,9 @@ export const formatDateWeekly = (date: string | Date | null | undefined): string
 /** Max characters shown per Title / Description cell in Support ticket tables; open ticket for full text. */
 export const TICKET_TABLE_TITLE_DESC_MAX_CHARS = 20
 
+/** Preview length for Quality of Response / Customer Questions in Support lists; full text in ticket detail. */
+export const TICKET_TABLE_QA_PREVIEW_MAX_CHARS = 10
+
 export function truncateTitleDescCell(
   text: string | undefined,
   maxChars = TICKET_TABLE_TITLE_DESC_MAX_CHARS

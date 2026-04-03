@@ -1,6 +1,12 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from "axios"
 import { storage } from "../utils/storage"
 import { ROUTES } from "../utils/constants"
+import {
+  DEFAULT_LOCAL_BACKEND_ORIGIN,
+  isHttpLoopbackApiUrl,
+} from "../utils/localBackend"
+
+export { getLocalUvicornStartCommand } from "../utils/localBackend"
 
 /** Default production backend (Render). Must match your deployed FastAPI URL. */
 export const PRODUCTION_API_FALLBACK = "https://ip-internal-manage-software.onrender.com"
@@ -15,19 +21,61 @@ declare global {
 /**
  * Resolve API base URL.
  * Fixes: Vercel env often mistakenly set to the frontend URL (industryprime.vercel.app)
- * → POST /onboarding/... hits the static site → 404 "Not Found". Local uses 127.0.0.1 and works.
+ * → POST /onboarding/... hits the static site → 404 "Not Found".
+ *
+ * Local dev: default = same-origin /api + Vite proxy → avoids ERR_NETWORK (browser → 127.0.0.1) on Windows.
+ * Set VITE_DEV_SAME_ORIGIN_PROXY=0 for direct calls to VITE_API_BASE_URL instead.
  */
 function resolveApiBase(): string {
-  const _local = "http://127.0.0.1:8000"
+  const _local = DEFAULT_LOCAL_BACKEND_ORIGIN
   const runtime =
     typeof window !== "undefined" && window.__FMS_API_BASE_URL__?.trim()
       ? window.__FMS_API_BASE_URL__.trim()
       : ""
   const fromVite =
     (import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || "").trim()
+  const devSameOriginProxy = import.meta.env.VITE_DEV_SAME_ORIGIN_PROXY !== "0"
+
+  // Explicit runtime override (index.html) — keep full URL
+  if (runtime) {
+    let raw = runtime.replace(/\/+$/, "")
+    if (typeof window !== "undefined" && import.meta.env.PROD) {
+      try {
+        const u = new URL(raw.startsWith("http") ? raw : `https://${raw}`)
+        const path = (u.pathname || "/").replace(/\/+$/, "") || "/"
+        const sameOriginAsPage = u.origin === window.location.origin
+        if (sameOriginAsPage && path === "/") {
+          console.warn(
+            "[FMS] API base is the same as this website — using Render backend instead:",
+            PRODUCTION_API_FALLBACK
+          )
+          return PRODUCTION_API_FALLBACK.replace(/\/+$/, "")
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+    return raw
+  }
+
+  // Vite dev + browser: default `/api` + proxy (see vite.config). Direct URL if VITE_DEV_SAME_ORIGIN_PROXY=0.
+  if (import.meta.env.DEV && typeof window !== "undefined") {
+    const v = fromVite.replace(/\/+$/, "")
+    if (devSameOriginProxy) {
+      if (!v || isHttpLoopbackApiUrl(v)) {
+        return "/api"
+      }
+    } else {
+      if (isHttpLoopbackApiUrl(v)) {
+        return v
+      }
+      if (!v) {
+        return _local
+      }
+    }
+  }
 
   let raw =
-    runtime ||
     fromVite ||
     (import.meta.env.DEV ? _local : PRODUCTION_API_FALLBACK)
   raw = raw.replace(/\/+$/, "")
@@ -37,7 +85,6 @@ function resolveApiBase(): string {
       const u = new URL(raw.startsWith("http") ? raw : `https://${raw}`)
       const path = (u.pathname || "/").replace(/\/+$/, "") || "/"
       const sameOriginAsPage = u.origin === window.location.origin
-      // Frontend-only URL (no /api path) → API calls go to Vercel SPA → 404
       if (sameOriginAsPage && path === "/") {
         console.warn(
           "[FMS] API base is the same as this website — using Render backend instead:",
@@ -62,7 +109,9 @@ if (import.meta.env.PROD && (API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.
 }
 
 export const isLocalBackend =
-  API_BASE_URL.includes("127.0.0.1") || API_BASE_URL.includes("localhost")
+  API_BASE_URL === "/api" ||
+  API_BASE_URL.includes("127.0.0.1") ||
+  API_BASE_URL.includes("localhost")
 
 console.log("🔗 API Base URL:", API_BASE_URL)
 
@@ -110,10 +159,12 @@ apiClient.interceptors.response.use(
     }
 
     // Render / some hosts only forward /api/* to FastAPI → root /onboarding/* returns 404
+    const apiBaseNorm = API_BASE_URL.replace(/\/+$/, "")
     if (
       error.response?.status === 404 &&
       originalRequest &&
-      !originalRequest._api404Retry
+      !originalRequest._api404Retry &&
+      apiBaseNorm !== "/api"
     ) {
       const raw = originalRequest.url || ""
       const pathOnly = (raw.split("?")[0] || "").replace(/^\/+/, "/")

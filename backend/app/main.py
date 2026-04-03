@@ -363,6 +363,7 @@ class RecoveryPasswordRequest(BaseModel):
 
 # ---------- Routes ----------
 @app.get("/health")
+@app.get("/api/health")
 def health():
     """Lightweight health check (no DB). Use for keep-alive pings (e.g. UptimeRobot every 5 min) to prevent Render cold start.
     If DEADMANS_SNITCH_URL is set, pings Snitch so you get alerted when this endpoint stops being hit."""
@@ -381,6 +382,7 @@ def register_simple(payload: RegisterRequest):
 
 
 @app.get("/health/db")
+@app.get("/api/health/db")
 def health_db():
     """Check if database tables exist - run FRESH_SETUP.sql if this fails"""
     try:
@@ -397,6 +399,7 @@ def register_test():
 
 
 @app.get("/health/supabase")
+@app.get("/api/health/supabase")
 def health_supabase():
     """Test Supabase connection. Open in browser to see why login fails."""
     url = os.getenv("SUPABASE_URL", "")
@@ -2316,23 +2319,28 @@ def _dashboard_kpi_resolve_user_id(name: str) -> str | None:
 
 
 def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple[date, date] | None:
-    """Return (range_start, range_end) for the given month and week (e.g. week 2). week 1 = 1-7, 2 = 8-14, 3 = 15-21, 4 = 22-28, 5 = 29-31."""
+    """Return (range_start, range_end) inclusive for a Monday–Sunday week (aligned with Support FMS `_week_of_month`).
+
+    Week 1 starts on the first Monday of the month (see first Monday on-or-after the 1st, same formula as `_week_of_month`).
+    Each week spans exactly 7 days; Sunday may fall in the next calendar month.
+    """
     try:
         import calendar
-        _, last_day = calendar.monthrange(year, month_num)
+
         week_num = 2
         if week_str and "week" in week_str.lower():
-            import re
             m = re.search(r"(\d+)", week_str)
             if m:
                 week_num = max(1, min(5, int(m.group(1))))
-        start_day = (week_num - 1) * 7 + 1
-        end_day = min(week_num * 7, last_day)
-        if start_day > last_day:
-            start_day = 1
-            end_day = min(7, last_day)
+        first = date(year, month_num, 1)
+        first_wd = first.weekday()
+        first_monday_day = 1 if first_wd == 0 else 1 + (7 - first_wd) % 7
+        start_day = first_monday_day + (week_num - 1) * 7
+        last = calendar.monthrange(year, month_num)[1]
+        if start_day > last:
+            return None
         range_start = date(year, month_num, start_day)
-        range_end = date(year, month_num, end_day)
+        range_end = range_start + timedelta(days=6)
         return range_start, range_end
     except Exception:
         return None
@@ -3209,15 +3217,22 @@ def _stage2_marked_completed(status_2: str | None) -> bool:
 
 
 def _week_date_range(week_num: int, month: int, year: int) -> str:
-    """Return human-readable date range for week (e.g. '1 Jan – 7 Jan')."""
-    first = datetime(year, month, 1)
-    first_day = first.weekday()
-    first_monday = 1 + (7 - first_day) % 7 if first_day != 0 else 1
-    start_day = first_monday + (week_num - 1) * 7
-    start = datetime(year, month, min(start_day, 28))
-    end = datetime(year, month, min(start_day + 5, 28))
-    names = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-    return f"{start.day} {names[month - 1]} – {end.day} {names[month - 1]}"
+    """Human-readable Monday–Sunday range for Support Dashboard (same week rules as `_week_of_month`)."""
+    import calendar
+
+    first = date(year, month, 1)
+    first_wd = first.weekday()
+    first_monday_day = 1 if first_wd == 0 else 1 + (7 - first_wd) % 7
+    start_day = first_monday_day + (week_num - 1) * 7
+    last = calendar.monthrange(year, month)[1]
+    if start_day > last:
+        return f"Week {week_num}"
+    start = date(year, month, start_day)
+    end = start + timedelta(days=6)
+    names = _MONTH_NAMES
+    if start.month == end.month:
+        return f"{start.day} {names[start.month - 1]} – {end.day} {names[end.month - 1]}"
+    return f"{start.day} {names[start.month - 1]} – {end.day} {names[end.month - 1]}"
 
 
 @api_router.get("/support-dashboard/filtered")

@@ -28,6 +28,7 @@ import {
   TICKET_EXPORT_COLUMNS,
   buildTicketExportRow,
   truncateTitleDescCell,
+  TICKET_TABLE_QA_PREVIEW_MAX_CHARS,
 } from '../../utils/helpers'
 import { useRole } from '../../hooks/useRole'
 import type { Ticket } from '../../api/tickets'
@@ -482,10 +483,10 @@ export const TicketList = () => {
       title: 'Company Name',
       dataIndex: 'company_name',
       key: 'company_name',
-      width: 120,
+      width: 140,
       fixed: 'left' as const,
-      ellipsis: true,
-      render: (v: string) => v || '-',
+      ellipsis: false,
+      render: (v: string) => <span style={wrapStyle}>{v?.trim() ? v : '-'}</span>,
     },
     {
       title: 'User Name',
@@ -597,17 +598,25 @@ export const TicketList = () => {
       title: 'Quality of Response',
       dataIndex: 'quality_of_response',
       key: 'quality_of_response',
-      width: 220,
+      width: 140,
       ellipsis: false,
-      render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
+      render: (v: string) => (
+        <span style={wrapStyle} title={v?.trim() ? String(v) : undefined}>
+          {truncateTitleDescCell(v || undefined, TICKET_TABLE_QA_PREVIEW_MAX_CHARS)}
+        </span>
+      ),
     },
     {
       title: 'Customer Questions',
       dataIndex: 'customer_questions',
       key: 'customer_questions',
-      width: 220,
+      width: 140,
       ellipsis: false,
-      render: (v: string) => <span style={wrapStyle}>{v || '-'}</span>,
+      render: (v: string) => (
+        <span style={wrapStyle} title={v?.trim() ? String(v) : undefined}>
+          {truncateTitleDescCell(v || undefined, TICKET_TABLE_QA_PREVIEW_MAX_CHARS)}
+        </span>
+      ),
     },
     {
       title: 'Query Response',
@@ -811,9 +820,9 @@ export const TicketList = () => {
       title: 'Company Name',
       dataIndex: 'company_name',
       key: 'company_name',
-      width: 140,
-      ellipsis: true,
-      render: (v: string) => v || '-',
+      width: 160,
+      ellipsis: false,
+      render: (v: string) => <span style={wrapStyle}>{v?.trim() ? v : '-'}</span>,
     },
     {
       title: 'Quality of Solution',

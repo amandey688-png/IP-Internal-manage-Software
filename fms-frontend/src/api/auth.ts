@@ -1,4 +1,5 @@
 import { apiClient, isLocalBackend } from './axios'
+import { getLocalUvicornStartCommand } from '../utils/localBackend'
 import type { ApiResponse } from '../types/common'
 import type {
   RegisterRequest,
@@ -49,7 +50,7 @@ export const authApi = {
           ? 'Cannot connect to backend server.'
           : `Network Error: ${err.message || 'Backend server is not reachable'}`
         const errorMessage = isLocalBackend
-          ? `${defaultMsg} Start the backend: cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000`
+          ? `${defaultMsg} Start the backend: ${getLocalUvicornStartCommand()}`
           : `${defaultMsg} The server may be down or check your connection.`
 
         return {
@@ -106,12 +107,12 @@ export const authApi = {
         !err.response
       if (isNetworkError) {
         const hint = isLocalBackend
-          ? 'Start the backend: cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000'
+          ? `Start the backend: ${getLocalUvicornStartCommand()}`
           : 'Server may be down or check your connection.'
         const errorMessage =
           err.code === 'ECONNABORTED'
             ? (isLocalBackend
-                ? `Login timed out. Is the backend running on port 8000? Run: cd backend && uvicorn app.main:app --reload --host 127.0.0.1 --port 8000`
+                ? `Login timed out. Is the API running? ${getLocalUvicornStartCommand()}`
                 : `Login timed out (90s). ${hint}`)
             : err.message?.includes('Network Error') || err.code === 'ERR_NETWORK'
               ? `Cannot reach server. ${hint}`

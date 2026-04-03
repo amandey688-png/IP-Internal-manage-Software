@@ -4,7 +4,7 @@ Success KPI for Rimpa Dashboard: pulls from ALL Success / performance_monitoring
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.supabase_client import supabase
@@ -13,6 +13,18 @@ SUCCESS_KPI_POC_TARGET = 16
 SUCCESS_KPI_TRAIN_TARGET = 1
 SUCCESS_KPI_FOLLOWUP_TARGET = 25
 SUCCESS_KPI_INCREASE_TARGET = 2
+
+_MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+_WD_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+
+def _format_dashboard_week_label(week_start: date, week_end: date) -> str:
+    """Mon dd Mmm – Sun dd Mmm (cross-month when Sunday is in the next month)."""
+    sm, em = _MONTH_ABBR[week_start.month - 1], _MONTH_ABBR[week_end.month - 1]
+    return (
+        f"{_WD_SHORT[week_start.weekday()]} {week_start.day} {sm} – "
+        f"{_WD_SHORT[week_end.weekday()]} {week_end.day} {em}"
+    )
 
 
 def _parse_iso_to_date(value) -> date | None:
@@ -31,6 +43,24 @@ def _parse_iso_to_date(value) -> date | None:
 
 def _in_range(d: date | None, rs: date, re: date) -> bool:
     return d is not None and rs <= d <= re
+
+
+def _monday_week_range_in_month(year: int, month_num: int, week_idx: int) -> tuple[date, date] | None:
+    """Monday–Sunday inclusive; week_idx 1–5. Matches main._dashboard_kpi_week_range / Support FMS weeks."""
+    import calendar
+
+    if week_idx < 1 or week_idx > 5:
+        return None
+    first = date(year, month_num, 1)
+    first_wd = first.weekday()
+    first_monday_day = 1 if first_wd == 0 else 1 + (7 - first_wd) % 7
+    start_day = first_monday_day + (week_idx - 1) * 7
+    last = calendar.monthrange(year, month_num)[1]
+    if start_day > last:
+        return None
+    ws = date(year, month_num, start_day)
+    we = ws + timedelta(days=6)
+    return ws, we
 
 
 def compute_success_kpi_for_dashboard(
@@ -301,23 +331,9 @@ def compute_success_kpi_for_dashboard(
         pct_values = [poc_pct, train_pct, fu_pct, success_pct]
         overall_pct = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
 
-        # Weekly graph: same logic per calendar week of month
+        # Weekly graph: Monday–Sunday weeks (same as Dashboard KPI / Support)
         for w in range(1, 6):
-            rng = None
-            try:
-                import calendar as _cal
-
-                _, last_day = _cal.monthrange(y, month_num)
-                start_day = (w - 1) * 7 + 1
-                end_day = min(w * 7, last_day)
-                if start_day > last_day:
-                    start_day = 1
-                    end_day = min(7, last_day)
-                wrs = date(y, month_num, start_day)
-                wre = date(y, month_num, end_day)
-                rng = (wrs, wre)
-            except Exception:
-                rng = None
+            rng = _monday_week_range_in_month(y, month_num, w)
             if not rng:
                 weekly_success_pct.append(0)
                 continue
@@ -379,7 +395,7 @@ def compute_success_kpi_for_dashboard(
             },
             "overallPercentage": overall_pct,
             "meta": {
-                "weekLabel": f"{week_start.isoformat()} – {week_end.isoformat()}",
+                "weekLabel": _format_dashboard_week_label(week_start, week_end),
                 "targets": {
                     "poc": SUCCESS_KPI_POC_TARGET,
                     "training": SUCCESS_KPI_TRAIN_TARGET,
