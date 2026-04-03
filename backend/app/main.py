@@ -2318,6 +2318,14 @@ def _dashboard_kpi_resolve_user_id(name: str) -> str | None:
     return None
 
 
+def _delegation_task_done(t: dict) -> bool:
+    """True if delegation task counts as completed for KPI %."""
+    st = str(t.get("status") or "").lower().strip()
+    if st in ("completed", "complete"):
+        return True
+    return bool(t.get("completed_at"))
+
+
 def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple[date, date] | None:
     """Return (range_start, range_end) inclusive for a Monday–Sunday week (aligned with Support FMS `_week_of_month`).
 
@@ -2478,15 +2486,19 @@ def dashboard_kpi(
             q = q.or_(f"assignee_id.eq.{user_id},submitted_by.eq.{user_id}")
             r = q.execute()
             all_tasks = r.data or []
-            week_tasks = [t for t in all_tasks if t.get("due_date") or t.get("delegation_on")]
+            # Weekly KPI should be scoped by the *due* week.
+            # Some pending tasks may have `delegation_on` in the current week but `due_date` in another week;
+            # using `delegation_on` here makes them appear in the wrong week.
+            week_tasks = [t for t in all_tasks if t.get("due_date")]
             def _in_week(t):
-                d = t.get("due_date") or t.get("delegation_on")
+                d = t.get("due_date")
                 if not d:
                     return False
                 if isinstance(d, str):
                     d = date.fromisoformat(d[:10])
                 return range_start <= d <= range_end
             def _in_month(t):
+                # Monthly KPI can still consider delegation_on when due_date is missing.
                 d = t.get("due_date") or t.get("delegation_on")
                 if not d:
                     return False
@@ -2495,16 +2507,16 @@ def dashboard_kpi(
                 return month_start <= d <= month_end
             week_list = [t for t in week_tasks if _in_week(t)]
             month_list = [t for t in all_tasks if _in_month(t)]
-            # Weekly percentage is based on tasks whose due_date/delegation_on falls in the selected week
+            # Weekly % and table rows both use tasks whose due_date/delegation_on falls in the selected week
             total_w = len(week_list)
-            done_w = sum(1 for t in week_list if str(t.get("status") or "").lower() == "completed")
+            done_w = sum(1 for t in week_list if _delegation_task_done(t))
             delegation_weekly_pct = round((done_w / total_w) * 100) if total_w else 0
             # Monthly percentage is based on all tasks in the selected month
             total_m = len(month_list)
-            done_m = sum(1 for t in month_list if str(t.get("status") or "").lower() == "completed")
+            done_m = sum(1 for t in month_list if _delegation_task_done(t))
             delegation_monthly_pct = round((done_m / total_m) * 100) if total_m else 0
-            # Show all delegation tasks for this user in the selected month in the KPI table
-            for t in month_list:
+            # KPI table: same scope as weekly % (selected Mon–Sun week), not the whole month
+            for t in week_list:
                 delegation_rows.append({
                     "task": t.get("title") or t.get("task") or "",
                     "status": (t.get("status") or "pending").replace("_", " ").title(),
@@ -2719,7 +2731,8 @@ def dashboard_kpi(
                 weekly_progress_checklist.append(cl_pct)
                 # Delegation % for this week
                 def _in_week_del(t, rs_=rs, re_=re):
-                    d = t.get("due_date") or t.get("delegation_on")
+                    # Weekly progress should also be scoped by due_date only.
+                    d = t.get("due_date")
                     if not d:
                         return False
                     if isinstance(d, str):
@@ -2727,7 +2740,7 @@ def dashboard_kpi(
                     return rs_ <= d <= re_
                 week_list_w = [t for t in all_tasks if _in_week_del(t)]
                 total_d = len(week_list_w)
-                done_d = sum(1 for t in week_list_w if str(t.get("status") or "").lower() == "completed")
+                done_d = sum(1 for t in week_list_w if _delegation_task_done(t))
                 del_pct = round((done_d / total_d) * 100) if total_d else 0
                 weekly_progress_delegation.append(del_pct)
                 # Support FMS % for this week (same formula: (total - pending) / total * 100)
