@@ -1,4 +1,4 @@
-import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Spin, Tag, Form, Input, message } from 'antd'
+import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Spin, Tag, Form, Input, message, Space } from 'antd'
 import {
   LineChart,
   Line,
@@ -16,6 +16,7 @@ import {
   RocketOutlined,
 } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
+import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import { dashboardApi, type DashboardDetailTicket, type TrendPoint } from '../api/dashboard'
 import { ticketsApi } from '../api/tickets'
@@ -45,6 +46,14 @@ const ACTIVE_LEAD_STAGE_COLORS: Record<string, string> = {
 }
 
 const { Title, Text } = Typography
+
+function formatINR(n: number): string {
+  try {
+    return new Intl.NumberFormat('en-IN').format(n)
+  } catch {
+    return String(n)
+  }
+}
 
 /** Same display for Tag (T1) and Tag (T2): name + email when both exist */
 function formatTagColumn(name?: string | null, email?: string | null) {
@@ -93,8 +102,9 @@ export const Dashboard = () => {
   const [detailTitle, setDetailTitle] = useState('')
   const [detailData, setDetailData] = useState<DashboardDetailTicket[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
-  const hideCompanyColumnInDelegation =
-    detailMetric === 'custom_pending_delegation' || detailMetric === 'custom_total_rec_amount' || detailMetric === 'custom_total_due'
+  const hideCompanyColumnInDelegation = detailMetric === 'custom_pending_delegation'
+  const isPaymentKpiDetail =
+    detailMetric === 'custom_total_rec_amount' || detailMetric === 'custom_total_due'
   const [activeLeads, setActiveLeads] = useState<ActiveLeadRow[]>([])
   const [activeLeadsLoading, setActiveLeadsLoading] = useState(false)
   const [paymentActions, setPaymentActions] = useState<
@@ -275,11 +285,16 @@ export const Dashboard = () => {
     custom_received_monthly: 0,
     custom_received_quarterly: 0,
     custom_received_half_yearly: 0,
+    custom_received_yearly: 0,
     custom_total_due: 0,
     custom_pending_delegation: 0,
   }
 
-  const customReceivedTotal = Number(safeMetrics.custom_received_monthly) + Number(safeMetrics.custom_received_quarterly) + Number(safeMetrics.custom_received_half_yearly)
+  const customReceivedTotal =
+    Number(safeMetrics.custom_received_monthly) +
+    Number(safeMetrics.custom_received_quarterly) +
+    Number(safeMetrics.custom_received_half_yearly) +
+    Number(safeMetrics.custom_received_yearly)
 
   const baseMetricCards = [
     { title: 'Total Pending Bug (till date)', metricKey: 'total_pending_bug', value: Number(safeMetrics.total_pending_bug_till_date) ?? 0, icon: <FileTextOutlined /> },
@@ -393,6 +408,8 @@ export const Dashboard = () => {
         {metricCards.map((card, i) => {
           const cardStyle = metricCardColors[i] || metricCardColors[0]
           const clickable = card.clickable !== false
+          const paymentRupeeCard =
+            card.metricKey === 'custom_total_due' || card.metricKey === 'custom_total_rec_amount'
           return (
             <Col xs={24} sm={12} md={8} lg={6} key={i}>
               <Card
@@ -414,6 +431,7 @@ export const Dashboard = () => {
                     </Text>
                     <Statistic
                       value={card.value}
+                      formatter={paymentRupeeCard ? (val) => <span style={{ fontSize: 28, fontWeight: 700, color: '#1e293b' }}>₹{formatINR(Number(val))}</span> : undefined}
                       valueStyle={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginTop: 4 }}
                     />
                   </div>
@@ -657,16 +675,115 @@ export const Dashboard = () => {
       </Card>
 
       <Modal
-        title={detailTitle}
+        title={
+          isPaymentKpiDetail ? (
+            <Space direction="vertical" size={4} style={{ width: '100%' }}>
+              <span>{detailTitle}</span>
+              <Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>
+                Same raised-invoice rows as{' '}
+                <Button type="link" size="small" style={{ padding: 0, height: 'auto' }} onClick={() => { setDetailModalOpen(false); navigate(ROUTES.CLIENT_PAYMENT) }}>
+                  Client Payment → Payment Management
+                </Button>
+              </Text>
+            </Space>
+          ) : (
+            detailTitle
+          )
+        }
         open={detailModalOpen}
         onCancel={() => { setDetailModalOpen(false); setDetailData([]) }}
-        footer={null}
-        width={800}
+        footer={
+          isPaymentKpiDetail ? (
+            <Button type="primary" onClick={() => { setDetailModalOpen(false); navigate(ROUTES.CLIENT_PAYMENT) }}>
+              Open Client Payment
+            </Button>
+          ) : null
+        }
+        width={isPaymentKpiDetail ? 1100 : 800}
       >
         {detailLoading ? (
           <div style={{ padding: 48, textAlign: 'center' }}>
             <Spin size="large" />
           </div>
+        ) : isPaymentKpiDetail ? (
+          <Table
+            dataSource={detailData}
+            rowKey="id"
+            size="small"
+            pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `Total ${t} invoices` }}
+            scroll={{ x: 1000 }}
+            columns={[
+              {
+                title: 'Reference',
+                dataIndex: 'referenceNo',
+                key: 'referenceNo',
+                width: 130,
+                ellipsis: true,
+                render: (v: string) => v || '—',
+              },
+              {
+                title: 'Company Name',
+                dataIndex: 'company',
+                key: 'company',
+                width: 220,
+                ellipsis: true,
+                render: (v: string) => v || '—',
+              },
+              {
+                title: 'Invoice Date',
+                dataIndex: 'invoiceDate',
+                key: 'invoiceDate',
+                width: 120,
+                render: (v: string) => (v && dayjs(v).isValid() ? dayjs(v).format('DD-MMM-YYYY') : '—'),
+              },
+              {
+                title: 'Invoice Amount',
+                dataIndex: 'invoiceAmount',
+                key: 'invoiceAmount',
+                width: 120,
+                align: 'right' as const,
+                render: (v: number | undefined) => (v != null ? `₹${formatINR(Number(v))}` : '—'),
+              },
+              {
+                title: 'Invoice Number',
+                dataIndex: 'invoiceNumber',
+                key: 'invoiceNumber',
+                width: 130,
+                ellipsis: true,
+                render: (v: string) => v || '—',
+              },
+              {
+                title: 'Stage',
+                dataIndex: 'stage',
+                key: 'stage',
+                width: 150,
+                ellipsis: true,
+                render: (v: string) => v || '—',
+              },
+              {
+                title: 'Status',
+                dataIndex: 'status',
+                key: 'status',
+                width: 100,
+                render: (v: string) => v || '—',
+              },
+              {
+                title: 'Aging (days)',
+                dataIndex: 'agingDays',
+                key: 'agingDays',
+                width: 100,
+                align: 'center' as const,
+                render: (v: number | null | undefined) => (v != null ? String(v) : '—'),
+              },
+              {
+                title: 'Genre',
+                dataIndex: 'genre',
+                key: 'genre',
+                width: 100,
+                render: (v: string) => v || '—',
+              },
+            ]}
+          />
         ) : (
           <Table
             dataSource={detailData}
