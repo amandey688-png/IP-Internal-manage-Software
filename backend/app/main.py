@@ -1946,22 +1946,21 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
             return False
     completion_delay = sum(1 for t in week_tickets if _completion_delay_ticket(t))
 
-    # In Staging: pending counts by type (Feature vs Chores & Bug)
+    # In Staging: same rules as Support → Staging (GET /tickets?section=staging), not staging_deployments.
     staging_pending_feature = 0
     staging_pending_chores_bugs = 0
     try:
-        r = supabase.table("staging_deployments").select("ticket_id").eq("status", "pending").execute()
-        pending_staging = r.data or []
-        ticket_ids = [d["ticket_id"] for d in pending_staging if d.get("ticket_id")]
-        if ticket_ids:
-            # Fetch ticket types for these ids (batch in chunks if many)
-            r2 = supabase.table("tickets").select("id, type").in_("id", ticket_ids).execute()
-            tickets_in_staging = r2.data or []
-            for t in tickets_in_staging:
-                if t.get("type") == "feature":
-                    staging_pending_feature += 1
-                elif t.get("type") in ("chore", "bug"):
-                    staging_pending_chores_bugs += 1
+
+        def _staging_metrics_base():
+            b = supabase.table("tickets").select("id", count="exact")
+            b = b.or_("staging_planned.not.is.null,status_2.eq.staging")
+            b = b.or_("live_review_status.is.null,live_review_status.neq.completed")
+            return b
+
+        rf = _staging_metrics_base().eq("type", "feature").execute()
+        staging_pending_feature = int(rf.count) if rf.count is not None else len(rf.data or [])
+        rcb = _staging_metrics_base().in_("type", ["chore", "bug"]).execute()
+        staging_pending_chores_bugs = int(rcb.count) if rcb.count is not None else len(rcb.data or [])
     except Exception:
         pass
 
@@ -1984,6 +1983,7 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     custom_received_monthly = 0
     custom_received_quarterly = 0
     custom_received_half_yearly = 0
+    custom_received_yearly = 0
     custom_total_due = 0
     custom_pending_delegation = 0
 
@@ -1992,15 +1992,12 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     custom_emails = custom_full_emails | custom_payment_only_emails
     if auth_email in custom_emails:
         try:
-            # Current quarter bounds (used for genre split)
             from datetime import date as date_cls
-            today = date_cls.today()
-            fy, q = _pa.fy_quarter_key(today)
-            q_start, q_end = _pa.quarter_date_bounds(fy, q)
+            from datetime import timedelta
 
-            def _parse_amt(val: object) -> int:
-                s = str(val).strip()
-                return int(s) if s.isdigit() else 0
+            today = date_cls.today()
+            # Received amounts: trailing 12 months by payment/anchor date (see M-Comp / completed lists).
+            recv_window_start = today - timedelta(days=365)
 
             pr = (
                 supabase.table("onboarding_client_payment")
@@ -2011,24 +2008,28 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
             pay_rows = pr.data or []
 
             for row in pay_rows:
-                inv_d = _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
-                if not inv_d or not (q_start <= inv_d <= q_end):
+                amt = _parse_invoice_amount(row.get("invoice_amount"))
+                is_paid = not _client_payment_row_unpaid(row)
+
+                # Total Due: all unpaid raised invoices (same scope as Payment Management "open" list),
+                # not limited to the current fiscal quarter — invoice date can be any period.
+                if not is_paid:
+                    custom_total_due += amt
+                    continue
+    
+                anchor_d = _client_payment_received_quarter_anchor(row)
+                if not anchor_d or not (recv_window_start <= anchor_d <= today):
                     continue
 
-                amt = _parse_amt(row.get("invoice_amount"))
-                g = (row.get("genre") or "").strip().upper()
-                paid_val = row.get("payment_received_date")
-                is_paid = paid_val is not None and str(paid_val).strip() != ""
-
-                if is_paid:
-                    if g == "M":
-                        custom_received_monthly += amt
-                    elif g == "Q":
-                        custom_received_quarterly += amt
-                    elif g == "HY":
-                        custom_received_half_yearly += amt
-                else:
-                    custom_total_due += amt
+                g = _normalize_client_payment_genre(row.get("genre"))
+                if g == "M":
+                    custom_received_monthly += amt
+                elif g == "Q":
+                    custom_received_quarterly += amt
+                elif g == "HY":
+                    custom_received_half_yearly += amt
+                elif g == "Y":
+                    custom_received_yearly += amt
         except Exception:
             pass
 
@@ -2056,6 +2057,7 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
         "custom_received_monthly": custom_received_monthly,
         "custom_received_quarterly": custom_received_quarterly,
         "custom_received_half_yearly": custom_received_half_yearly,
+        "custom_received_yearly": custom_received_yearly,
         "custom_total_due": custom_total_due,
         "custom_pending_delegation": custom_pending_delegation,
         "response_delay": response_delay,
@@ -2178,88 +2180,119 @@ def dashboard_detail(
     elif metric == "feature_with_demo_c":
         result = [row(t) for t in all_feature if _is_pending_ticket(t) and _company_demo_c_t(t)]
     elif metric in ("custom_total_rec_amount", "custom_total_due"):
-        # Payment Management custom KPIs (Quarterly period) – show invoice rows in modal
+        # Total Due: all unpaid rows (Payment Management). Received: trailing 12 months (matches dashboard metrics).
         from datetime import date as date_cls
-
-        def _parse_amt(val: object) -> int:
-            s = str(val).strip()
-            return int(s) if s.isdigit() else 0
+        from datetime import timedelta
 
         today = date_cls.today()
-        fy, q = _pa.fy_quarter_key(today)
-        q_start, q_end = _pa.quarter_date_bounds(fy, q)
+        recv_window_start = today - timedelta(days=365)
 
-        try:
-            base_q = (
-                supabase.table("onboarding_client_payment")
-                .select("id, reference_no, company_name, invoice_amount, invoice_date, timestamp, genre, payment_received_date")
-                .limit(5000)
-            )
-            if metric == "custom_total_due":
-                base_q = base_q.is_("payment_received_date", "null")
-            else:
-                base_q = base_q.not_.is_("payment_received_date", "null")
-            pr = base_q.execute()
-            pay_rows = pr.data or []
-        except Exception:
-            pay_rows = []
-
-        for rowp in pay_rows:
-            inv_d = _pa._parse_date(rowp.get("invoice_date")) or _pa._parse_date(rowp.get("timestamp"))
-            if not inv_d or not (q_start <= inv_d <= q_end):
-                continue
-
-            amt = _parse_amt(rowp.get("invoice_amount"))
-            g = (rowp.get("genre") or "").strip().upper()
-            paid_val = rowp.get("payment_received_date")
-            is_paid = paid_val is not None and str(paid_val).strip() != ""
-
-            if metric == "custom_total_rec_amount":
-                # Only genres that contribute to Monthly/Quarterly/Half-Yearly cards
-                if not is_paid or g not in ("M", "Q", "HY"):
+        if metric == "custom_total_due":
+            try:
+                pr = (
+                    supabase.table("onboarding_client_payment")
+                    .select(_OCP_LIST_COLUMNS)
+                    .is_("payment_received_date", "null")
+                    .order("timestamp", desc=True)
+                    .limit(_LIST_CLIENT_PAYMENT_LIMIT)
+                    .execute()
+                )
+                pay_rows = pr.data or []
+            except Exception:
+                pay_rows = []
+            _enrich_client_payment_list_items(pay_rows)
+            for rowp in pay_rows:
+                if not _client_payment_row_unpaid(rowp):
                     continue
-            else:
-                # custom_total_due: only unpaid invoices
-                if is_paid:
+                amt = _parse_invoice_amount(rowp.get("invoice_amount"))
+                inv_d = _pa._parse_date(rowp.get("invoice_date")) or _pa._parse_date(rowp.get("timestamp"))
+                g = (rowp.get("genre") or "").strip().upper()
+                genre_label = {"M": "Monthly", "Q": "Quarterly", "HY": "Half-Yearly", "Y": "Yearly"}.get(g, g or "—")
+                company_name = (rowp.get("company_name") or "").strip() or "Unknown"
+                reference_no = (rowp.get("reference_no") or "").strip() or str(rowp.get("id") or "N/A")
+                result.append(
+                    {
+                        "id": str(rowp.get("id") or ""),
+                        "referenceNo": reference_no,
+                        "title": company_name,
+                        "description": "",
+                        "type": "payment",
+                        "company": company_name,
+                        "status": rowp.get("status") or "Pending",
+                        "invoiceAmount": amt,
+                        "invoiceDate": inv_d.isoformat() if inv_d else "",
+                        "invoiceNumber": (rowp.get("invoice_number") or "").strip(),
+                        "stage": (rowp.get("stage") or "").strip() or "—",
+                        "genre": genre_label,
+                        "agingDays": int(rowp.get("aging_days") or 0),
+                    }
+                )
+        else:
+            try:
+                pr = (
+                    supabase.table("onboarding_client_payment")
+                    .select("id, reference_no, company_name, invoice_amount, invoice_date, invoice_number, timestamp, genre, payment_received_date, stage")
+                    .not_.is_("payment_received_date", "null")
+                    .limit(5000)
+                    .execute()
+                )
+                pay_rows = pr.data or []
+            except Exception:
+                pay_rows = []
+            for rowp in pay_rows:
+                if _client_payment_row_unpaid(rowp):
                     continue
-
-            company_name = (rowp.get("company_name") or "").strip() or "Unknown"
-            reference_no = (rowp.get("reference_no") or "").strip() or str(rowp.get("id") or "N/A")
-            status = "Received" if is_paid else "Pending"
-
-            result.append(
-                {
-                    "id": str(rowp.get("id") or ""),
-                    "referenceNo": reference_no,
-                    "title": company_name,
-                    "description": f"Genre: {g or '—'} | Amount: {amt} | Invoice Date: {inv_d.isoformat()}",
-                    "type": "payment",
-                    "company": company_name,
-                    "status": status,
-                }
-            )
+                anchor_d = _client_payment_received_quarter_anchor(rowp)
+                if not anchor_d or not (recv_window_start <= anchor_d <= today):
+                    continue
+                amt = _parse_invoice_amount(rowp.get("invoice_amount"))
+                g = _normalize_client_payment_genre(rowp.get("genre"))
+                if g not in ("M", "Q", "HY", "Y"):
+                    continue
+                inv_d = _pa._parse_date(rowp.get("invoice_date")) or _pa._parse_date(rowp.get("timestamp"))
+                company_name = (rowp.get("company_name") or "").strip() or "Unknown"
+                reference_no = (rowp.get("reference_no") or "").strip() or str(rowp.get("id") or "N/A")
+                genre_label = {"M": "Monthly", "Q": "Quarterly", "HY": "Half-Yearly", "Y": "Yearly"}.get(g, g)
+                result.append(
+                    {
+                        "id": str(rowp.get("id") or ""),
+                        "referenceNo": reference_no,
+                        "title": company_name,
+                        "description": f"Genre: {genre_label} | Amount: ₹{amt} | Received: {anchor_d.isoformat()}",
+                        "type": "payment",
+                        "company": company_name,
+                        "status": "Received",
+                        "invoiceAmount": amt,
+                        "invoiceDate": inv_d.isoformat() if inv_d else "",
+                        "invoiceNumber": (rowp.get("invoice_number") or "").strip(),
+                        "stage": (rowp.get("stage") or "—").strip() or "—",
+                        "genre": genre_label,
+                        "agingDays": None,
+                    }
+                )
     elif metric in ("staging_feature", "staging_chores_bugs"):
         try:
-            r = supabase.table("staging_deployments").select("ticket_id").eq("status", "pending").execute()
-            pending = r.data or []
-            ticket_ids = [d["ticket_id"] for d in pending if d.get("ticket_id")]
-            if ticket_ids:
-                r2 = supabase.table("tickets").select(cols).in_("id", ticket_ids).execute()
-                staging_tickets = r2.data or []
-                # Fetch companies for staging tickets not yet in map
-                extra_cids = {t.get("company_id") for t in staging_tickets if t.get("company_id") and t.get("company_id") not in companies_map}
-                if extra_cids:
-                    try:
-                        cr2 = supabase.table("companies").select("id,name").in_("id", list(extra_cids)).execute()
-                        for r in (cr2.data or []):
-                            if r.get("id"):
-                                companies_map[r["id"]] = (r.get("name") or "").strip()
-                    except Exception:
-                        pass
-                if metric == "staging_feature":
-                    result = [row(t) for t in staging_tickets if t.get("type") == "feature"]
-                else:
-                    result = [row(t) for t in staging_tickets if t.get("type") in ("chore", "bug")]
+            stq = supabase.table("tickets").select(cols)
+            stq = stq.or_("staging_planned.not.is.null,status_2.eq.staging")
+            stq = stq.or_("live_review_status.is.null,live_review_status.neq.completed")
+            stq = stq.limit(500)
+            r2 = stq.execute()
+            staging_tickets = r2.data or []
+            extra_cids = {
+                t.get("company_id") for t in staging_tickets if t.get("company_id") and t.get("company_id") not in companies_map
+            }
+            if extra_cids:
+                try:
+                    cr2 = supabase.table("companies").select("id,name").in_("id", list(extra_cids)).execute()
+                    for rc in cr2.data or []:
+                        if rc.get("id"):
+                            companies_map[rc["id"]] = (rc.get("name") or "").strip()
+                except Exception:
+                    pass
+            if metric == "staging_feature":
+                result = [row(t) for t in staging_tickets if t.get("type") == "feature"]
+            else:
+                result = [row(t) for t in staging_tickets if t.get("type") in ("chore", "bug")]
         except Exception:
             pass
     elif metric == "custom_pending_delegation":
@@ -4176,41 +4209,7 @@ def list_client_payment(auth: dict = Depends(get_current_user), status: str = No
         items = r.data or []
         if status == "completed" and section and section == "Gener":
             items = [x for x in items if (x.get("genre") == "Y" or x.get("genre") not in ("M", "Q", "HY"))]
-        ids = [str(row.get("id")) for row in items if row.get("id")]
-        with ThreadPoolExecutor(max_workers=2) as _pool:
-            _f_sent = _pool.submit(_get_client_payment_ids_with_sent, ids)
-            _f_max = _pool.submit(_get_client_payment_max_followup, ids)
-            ids_with_sent = _f_sent.result()
-            max_followup = _f_max.result()
-        today = date.today()
-        for row in items:
-            inv_date = row.get("invoice_date")
-            _pr = row.get("payment_received_date")
-            paid_date = None if _pr is None or (isinstance(_pr, str) and not str(_pr).strip()) else _pr
-            row["status"] = "Completed" if paid_date else "Pending"
-            aging_days = 0
-            try:
-                if not paid_date and inv_date:
-                    inv_d = date.fromisoformat(str(inv_date)[:10]) if isinstance(inv_date, str) else inv_date
-                    aging_days = max((today - inv_d).days, 0)
-                elif paid_date and inv_date:
-                    inv_d = date.fromisoformat(str(inv_date)[:10]) if isinstance(inv_date, str) else inv_date
-                    paid_d = date.fromisoformat(str(paid_date)[:10]) if isinstance(paid_date, str) else paid_date
-                    aging_days = max((paid_d - inv_d).days, 0)
-            except Exception:
-                aging_days = 0
-            row["aging_days"] = aging_days
-            cp_id = str(row.get("id")) if row.get("id") else None
-            if paid_date:
-                row["stage"] = "Completed"
-            else:
-                n = max_followup.get(cp_id, 0)
-                if n >= 1:
-                    row["stage"] = f"Follow up {n}"
-                elif cp_id in ids_with_sent:
-                    row["stage"] = "Invoice Sent details"
-                else:
-                    row["stage"] = "Invoice Sent details"
+        _enrich_client_payment_list_items(items)
         return {"items": items}
     except Exception as e:
         _log(f"client payment list: {e}")
@@ -4270,10 +4269,101 @@ def _dedupe_ageing_display_rows(rows: list[dict], nq: int) -> list[dict]:
 def _parse_invoice_amount(val) -> int:
     if val is None:
         return 0
-    s = str(val).strip()
-    if not s.isdigit():
+    if isinstance(val, bool):
         return 0
-    return int(s)
+    if isinstance(val, (int, float)):
+        return int(val)
+    s = str(val).strip().replace(",", "")
+    if s.isdigit():
+        return int(s)
+    try:
+        return int(float(s))
+    except ValueError:
+        return 0
+
+
+def _client_payment_row_unpaid(row: dict) -> bool:
+    pr = row.get("payment_received_date")
+    return pr is None or (isinstance(pr, str) and not str(pr).strip())
+
+
+def _normalize_client_payment_genre(raw: object) -> str:
+    """Map stored / legacy genre labels to M, Q, HY, Y."""
+    g = (str(raw or "").strip().upper())
+    if not g:
+        return ""
+    if g in ("M", "MONTHLY"):
+        return "M"
+    if g in ("Q", "QUARTERLY"):
+        return "Q"
+    if g in ("HY", "HALF YEARLY", "HALF-YEARLY", "HALF_YEARLY", "HALFYEARLY"):
+        return "HY"
+    if g in ("Y", "YEARLY", "ANNUAL"):
+        return "Y"
+    if "QUARTER" in g:
+        return "Q"
+    if "MONTH" in g:
+        return "M"
+    if "HALF" in g and "Y" in g:
+        return "HY"
+    if "YEAR" in g:
+        return "Y"
+    return g
+
+
+def _client_payment_received_quarter_anchor(row: dict) -> date | None:
+    """Date used to attribute *received* amounts to a fiscal quarter: payment date, else invoice/timestamp."""
+    pd = _pa._parse_date(row.get("payment_received_date"))
+    if pd:
+        return pd
+    return _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
+
+
+def _enrich_client_payment_list_items(items: list[dict]) -> None:
+    """Set status, aging_days, stage on each row (same rules as Payment Management list)."""
+    if not items:
+        return
+    ids = [str(row.get("id")) for row in items if row.get("id")]
+    ids_with_sent: set[str] = set()
+    max_followup: dict[str, int] = {}
+    if ids:
+        try:
+            with ThreadPoolExecutor(max_workers=2) as _pool:
+                _f_sent = _pool.submit(_get_client_payment_ids_with_sent, ids)
+                _f_max = _pool.submit(_get_client_payment_max_followup, ids)
+                ids_with_sent = _f_sent.result()
+                max_followup = _f_max.result()
+        except Exception:
+            pass
+    today = date.today()
+    for row in items:
+        inv_date = row.get("invoice_date")
+        _pr = row.get("payment_received_date")
+        paid_date = None if _pr is None or (isinstance(_pr, str) and not str(_pr).strip()) else _pr
+        row["status"] = "Completed" if paid_date else "Pending"
+        aging_days = 0
+        try:
+            if not paid_date and inv_date:
+                inv_d = date.fromisoformat(str(inv_date)[:10]) if isinstance(inv_date, str) else inv_date
+                aging_days = max((today - inv_d).days, 0)
+            elif paid_date and inv_date:
+                inv_d = date.fromisoformat(str(inv_date)[:10]) if isinstance(inv_date, str) else inv_date
+                paid_d = date.fromisoformat(str(paid_date)[:10]) if isinstance(paid_date, str) else paid_date
+                aging_days = max((paid_d - inv_d).days, 0)
+        except Exception:
+            aging_days = 0
+        row["aging_days"] = aging_days
+        cp_id = str(row.get("id")) if row.get("id") else None
+        if paid_date:
+            row["stage"] = "Completed"
+        else:
+            n = max_followup.get(cp_id, 0)
+            if n >= 1:
+                row["stage"] = f"Follow up {n}"
+            elif cp_id in ids_with_sent:
+                row["stage"] = "Invoice Sent details"
+            else:
+                row["stage"] = "Invoice Sent details"
 
 
 def _compute_payment_ageing_kpis(pay_rows: list, allowed: frozenset[str] | None) -> dict:

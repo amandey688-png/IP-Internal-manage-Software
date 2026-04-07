@@ -11,6 +11,7 @@ export interface DashboardMetrics {
   custom_received_monthly?: number
   custom_received_quarterly?: number
   custom_received_half_yearly?: number
+  custom_received_yearly?: number
   custom_total_due?: number
   custom_pending_delegation?: number
   response_delay: number
@@ -35,6 +36,13 @@ export interface DashboardDetailTicket {
   type: string
   company: string
   status: string
+  /** Client Payment row fields (custom_total_due / custom_total_rec_amount detail) */
+  invoiceAmount?: number
+  invoiceDate?: string
+  invoiceNumber?: string
+  stage?: string
+  genre?: string
+  agingDays?: number | null
 }
 
 export const dashboardApi = {
