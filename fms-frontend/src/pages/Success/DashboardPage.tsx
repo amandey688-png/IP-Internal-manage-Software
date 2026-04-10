@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Alert, DatePicker, Skeleton, Spin, Typography } from 'antd'
+import { Alert, DatePicker, Skeleton, Typography } from 'antd'
 import dayjs from 'dayjs'
 import { API_BASE_URL } from '../../api/axios'
 import { storage } from '../../utils/storage'
@@ -152,8 +152,7 @@ export function DashboardPage() {
 
       {loading ? (
         <div className="su-loading-wrap">
-          <Spin size="large" />
-          <Skeleton active paragraph={{ rows: 6 }} />
+          <Skeleton active title={{ width: '36%' }} paragraph={{ rows: 10 }} />
         </div>
       ) : (
         <>

@@ -21,6 +21,7 @@ import { API_BASE_URL } from '../../api/axios'
 import { storage } from '../../utils/storage'
 import { sortPerformanceRefOptions } from '../../utils/performanceRefs'
 import { PerformanceTablePaginationBar } from '../../components/success/PerformanceTablePaginationBar'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title, Text } = Typography
 
@@ -595,22 +596,24 @@ export const PerformanceMonitoringPage = () => {
             options={[...new Set(items.map((i) => i.company_name).filter(Boolean))].sort().map((c) => ({ value: c, label: c }))}
           />
         </div>
-        <Table
-          dataSource={pagedDisplayItems}
-          rowKey="id"
-          loading={loading}
-          onRow={(record) => ({
-            onClick: () => openViewDetails(record),
-            style: { cursor: 'pointer' },
-          })}
-          columns={tableColumns}
-          pagination={false}
-          locale={{
-            emptyText: !loading && !setupError
-              ? 'No active companies. Use "Add POC Details" above to add one, or see Comp-Perform for completed companies.'
-              : undefined,
-          }}
-        />
+        <TableWithSkeletonLoading loading={loading} columns={9} rows={12}>
+          <Table
+            dataSource={pagedDisplayItems}
+            rowKey="id"
+            loading={false}
+            onRow={(record) => ({
+              onClick: () => openViewDetails(record),
+              style: { cursor: 'pointer' },
+            })}
+            columns={tableColumns}
+            pagination={false}
+            locale={{
+              emptyText: !loading && !setupError
+                ? 'No active companies. Use "Add POC Details" above to add one, or see Comp-Perform for completed companies.'
+                : undefined,
+            }}
+          />
+        </TableWithSkeletonLoading>
         <PerformanceTablePaginationBar
           page={tablePage}
           pageSize={tablePageSize}

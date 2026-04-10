@@ -22,6 +22,7 @@ import dayjs, { type Dayjs } from 'dayjs'
 import { dbClientOnbApi, type ClientOnbRecord } from '../../api/dbClientOnb'
 import { useRole } from '../../hooks/useRole'
 import { CLIENT_ONB_ADD_STATUS_SQL } from './clientOnbAddStatusSql'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title } = Typography
 const { TextArea } = Input
@@ -375,7 +376,7 @@ export function ClientOnbPage({ mode = 'active' }: { mode?: ClientOnbPageMode })
     () => ({
       rowKey: 'id' as const,
       columns,
-      loading,
+      loading: false as const,
       scroll: { x: (isInactivePage ? 3400 : 2900) as const },
       pagination: { pageSize: 20, showSizeChanger: true as const },
       size: 'small' as const,
@@ -384,7 +385,7 @@ export function ClientOnbPage({ mode = 'active' }: { mode?: ClientOnbPageMode })
         style: { cursor: 'pointer' as const },
       }),
     }),
-    [columns, loading, isInactivePage, openInactiveDetail, openStatusModal]
+    [columns, isInactivePage, openInactiveDetail, openStatusModal]
   )
 
   const listForPage = isInactivePage ? inactiveRecords : activeRecords
@@ -430,7 +431,9 @@ export function ClientOnbPage({ mode = 'active' }: { mode?: ClientOnbPageMode })
             </Button>
           )}
         </Space>
-        <Table<ClientOnbRecord> {...tableProps} dataSource={listForPage} />
+        <TableWithSkeletonLoading loading={loading} columns={12} rows={12}>
+          <Table<ClientOnbRecord> {...tableProps} dataSource={listForPage} />
+        </TableWithSkeletonLoading>
       </Card>
 
       <Modal

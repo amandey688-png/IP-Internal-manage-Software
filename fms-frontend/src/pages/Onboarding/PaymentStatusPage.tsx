@@ -20,6 +20,7 @@ import { PlusOutlined, FormOutlined, CheckSquareOutlined, EditOutlined, CheckCir
 import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { onboardingApi, type PaymentStatusRecord } from '../../api/onboarding'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title } = Typography
 const { TextArea } = Input
@@ -2208,18 +2209,20 @@ export function PaymentStatusPage() {
       </Modal>
 
       <Card title="Payment Status Records">
-        <Table
-          dataSource={records}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          scroll={{ x: 1100 }}
-          pagination={{ pageSize: 20, showSizeChanger: true }}
-          onRow={(record) => ({
-            onClick: () => handleRowClick(record),
-            style: { cursor: 'pointer' },
-          })}
-        />
+        <TableWithSkeletonLoading loading={loading} columns={10} rows={12}>
+          <Table
+            dataSource={records}
+            columns={columns}
+            rowKey="id"
+            loading={false}
+            scroll={{ x: 1100 }}
+            pagination={{ pageSize: 20, showSizeChanger: true }}
+            onRow={(record) => ({
+              onClick: () => handleRowClick(record),
+              style: { cursor: 'pointer' },
+            })}
+          />
+        </TableWithSkeletonLoading>
       </Card>
     </div>
   )

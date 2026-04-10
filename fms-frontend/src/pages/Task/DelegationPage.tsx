@@ -21,6 +21,7 @@ import { useRole } from '../../hooks/useRole'
 import { delegationApi, type DelegationTask } from '../../api/delegation'
 import { uploadAttachment } from '../../api/upload'
 import { PrintExport } from '../../components/common/PrintExport'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title, Text } = Typography
 const { Dragger } = Upload
@@ -395,14 +396,16 @@ export const DelegationPage = () => {
           exportData={delegationExportData}
           exportFilename={delegationExportFilename}
         />
-        <Table
-          dataSource={displayTasks}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          pagination={{ pageSize: 20 }}
-          style={{ marginTop: 16 }}
-        />
+        <TableWithSkeletonLoading loading={loading} columns={7} rows={12}>
+          <Table
+            dataSource={displayTasks}
+            columns={columns}
+            rowKey="id"
+            loading={false}
+            pagination={{ pageSize: 20 }}
+            style={{ marginTop: 16 }}
+          />
+        </TableWithSkeletonLoading>
       </Card>
 
       <Modal

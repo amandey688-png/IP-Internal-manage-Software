@@ -10,6 +10,7 @@ import {
   type TrainingStagesConfigResponse,
   type TrainingUser,
 } from '../../api/training'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title } = Typography
 
@@ -393,19 +394,21 @@ export function ClientTrainingPage() {
           />
           <Button onClick={clearFilters}>Clear filters</Button>
         </div>
-        <Table
-          dataSource={displayItems}
-          columns={columns}
-          rowKey="payment_status_id"
-          loading={loading}
-          pagination={{ pageSize: 20, showSizeChanger: true }}
-          scroll={{ x: 4000 }}
-          locale={{ emptyText: loading ? undefined : 'No clients. Submit Final Setup in Onboarding (Payment Status) for a company to appear here.' }}
-          onRow={(record) => ({
-            onClick: () => openDetails(record),
-            style: { cursor: 'pointer' },
-          })}
-        />
+        <TableWithSkeletonLoading loading={loading} columns={12} rows={12}>
+          <Table
+            dataSource={displayItems}
+            columns={columns}
+            rowKey="payment_status_id"
+            loading={false}
+            pagination={{ pageSize: 20, showSizeChanger: true }}
+            scroll={{ x: 4000 }}
+            locale={{ emptyText: loading ? undefined : 'No clients. Submit Final Setup in Onboarding (Payment Status) for a company to appear here.' }}
+            onRow={(record) => ({
+              onClick: () => openDetails(record),
+              style: { cursor: 'pointer' },
+            })}
+          />
+        </TableWithSkeletonLoading>
 
         <Drawer
           title={selectedClient ? `${selectedClient.client_reference_no} – ${selectedClient.company_name}` : 'Client Details'}

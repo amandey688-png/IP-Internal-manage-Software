@@ -24,6 +24,7 @@ import {
   type ChecklistTask,
   type ChecklistOccurrence,
 } from '../../api/checklist'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title, Text } = Typography
 
@@ -287,14 +288,16 @@ export const ChecklistPage = () => {
           </Space>
         }
       >
-        <Table
-          dataSource={occurrences}
-          columns={columns}
-          rowKey={(r) => `${r.task_id}-${r.occurrence_date}`}
-          loading={loading}
-          pagination={{ pageSize: 20 }}
-          size="small"
-        />
+        <TableWithSkeletonLoading loading={loading} columns={7} rows={12}>
+          <Table
+            dataSource={occurrences}
+            columns={columns}
+            rowKey={(r) => `${r.task_id}-${r.occurrence_date}`}
+            loading={false}
+            pagination={{ pageSize: 20 }}
+            size="small"
+          />
+        </TableWithSkeletonLoading>
       </Card>
 
       {/* Add Task Modal */}

@@ -1,4 +1,4 @@
-import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Spin, Tag, Form, Input, message, Space } from 'antd'
+import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Tag, Form, Input, message, Space } from 'antd'
 import {
   LineChart,
   Line,
@@ -22,6 +22,7 @@ import { dashboardApi, type DashboardDetailTicket, type TrendPoint } from '../ap
 import { ticketsApi } from '../api/tickets'
 import { leadsApi, type ActiveLeadRow } from '../api/leads'
 import { LoadingSpinner } from '../components/common/LoadingSpinner'
+import { ModalContentSkeleton, TableWithSkeletonLoading } from '../components/common/skeletons'
 import { PrintExport } from '../components/common/PrintExport'
 import { TICKET_EXPORT_COLUMNS, buildTicketExportRow, getChoresBugsCurrentStage } from '../utils/helpers'
 import { ROUTES } from '../utils/constants'
@@ -508,19 +509,21 @@ export const Dashboard = () => {
             style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff', marginBottom: 28 }}
             bodyStyle={{ padding: 16 }}
           >
-            <Table
-              size="small"
-              loading={paymentActionsLoading}
-              dataSource={paymentActions}
-              rowKey={(r) => `${r.client_payment_id}-${r.pending_payment_tag || 't1'}`}
-              pagination={false}
-              columns={paymentActionColumns}
-              locale={{
-                emptyText: isFullPaymentViewer
-                  ? 'No payment actions. Add intercept + Tag (T1) on Client Payment, run docs/CLIENT_PAYMENT_INTERCEPT_TAG2.sql in Supabase if T2 columns are missing.'
-                  : 'No rows for your account. You must be tagged for T1 or T2 on an intercept with pending payment action.',
-              }}
-            />
+            <TableWithSkeletonLoading loading={paymentActionsLoading} columns={7} rows={8}>
+              <Table
+                size="small"
+                loading={false}
+                dataSource={paymentActions}
+                rowKey={(r) => `${r.client_payment_id}-${r.pending_payment_tag || 't1'}`}
+                pagination={false}
+                columns={paymentActionColumns}
+                locale={{
+                  emptyText: isFullPaymentViewer
+                    ? 'No payment actions. Add intercept + Tag (T1) on Client Payment, run docs/CLIENT_PAYMENT_INTERCEPT_TAG2.sql in Supabase if T2 columns are missing.'
+                    : 'No rows for your account. You must be tagged for T1 or T2 on an intercept with pending payment action.',
+                }}
+              />
+            </TableWithSkeletonLoading>
           </Card>
         </>
       )}
@@ -619,59 +622,61 @@ export const Dashboard = () => {
         style={{ marginBottom: 28, borderRadius: 8, overflow: 'hidden', border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06)' }}
         bodyStyle={{ padding: 0 }}
       >
-        <Table
-          loading={activeLeadsLoading}
-          dataSource={activeLeads}
-          rowKey="id"
-          size="small"
-          scroll={{ x: 720 }}
-          pagination={activeLeads.length > 10 ? { pageSize: 10, showSizeChanger: false, showTotal: (t) => `Total ${t} leads` } : false}
-          onRow={(record) => ({
-            onClick: () => navigate(ROUTES.LEAD_DETAIL.replace(':id', record.reference_no)),
-            style: { cursor: 'pointer' },
-          })}
-          columns={[
-            {
-              title: 'Company Name',
-              dataIndex: 'company_name',
-              key: 'company_name',
-              width: 180,
-              render: (v: string) => v || '—',
-            },
-            {
-              title: 'Stage',
-              dataIndex: 'stage',
-              key: 'stage',
-              width: 160,
-              render: (stage: string) => {
-                const color = ACTIVE_LEAD_STAGE_COLORS[stage] || '#94a3b8'
-                const isLight = ['#86efac', '#bae6fd', '#e0f2fe'].includes(color)
-                return <Tag style={{ margin: 0, border: 'none', background: color, color: isLight ? '#0f172a' : '#fff' }}>{stage || '—'}</Tag>
+        <TableWithSkeletonLoading loading={activeLeadsLoading} columns={5} rows={10}>
+          <Table
+            loading={false}
+            dataSource={activeLeads}
+            rowKey="id"
+            size="small"
+            scroll={{ x: 720 }}
+            pagination={activeLeads.length > 10 ? { pageSize: 10, showSizeChanger: false, showTotal: (t) => `Total ${t} leads` } : false}
+            onRow={(record) => ({
+              onClick: () => navigate(ROUTES.LEAD_DETAIL.replace(':id', record.reference_no)),
+              style: { cursor: 'pointer' },
+            })}
+            columns={[
+              {
+                title: 'Company Name',
+                dataIndex: 'company_name',
+                key: 'company_name',
+                width: 180,
+                render: (v: string) => v || '—',
               },
-            },
-            {
-              title: 'Person Name',
-              dataIndex: 'person_name',
-              key: 'person_name',
-              width: 140,
-              render: (v: string) => v || '—',
-            },
-            {
-              title: 'City',
-              dataIndex: 'city',
-              key: 'city',
-              width: 120,
-              render: (v: string) => v || '—',
-            },
-            {
-              title: 'State',
-              dataIndex: 'state',
-              key: 'state',
-              width: 120,
-              render: (v: string) => v || '—',
-            },
-          ]}
-        />
+              {
+                title: 'Stage',
+                dataIndex: 'stage',
+                key: 'stage',
+                width: 160,
+                render: (stage: string) => {
+                  const color = ACTIVE_LEAD_STAGE_COLORS[stage] || '#94a3b8'
+                  const isLight = ['#86efac', '#bae6fd', '#e0f2fe'].includes(color)
+                  return <Tag style={{ margin: 0, border: 'none', background: color, color: isLight ? '#0f172a' : '#fff' }}>{stage || '—'}</Tag>
+                },
+              },
+              {
+                title: 'Person Name',
+                dataIndex: 'person_name',
+                key: 'person_name',
+                width: 140,
+                render: (v: string) => v || '—',
+              },
+              {
+                title: 'City',
+                dataIndex: 'city',
+                key: 'city',
+                width: 120,
+                render: (v: string) => v || '—',
+              },
+              {
+                title: 'State',
+                dataIndex: 'state',
+                key: 'state',
+                width: 120,
+                render: (v: string) => v || '—',
+              },
+            ]}
+          />
+        </TableWithSkeletonLoading>
       </Card>
 
       <Modal
@@ -702,9 +707,7 @@ export const Dashboard = () => {
         width={isPaymentKpiDetail ? 1100 : 800}
       >
         {detailLoading ? (
-          <div style={{ padding: 48, textAlign: 'center' }}>
-            <Spin size="large" />
-          </div>
+          <ModalContentSkeleton rows={12} />
         ) : isPaymentKpiDetail ? (
           <Table
             dataSource={detailData}

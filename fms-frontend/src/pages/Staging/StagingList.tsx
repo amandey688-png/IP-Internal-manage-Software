@@ -15,6 +15,7 @@ import {
 import type { Ticket } from '../../api/tickets'
 import { StagingDetailDrawer } from '../../components/tickets/StagingDetailDrawer'
 import { PrintExport } from '../../components/common/PrintExport'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 import { useRole } from '../../hooks/useRole'
 
 const { Option } = Select
@@ -409,28 +410,30 @@ export const StagingList = () => {
             ))}
           </Select>
         </Space>
-        <Table
-          columns={stagingTicketColumns}
-          dataSource={ticketsForDisplay}
-          rowKey="id"
-          loading={loading}
-          scroll={{ x: 'max-content' }}
-          onRow={(record) => ({
-            onClick: () => record?.id && setDrawerTicketId(record.id),
-            style: { cursor: 'pointer' },
-          })}
-          pagination={{
-            current: page,
-            pageSize,
-            total: stageFilter ? allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter).length : total,
-            showSizeChanger: true,
-            showTotal: (t) => `Total ${t} tickets`,
-            onChange: (newPage, newPageSize) => {
-              setPage(newPage)
-              setPageSize(newPageSize ?? pageSize)
-            },
-          }}
-        />
+        <TableWithSkeletonLoading loading={loading} columns={10} rows={12}>
+          <Table
+            columns={stagingTicketColumns}
+            dataSource={ticketsForDisplay}
+            rowKey="id"
+            loading={false}
+            scroll={{ x: 'max-content' }}
+            onRow={(record) => ({
+              onClick: () => record?.id && setDrawerTicketId(record.id),
+              style: { cursor: 'pointer' },
+            })}
+            pagination={{
+              current: page,
+              pageSize,
+              total: stageFilter ? allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter).length : total,
+              showSizeChanger: true,
+              showTotal: (t) => `Total ${t} tickets`,
+              onChange: (newPage, newPageSize) => {
+                setPage(newPage)
+                setPageSize(newPageSize ?? pageSize)
+              },
+            }}
+          />
+        </TableWithSkeletonLoading>
       </Card>
       <StagingDetailDrawer
         ticketId={drawerTicketId}
