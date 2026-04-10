@@ -19,7 +19,7 @@ _WD_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
 def _format_dashboard_week_label(week_start: date, week_end: date) -> str:
-    """Mon dd Mmm – Sun dd Mmm (cross-month when Sunday is in the next month)."""
+    """Mon/Sat KPI range label (Sunday excluded from KPI grouping logic)."""
     sm, em = _MONTH_ABBR[week_start.month - 1], _MONTH_ABBR[week_end.month - 1]
     return (
         f"{_WD_SHORT[week_start.weekday()]} {week_start.day} {sm} – "
@@ -45,21 +45,34 @@ def _in_range(d: date | None, rs: date, re: date) -> bool:
     return d is not None and rs <= d <= re
 
 
-def _monday_week_range_in_month(year: int, month_num: int, week_idx: int) -> tuple[date, date] | None:
-    """Monday–Sunday inclusive; week_idx 1–5. Matches main._dashboard_kpi_week_range / Support FMS weeks."""
+def _company_key(company_id: Any, company_name: str | None) -> str | None:
+    """Stable unique company key for KPI card counts."""
+    if company_id is not None and str(company_id).strip():
+        return f"id:{str(company_id).strip()}"
+    nm = (company_name or "").strip().lower()
+    if nm:
+        return f"name:{nm}"
+    return None
+
+
+def _kpi_week_range_in_month(year: int, month_num: int, week_idx: int) -> tuple[date, date] | None:
+    """Month-scoped KPI week range: Monday–Saturday model with week1 at month-start."""
     import calendar
 
     if week_idx < 1 or week_idx > 5:
         return None
     first = date(year, month_num, 1)
-    first_wd = first.weekday()
-    first_monday_day = 1 if first_wd == 0 else 1 + (7 - first_wd) % 7
-    start_day = first_monday_day + (week_idx - 1) * 7
     last = calendar.monthrange(year, month_num)[1]
-    if start_day > last:
+    month_end = date(year, month_num, last)
+    if week_idx == 1:
+        ws = first if first.weekday() != 6 else (first + timedelta(days=1))
+        we = min(ws + timedelta(days=(5 - ws.weekday()) % 7), month_end)
+        return ws, we
+    first_monday = first + timedelta(days=(7 - first.weekday()) % 7)
+    ws = first_monday + timedelta(days=(week_idx - 2) * 7)
+    if ws.month != month_num:
         return None
-    ws = date(year, month_num, start_day)
-    we = ws + timedelta(days=6)
+    we = min(ws + timedelta(days=5), month_end)
     return ws, we
 
 
@@ -145,11 +158,17 @@ def compute_success_kpi_for_dashboard(
 
         # --- Weekly counts for KPI cards (selected week) ---
         # POC Collected = count of Performance Monitoring (POC) rows *entered* in this week (created_at in range).
-        poc_week = sum(
-            1
+        poc_rows_w = [
+            row
             for row in pm_rows
             if _in_range(_parse_iso_to_date(row.get("created_at")), rs, re)
-        )
+        ]
+        poc_company_keys = {
+            _company_key(row.get("company_id"), companies_map.get(row.get("company_id"), ""))
+            for row in poc_rows_w
+        }
+        poc_company_keys.discard(None)
+        poc_week = len(poc_company_keys)
         poc_target = SUCCESS_KPI_POC_TARGET
         poc_pct = round(min(100, (poc_week / poc_target) * 100)) if poc_target else 0
 
@@ -158,7 +177,15 @@ def compute_success_kpi_for_dashboard(
             d = _parse_iso_to_date(t.get("training_schedule_date") or t.get("created_at"))
             if _in_range(d, rs, re):
                 train_week.append(t)
-        train_current = sum(1 for t in train_week if str(t.get("training_status") or "").lower() == "yes")
+        train_company_keys: set[str] = set()
+        for t in train_week:
+            if str(t.get("training_status") or "").lower() != "yes":
+                continue
+            pm_row = pm_by_id.get(t.get("performance_id"), {})
+            k = _company_key(pm_row.get("company_id"), companies_map.get(pm_row.get("company_id"), ""))
+            if k:
+                train_company_keys.add(k)
+        train_current = len(train_company_keys)
         train_target = SUCCESS_KPI_TRAIN_TARGET
         train_pct = round(min(100, (train_current / train_target) * 100)) if train_target else 0
 
@@ -194,8 +221,29 @@ def compute_success_kpi_for_dashboard(
 
         click_week_count = _count_clicks_in_range(rs, re)
 
+        followup_company_keys: set[str] = set()
+        for fu in followups_week:
+            tf_id = fu.get("ticket_feature_id")
+            tf_row = tf_by_id.get(tf_id, {})
+            tr = training_by_id.get(tf_row.get("training_id"))
+            pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
+            k = _company_key(pm_row.get("company_id"), companies_map.get(pm_row.get("company_id"), ""))
+            if k:
+                followup_company_keys.add(k)
+        for row in all_click_rows:
+            d = _parse_iso_to_date(row.get("clicked_at"))
+            if not _in_range(d, rs, re):
+                continue
+            tf_id = row.get("ticket_feature_id")
+            tf_row = tf_by_id.get(tf_id, {}) if tf_id else {}
+            tr = training_by_id.get(tf_row.get("training_id")) if tf_row else None
+            pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr and tr.get("id") else None, {})
+            k = _company_key(pm_row.get("company_id"), companies_map.get(pm_row.get("company_id"), ""))
+            if k:
+                followup_company_keys.add(k)
+
         fu_from_rows = len(followups_week)
-        fu_current = fu_from_rows + click_week_count
+        fu_current = len(followup_company_keys)
         fu_target = SUCCESS_KPI_FOLLOWUP_TARGET
         fu_pct = round(min(100, (fu_current / fu_target) * 100)) if fu_target else 0
 
@@ -206,16 +254,20 @@ def compute_success_kpi_for_dashboard(
             and fu.get("previous_percentage") is not None
             and float(fu["total_percentage"]) > float(fu["previous_percentage"])
         ]
-        success_current = len(success_rows)
+        success_company_keys: set[str] = set()
+        for fu in success_rows:
+            tf_id = fu.get("ticket_feature_id")
+            tf_row = tf_by_id.get(tf_id, {})
+            tr = training_by_id.get(tf_row.get("training_id"))
+            pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
+            k = _company_key(pm_row.get("company_id"), companies_map.get(pm_row.get("company_id"), ""))
+            if k:
+                success_company_keys.add(k)
+        success_current = len(success_company_keys)
         success_target = SUCCESS_KPI_INCREASE_TARGET
         success_pct = round(min(100, (success_current / success_target) * 100)) if success_target else 0
 
-        # Details for modals (week-scoped)
-        poc_rows_w = [
-            row
-            for row in pm_rows
-            if _in_range(_parse_iso_to_date(row.get("created_at")), rs, re)
-        ]
+        # Details for modals (week-scoped): keep record-level rows (duplicates allowed).
         poc_details = {
             "referenceNumbers": [str(row.get("reference_no") or "") for row in poc_rows_w],
             "companies": [companies_map.get(row.get("company_id"), "") for row in poc_rows_w],
@@ -298,6 +350,7 @@ def compute_success_kpi_for_dashboard(
             "features": [[f] for f in fu_features],
             "clickCountWeek": click_week_count,
             "followupRowsWeek": fu_from_rows,
+            "uniqueCompanyCountWeek": fu_current,
             "clickEventsWeek": click_events_week,
         }
 
@@ -331,31 +384,65 @@ def compute_success_kpi_for_dashboard(
         pct_values = [poc_pct, train_pct, fu_pct, success_pct]
         overall_pct = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
 
-        # Weekly graph: Monday–Sunday weeks (same as Dashboard KPI / Support)
+        # Weekly graph: KPI weeks (Mon–Sat, month-scoped; Sunday excluded)
         for w in range(1, 6):
-            rng = _monday_week_range_in_month(y, month_num, w)
+            rng = _kpi_week_range_in_month(y, month_num, w)
             if not rng:
                 weekly_success_pct.append(0)
                 continue
             wrs, wre = rng
-            poc_w = sum(
-                1
+            poc_w_rows = [
+                row
                 for row in pm_rows
                 if _in_range(_parse_iso_to_date(row.get("created_at")), wrs, wre)
-            )
+            ]
+            poc_w_keys = {
+                _company_key(row.get("company_id"), companies_map.get(row.get("company_id"), ""))
+                for row in poc_w_rows
+            }
+            poc_w_keys.discard(None)
+            poc_w = len(poc_w_keys)
             poc_pct_w = min(100, (poc_w / SUCCESS_KPI_POC_TARGET) * 100) if SUCCESS_KPI_POC_TARGET else 0
             train_w = []
             for t in trainings:
                 d = _parse_iso_to_date(t.get("training_schedule_date") or t.get("created_at"))
                 if _in_range(d, wrs, wre):
                     train_w.append(t)
+            train_w_keys: set[str] = set()
+            for t in train_w:
+                if str(t.get("training_status") or "").lower() != "yes":
+                    continue
+                pm_row = pm_by_id.get(t.get("performance_id"), {})
+                k = _company_key(pm_row.get("company_id"), companies_map.get(pm_row.get("company_id"), ""))
+                if k:
+                    train_w_keys.add(k)
             train_pct_w = min(
                 100,
-                (sum(1 for t in train_w if str(t.get("training_status") or "").lower() == "yes") / SUCCESS_KPI_TRAIN_TARGET) * 100,
+                (len(train_w_keys) / SUCCESS_KPI_TRAIN_TARGET) * 100,
             ) if SUCCESS_KPI_TRAIN_TARGET else 0
             fu_w = [fu for fu in followups if _in_range(_parse_iso_to_date(fu.get("created_at")), wrs, wre)]
             clicks_w = _count_clicks_in_range(wrs, wre)
-            fu_cnt = len(fu_w) + clicks_w
+            fu_w_keys: set[str] = set()
+            for fu in fu_w:
+                tf_id = fu.get("ticket_feature_id")
+                tf_row = tf_by_id.get(tf_id, {})
+                tr = training_by_id.get(tf_row.get("training_id"))
+                pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
+                k = _company_key(pm_row.get("company_id"), companies_map.get(pm_row.get("company_id"), ""))
+                if k:
+                    fu_w_keys.add(k)
+            for row in all_click_rows:
+                d = _parse_iso_to_date(row.get("clicked_at"))
+                if not _in_range(d, wrs, wre):
+                    continue
+                tf_id = row.get("ticket_feature_id")
+                tf_row = tf_by_id.get(tf_id, {}) if tf_id else {}
+                tr = training_by_id.get(tf_row.get("training_id")) if tf_row else None
+                pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr and tr.get("id") else None, {})
+                k = _company_key(pm_row.get("company_id"), companies_map.get(pm_row.get("company_id"), ""))
+                if k:
+                    fu_w_keys.add(k)
+            fu_cnt = len(fu_w_keys)
             fu_pct_w = min(100, (fu_cnt / SUCCESS_KPI_FOLLOWUP_TARGET) * 100) if SUCCESS_KPI_FOLLOWUP_TARGET else 0
             inc_w = [
                 fu
@@ -364,7 +451,16 @@ def compute_success_kpi_for_dashboard(
                 and fu.get("previous_percentage") is not None
                 and float(fu["total_percentage"]) > float(fu["previous_percentage"])
             ]
-            success_inc_pct_w = min(100, (len(inc_w) / SUCCESS_KPI_INCREASE_TARGET) * 100) if SUCCESS_KPI_INCREASE_TARGET else 0
+            inc_w_keys: set[str] = set()
+            for fu in inc_w:
+                tf_id = fu.get("ticket_feature_id")
+                tf_row = tf_by_id.get(tf_id, {})
+                tr = training_by_id.get(tf_row.get("training_id"))
+                pm_row = pm_by_id.get(perf_for_training.get(tr.get("id")) if tr else None, {})
+                k = _company_key(pm_row.get("company_id"), companies_map.get(pm_row.get("company_id"), ""))
+                if k:
+                    inc_w_keys.add(k)
+            success_inc_pct_w = min(100, (len(inc_w_keys) / SUCCESS_KPI_INCREASE_TARGET) * 100) if SUCCESS_KPI_INCREASE_TARGET else 0
             overall_w = round((poc_pct_w + train_pct_w + fu_pct_w + success_inc_pct_w) / 4, 2)
             weekly_success_pct.append(overall_w)
 

@@ -2359,32 +2359,72 @@ def _delegation_task_done(t: dict) -> bool:
     return bool(t.get("completed_at"))
 
 
-def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple[date, date] | None:
-    """Return (range_start, range_end) inclusive for a Monday–Sunday week (aligned with Support FMS `_week_of_month`).
+def _parse_kpi_week_num(week_str: str | None, default: int = 2) -> int:
+    week_num = default
+    if week_str and "week" in week_str.lower():
+        m = re.search(r"(\d+)", week_str)
+        if m:
+            try:
+                week_num = int(m.group(1))
+            except Exception:
+                week_num = default
+    return max(1, min(5, week_num))
 
-    Week 1 starts on the first Monday of the month (see first Monday on-or-after the 1st, same formula as `_week_of_month`).
-    Each week spans exactly 7 days; Sunday may fall in the next calendar month.
-    """
+
+def _week_of_month(dt: datetime) -> int:
+    """Week of month (1-5), KPI rule: week starts Monday and ends Saturday (Sunday excluded)."""
+    return _week_of_month_kpi_date(dt.date())
+
+
+def _week_of_month_kpi_date(d: date) -> int:
+    """KPI week number (1-5) for a date in its month: week-1 includes month-start until first Saturday."""
+    first = date(d.year, d.month, 1)
+    first_sat = first + timedelta(days=(5 - first.weekday()) % 7)
+    if d <= first_sat:
+        return 1
+    first_monday = first + timedelta(days=(7 - first.weekday()) % 7)
+    if d < first_monday:
+        return 1
+    week_num = ((d - first_monday).days // 7) + 2
+    return max(1, min(5, week_num))
+
+
+def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple[date, date] | None:
+    """Return month-scoped KPI week range (Mon–Sat model, Sunday excluded from grouping logic)."""
     try:
         import calendar
 
-        week_num = 2
-        if week_str and "week" in week_str.lower():
-            m = re.search(r"(\d+)", week_str)
-            if m:
-                week_num = max(1, min(5, int(m.group(1))))
+        week_num = _parse_kpi_week_num(week_str, default=2)
         first = date(year, month_num, 1)
-        first_wd = first.weekday()
-        first_monday_day = 1 if first_wd == 0 else 1 + (7 - first_wd) % 7
-        start_day = first_monday_day + (week_num - 1) * 7
-        last = calendar.monthrange(year, month_num)[1]
-        if start_day > last:
+        last_day = calendar.monthrange(year, month_num)[1]
+        month_end = date(year, month_num, last_day)
+
+        if week_num == 1:
+            # Week starts Monday; if month opens on Sunday, week 1 starts on Monday 2nd.
+            start = first if first.weekday() != 6 else (first + timedelta(days=1))
+            end = start + timedelta(days=(5 - start.weekday()) % 7)  # first Saturday on/after start
+            end = min(end, month_end)
+            return start, end
+
+        first_monday = first + timedelta(days=(7 - first.weekday()) % 7)
+        start = first_monday + timedelta(days=(week_num - 2) * 7)
+        if start.month != month_num:
             return None
-        range_start = date(year, month_num, start_day)
-        range_end = range_start + timedelta(days=6)
-        return range_start, range_end
+        end = min(start + timedelta(days=5), month_end)  # Saturday only
+        return start, end
     except Exception:
         return None
+
+
+def _date_in_dashboard_kpi_week(d: date | None, year: int, month_num: int, week_num: int) -> bool:
+    """True if date belongs to selected KPI month+week under Mon–Sat logic, ignoring Sunday overlap."""
+    if d is None:
+        return False
+    if d.year != year or d.month != month_num:
+        return False
+    if d.weekday() == 6:  # Sunday is special: exclude from overlap/grouping
+        return False
+    return _week_of_month_kpi_date(d) == max(1, min(5, week_num))
 
 
 def _normalize_query_arrival_iso(ts) -> str:
@@ -2592,23 +2632,15 @@ def dashboard_kpi(
                 except Exception as e2:
                     _log(f"dashboard/kpi tickets fetch: {e2}")
 
-            # Filter tickets to the selected week/month/year using the same helper as Support Dashboard
-            import re as _re_for_week
-            week_num_selected = 1
-            m_week = _re_for_week.search(r"(\d+)", week or "")
-            if m_week:
-                try:
-                    week_num_selected = max(1, min(5, int(m_week.group(1))))
-                except Exception:
-                    week_num_selected = 1
+            week_num_selected = _parse_kpi_week_num(week, default=2)
 
             # Enrich all chores/bugs once (company names) — used for weekly slice and Stage 2 completion week
             _enrich_tickets_with_lookups(tickets)
 
             week_tickets = []
             for t in tickets:
-                w_num, m_num, y_num = _get_ticket_week(t)
-                if w_num == week_num_selected and m_num == month_num and y_num == y:
+                d_arrival = _parse_iso_to_date(t.get("query_arrival_at") or t.get("created_at"))
+                if _date_in_dashboard_kpi_week(d_arrival, y, month_num, week_num_selected):
                     week_tickets.append(t)
 
             def _support_fms_row_item(ticket: dict) -> dict:
@@ -2648,17 +2680,20 @@ def dashboard_kpi(
 
             # Completion delay (Stage 2): bucket by week of actual_2 (when Stage 2 completed), not ticket creation week.
             # So CH-0265 / CH-0264 appear in the week they crossed Stage 2 TAT, even if created earlier.
-            stage2_completed_in_week = 0
+            stage2_completed_tickets = []
             for t in tickets:
                 if not _stage2_marked_completed(t.get("status_2")):
                     continue
                 if not (str(t.get("actual_2") or "").strip()):
                     continue
-                w2, m2, y2 = _get_ticket_week_from_iso(t.get("actual_2"))
-                if w2 == week_num_selected and m2 == month_num and y2 == y:
-                    stage2_completed_in_week += 1
+                d2 = _parse_iso_to_date(t.get("actual_2"))
+                if _date_in_dashboard_kpi_week(d2, y, month_num, week_num_selected):
+                    stage2_completed_tickets.append(t)
+            stage2_completed_in_week = len(stage2_completed_tickets)
 
-            for t in tickets:
+            # Completion Delay includes only tickets completed at Stage 2 in selected week
+            # and whose Stage 2 TAT crossed the SLA.
+            for t in stage2_completed_tickets:
                 has_comp, comp_text = _has_completion_delay(
                     resolved_at=t.get("actual_4"),
                     created_at=t.get("created_at"),
@@ -2669,9 +2704,6 @@ def dashboard_kpi(
                     actual_1=t.get("actual_1"),
                 )
                 if not has_comp:
-                    continue
-                w2, m2, y2 = _get_ticket_week_from_iso(t.get("actual_2"))
-                if w2 != week_num_selected or m2 != month_num or y2 != y:
                     continue
                 completion_delay_count += 1
                 completion_delay_details.append({**_support_fms_row_item(t), "delay_time": comp_text or "TAT crossed"})
@@ -2777,7 +2809,11 @@ def dashboard_kpi(
                 del_pct = round((done_d / total_d) * 100) if total_d else 0
                 weekly_progress_delegation.append(del_pct)
                 # Support FMS % for this week (same formula: (total - pending) / total * 100)
-                week_tickets_w = [t for t in tickets if _get_ticket_week(t) == (w, month_num, y)]
+                week_tickets_w = []
+                for t in tickets:
+                    d_arrival_w = _parse_iso_to_date(t.get("query_arrival_at") or t.get("created_at"))
+                    if _date_in_dashboard_kpi_week(d_arrival_w, y, month_num, w):
+                        week_tickets_w.append(t)
                 total_cb_w = len(week_tickets_w)
                 pending_w = 0
                 for t in week_tickets_w:
@@ -2816,8 +2852,8 @@ def dashboard_kpi(
                 },
                 "completionDelay": {
                     "value": completion_delay_count,
-                    "target": stage2_completed_in_week if stage2_completed_in_week else total_cb,
-                    "percentage": f"{completion_delay_count}/{stage2_completed_in_week or total_cb or 0}",
+                    "target": stage2_completed_in_week,
+                    "percentage": f"{completion_delay_count}/{stage2_completed_in_week}",
                     "details": completion_delay_details,
                 },
                 "pendingChores": {
@@ -2849,14 +2885,8 @@ def dashboard_kpi(
 
 # ---------- Support Dashboard Stats (FMS-style: weekly, pending grouped, top companies, features) ----------
 def _week_of_month(dt: datetime) -> int:
-    """Week of month (1-5) based on first Monday of month."""
-    year, month = dt.year, dt.month
-    first = datetime(year, month, 1)
-    first_day = first.weekday()  # 0=Mon, 6=Sun
-    first_monday = 1 + (7 - first_day) % 7 if first_day != 0 else 1
-    day = dt.day
-    week_num = ((day - first_monday) // 7) + 1
-    return max(1, min(week_num, 5))
+    """Week of month (1-5), KPI rule: week starts Monday and ends Saturday (Sunday excluded)."""
+    return _week_of_month_kpi_date(dt.date())
 
 
 def _days_pending(created_iso: str | None, resolved_iso: str | None) -> int:
@@ -3263,18 +3293,11 @@ def _stage2_marked_completed(status_2: str | None) -> bool:
 
 
 def _week_date_range(week_num: int, month: int, year: int) -> str:
-    """Human-readable Monday–Sunday range for Support Dashboard (same week rules as `_week_of_month`)."""
-    import calendar
-
-    first = date(year, month, 1)
-    first_wd = first.weekday()
-    first_monday_day = 1 if first_wd == 0 else 1 + (7 - first_wd) % 7
-    start_day = first_monday_day + (week_num - 1) * 7
-    last = calendar.monthrange(year, month)[1]
-    if start_day > last:
+    """Human-readable KPI range (Mon–Sat model, Sunday excluded from grouping)."""
+    rng = _dashboard_kpi_week_range(year, month, f"week {week_num}")
+    if not rng:
         return f"Week {week_num}"
-    start = date(year, month, start_day)
-    end = start + timedelta(days=6)
+    start, end = rng
     names = _MONTH_NAMES
     if start.month == end.month:
         return f"{start.day} {names[start.month - 1]} – {end.day} {names[end.month - 1]}"
