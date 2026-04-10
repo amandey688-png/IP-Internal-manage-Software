@@ -16,6 +16,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { ReloadOutlined, EditOutlined } from '@ant-design/icons'
 import { apiClient } from '../../api/axios'
 import { API_ENDPOINTS } from '../../utils/constants'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title, Text, Link } = Typography
 
@@ -370,15 +371,17 @@ export function PaymentAgeingReportPage() {
         </Space>
 
         <Card size="small">
-          <Table<AgeingRow>
-            rowKey={(r) => r.company_id || r.company_name}
-            loading={loading}
-            columns={columns}
-            dataSource={data?.rows || []}
-            scroll={{ x: 1200 + (data?.quarter_labels?.length || 0) * 90 }}
-            pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200'] }}
-            size="small"
-          />
+          <TableWithSkeletonLoading loading={loading} columns={12} rows={14}>
+            <Table<AgeingRow>
+              rowKey={(r) => r.company_id || r.company_name}
+              loading={false}
+              columns={columns}
+              dataSource={data?.rows || []}
+              scroll={{ x: 1200 + (data?.quarter_labels?.length || 0) * 90 }}
+              pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200'] }}
+              size="small"
+            />
+          </TableWithSkeletonLoading>
         </Card>
 
         <Collapse

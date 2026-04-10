@@ -6,6 +6,7 @@ import { apiClient } from '../../api/axios'
 import { API_ENDPOINTS } from '../../utils/constants'
 import { normalizeCompanyDedupeKey } from '../../utils/companiesDedupe'
 import './PendingPaymentDetailsPage.css'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title } = Typography
 const { RangePicker } = DatePicker
@@ -252,15 +253,17 @@ export function PendingPaymentDetailsPage() {
       {setupError && <Alert type="warning" message={setupError} showIcon style={{ marginBottom: 12 }} />}
 
       <div className="ppd-table-wrap">
-        <Table
-          rowKey={(r) => String(r.id)}
-          columns={columns}
-          dataSource={tableData}
-          loading={loading}
-          pagination={false}
-          size="small"
-          className="ppd-table"
-        />
+        <TableWithSkeletonLoading loading={loading} columns={10} rows={14}>
+          <Table
+            rowKey={(r) => String(r.id)}
+            columns={columns}
+            dataSource={tableData}
+            loading={false}
+            pagination={false}
+            size="small"
+            className="ppd-table"
+          />
+        </TableWithSkeletonLoading>
       </div>
     </div>
   )

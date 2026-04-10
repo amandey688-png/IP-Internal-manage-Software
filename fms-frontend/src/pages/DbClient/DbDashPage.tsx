@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Card, Col, Empty, Row, Select, Spin, Table, Typography } from 'antd'
+import { Alert, Button, Card, Col, Empty, Row, Select, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import {
   Bar,
@@ -21,6 +21,7 @@ import {
   ZoomableGroup,
 } from 'react-simple-maps'
 import { dbClientOnbApi, type ClientOnbRecord } from '../../api/dbClientOnb'
+import { DashboardBlockSkeleton } from '../../components/common/skeletons'
 import './db-dash.css'
 
 const { Title, Text } = Typography
@@ -357,9 +358,7 @@ export function DbDashPage() {
         ) : null}
 
         {loading ? (
-          <div style={{ marginTop: 24, textAlign: 'center' }}>
-            <Spin />
-          </div>
+          <DashboardBlockSkeleton />
         ) : rows.length === 0 ? (
           <div style={{ marginTop: 24 }}>
             <Empty description="No records found." />

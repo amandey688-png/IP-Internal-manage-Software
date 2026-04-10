@@ -6,6 +6,7 @@ import dayjs, { type Dayjs } from 'dayjs'
 import { API_ENDPOINTS } from '../../utils/constants'
 import { apiClient } from '../../api/axios'
 import { useAuth } from '../../hooks/useAuth'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title, Text } = Typography
 
@@ -681,22 +682,24 @@ export function ClientPaymentPage() {
       </Space>
 
       <Card>
-        <Table
-          dataSource={records}
-          columns={columns}
-          rowKey="id"
-          loading={loading}
-          scroll={{ x: 900 }}
-          pagination={{ pageSize: 20, showSizeChanger: true }}
-          onRow={(record) => ({
-            onClick: () => {
-              setSelectedRecord(record)
-              setDetailOpen(true)
-              loadDrawerData(record)
-            },
-            style: { cursor: 'pointer' },
-          })}
-        />
+        <TableWithSkeletonLoading loading={loading} columns={9} rows={12}>
+          <Table
+            dataSource={records}
+            columns={columns}
+            rowKey="id"
+            loading={false}
+            scroll={{ x: 900 }}
+            pagination={{ pageSize: 20, showSizeChanger: true }}
+            onRow={(record) => ({
+              onClick: () => {
+                setSelectedRecord(record)
+                setDetailOpen(true)
+                loadDrawerData(record)
+              },
+              style: { cursor: 'pointer' },
+            })}
+          />
+        </TableWithSkeletonLoading>
       </Card>
 
       <Drawer

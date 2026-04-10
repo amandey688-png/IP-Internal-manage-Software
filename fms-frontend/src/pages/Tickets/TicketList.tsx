@@ -18,6 +18,7 @@ import { supportApi } from '../../api/support'
 import { TicketDetailDrawer } from '../../components/tickets/TicketDetailDrawer'
 import { ChoresBugsDetailDrawer } from '../../components/tickets/ChoresBugsDetailDrawer'
 import { PrintExport } from '../../components/common/PrintExport'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 import {
   formatDateTable,
   formatDuration,
@@ -1098,51 +1099,53 @@ export const TicketList = () => {
           />
         </Space>
 
-        <Table
-          className={isCompletedChoresBugs ? 'completed-chores-bugs-wrap' : undefined}
-          columns={columns}
-          dataSource={ticketsForDisplay}
-          rowKey="id"
-          loading={loading}
-          locale={{ emptyText: 'No tickets yet.' }}
-          scroll={{ x: 2400, y: 'calc(100vh - 320px)' }}
-          pagination={{
-            current: page,
-            pageSize,
-            total:
-              showStageFilter && stageFilter
-                ? allTicketsForStageFilter.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter).length
-                : showStageFilterForFeature && stageFilter
-                  ? allTicketsForStageFilter.filter((t) => getFeatureCurrentStage(t).stageLabel === stageFilter).length
-                  : total,
-            showSizeChanger: true,
-            showTotal: (t) => `Total ${t} tickets`,
-            pageSizeOptions: ['10', '20', '50', '100'],
-            onChange: (newPage, newPageSize) => {
-              setPage(newPage)
-              setPageSize(newPageSize || 20)
-            },
-          }}
-          onChange={(_, __, sorter) => {
-            const s = Array.isArray(sorter) ? sorter[0] : sorter
-            if (s && 'field' in s && s.field) {
-              setFilters((f) => ({
-                ...f,
-                sort_by: String(s.field),
-                sort_order: s.order === 'ascend' ? 'asc' : 'desc',
-              }))
-              setPage(1)
-            }
-          }}
-          onRow={(record) => ({
-            onClick: () => {
-              setDrawerTicketId(record.id)
-              setDrawerTicketType((record as { type?: string }).type ?? null)
-            },
-            style: { cursor: 'pointer' },
-          })}
-          size="small"
-        />
+        <TableWithSkeletonLoading loading={loading} columns={12} rows={14}>
+          <Table
+            className={isCompletedChoresBugs ? 'completed-chores-bugs-wrap' : undefined}
+            columns={columns}
+            dataSource={ticketsForDisplay}
+            rowKey="id"
+            loading={false}
+            locale={{ emptyText: 'No tickets yet.' }}
+            scroll={{ x: 2400, y: 'calc(100vh - 320px)' }}
+            pagination={{
+              current: page,
+              pageSize,
+              total:
+                showStageFilter && stageFilter
+                  ? allTicketsForStageFilter.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter).length
+                  : showStageFilterForFeature && stageFilter
+                    ? allTicketsForStageFilter.filter((t) => getFeatureCurrentStage(t).stageLabel === stageFilter).length
+                    : total,
+              showSizeChanger: true,
+              showTotal: (t) => `Total ${t} tickets`,
+              pageSizeOptions: ['10', '20', '50', '100'],
+              onChange: (newPage, newPageSize) => {
+                setPage(newPage)
+                setPageSize(newPageSize || 20)
+              },
+            }}
+            onChange={(_, __, sorter) => {
+              const s = Array.isArray(sorter) ? sorter[0] : sorter
+              if (s && 'field' in s && s.field) {
+                setFilters((f) => ({
+                  ...f,
+                  sort_by: String(s.field),
+                  sort_order: s.order === 'ascend' ? 'asc' : 'desc',
+                }))
+                setPage(1)
+              }
+            }}
+            onRow={(record) => ({
+              onClick: () => {
+                setDrawerTicketId(record.id)
+                setDrawerTicketType((record as { type?: string }).type ?? null)
+              },
+              style: { cursor: 'pointer' },
+            })}
+            size="small"
+          />
+        </TableWithSkeletonLoading>
       </Card>
 
       {showChoresBugsDrawer ? (

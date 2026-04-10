@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Typography, Card, Button, Select, Row, Col, Table, Progress, Tag, Space, Spin, message, Modal, Alert } from 'antd'
+import { Typography, Card, Button, Select, Row, Col, Table, Progress, Tag, Space, message, Modal, Alert } from 'antd'
 import { DashboardOutlined, ArrowLeftOutlined, CheckSquareOutlined, SwapOutlined, CustomerServiceOutlined, UnorderedListOutlined } from '@ant-design/icons'
 import {
   BarChart,
@@ -21,6 +21,7 @@ import {
   type DashboardKpiResponse,
   type SupportFmsDelayItem,
 } from '../../api/dashboardKpi'
+import { DashboardBlockSkeleton } from '../../components/common/skeletons'
 import { getDefaultPreviousWeekFilter, maxWeekOfMonth, weekOfMonth } from './kpiWeekUtils'
 
 const { Title, Text } = Typography
@@ -207,11 +208,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
           </span>
         </Space>
 
-        {loading && (
-          <div style={{ textAlign: 'center', padding: 48 }}>
-            <Spin size="large" />
-          </div>
-        )}
+        {loading && <DashboardBlockSkeleton />}
 
         {!loading && data && data.success !== false && (
           <>

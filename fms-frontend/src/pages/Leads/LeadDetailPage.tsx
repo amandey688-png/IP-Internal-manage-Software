@@ -7,7 +7,6 @@ import {
   Modal,
   Form,
   message,
-  Spin,
   Input,
   Descriptions,
   Segmented,
@@ -24,6 +23,7 @@ import {
   getStageDisplayItems,
   STAGE_FIELDS,
 } from './leadStageFields'
+import { DetailPageSkeleton } from '../../components/common/skeletons'
 import { useAuth } from '../../hooks/useAuth'
 import { useRole } from '../../hooks/useRole'
 
@@ -102,11 +102,7 @@ export const LeadDetailPage = () => {
   }
 
   if (loading && !lead) {
-    return (
-      <div style={{ padding: 24, textAlign: 'center' }}>
-        <Spin size="large" />
-      </div>
-    )
+    return <DetailPageSkeleton />
   }
 
   if (!lead) {

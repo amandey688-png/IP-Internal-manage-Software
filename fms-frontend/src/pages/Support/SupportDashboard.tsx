@@ -1,4 +1,4 @@
-import { Typography, Row, Col, Card, Button, Modal, Table, Spin, Alert } from 'antd'
+import { Typography, Row, Col, Card, Button, Modal, Table, Alert } from 'antd'
 import {
   CalendarOutlined,
   ReloadOutlined,
@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supportDashboardApi, type SupportDashboardStats, type WeekData } from '../../api/supportDashboard'
 import { LoadingSpinner } from '../../components/common/LoadingSpinner'
+import { ModalContentSkeleton } from '../../components/common/skeletons'
 import { formatDateWeekly, truncateTitleDescCell } from '../../utils/helpers'
 import { ROUTES } from '../../utils/constants'
 import { isLocalBackend } from '../../api/axios'
@@ -436,9 +437,7 @@ export const SupportDashboard = () => {
         width={1000}
       >
         {filteredLoading ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin size="large" />
-          </div>
+          <ModalContentSkeleton rows={12} />
         ) : filteredData ? (
           <Table
             dataSource={filteredData.data as Record<string, unknown>[]}
@@ -593,9 +592,7 @@ export const SupportDashboard = () => {
 
             {/* Table area - loads when a box is clicked */}
             {weeklyLoading ? (
-              <div style={{ textAlign: 'center', padding: 40 }}>
-                <Spin size="large" />
-              </div>
+              <ModalContentSkeleton rows={10} />
             ) : weeklyData && weeklyData.tickets.length > 0 ? (
               <Table
                 dataSource={weeklyData.tickets as Record<string, unknown>[]}
@@ -671,9 +668,7 @@ export const SupportDashboard = () => {
         width={900}
       >
         {featureLoading ? (
-          <div style={{ textAlign: 'center', padding: 40 }}>
-            <Spin size="large" />
-          </div>
+          <ModalContentSkeleton rows={10} />
         ) : featureData ? (
           <Table
             dataSource={featureData.data as Record<string, unknown>[]}

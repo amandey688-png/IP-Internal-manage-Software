@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Table, Card, Typography, Tag } from 'antd'
 import { solutionsApi } from '../../api/solutions'
 import { PrintExport } from '../../components/common/PrintExport'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 import { formatDate } from '../../utils/helpers'
 import type { Solution } from '../../api/solutions'
 
@@ -92,13 +93,9 @@ export const SolutionList = () => {
         <PrintExport pageTitle="Solutions" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="solutions" />
       </div>
       <Card>
-        <Table
-          columns={columns}
-          dataSource={solutions}
-          rowKey="id"
-          loading={loading}
-          pagination={false}
-        />
+        <TableWithSkeletonLoading loading={loading} columns={5} rows={8}>
+          <Table columns={columns} dataSource={solutions} rowKey="id" loading={false} pagination={false} />
+        </TableWithSkeletonLoading>
       </Card>
     </div>
   )

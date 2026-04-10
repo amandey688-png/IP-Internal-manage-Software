@@ -6,6 +6,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import dayjs from 'dayjs'
 import { ROUTES } from '../../utils/constants'
 import { leadsApi, type Lead } from '../../api/leads'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title, Text } = Typography
 const { RangePicker } = DatePicker
@@ -169,58 +170,60 @@ export const LeadListPage = () => {
           </Button>
         </Space>
 
-        <Table
-          loading={loading}
-          dataSource={filteredLeads}
-          rowKey="id"
-          onRow={(record) => ({
-            onClick: () => navigate(ROUTES.LEAD_DETAIL.replace(':id', record.reference_no)),
-            style: { cursor: 'pointer' },
-          })}
-          columns={[
-            {
-              title: 'Timestamp',
-              dataIndex: 'created_at',
-              key: 'created_at',
-              width: 160,
-              render: (v: string) => (v ? dayjs(v).format('DD MMM YYYY HH:mm') : '—'),
-            },
-            {
-              title: 'Reference No',
-              dataIndex: 'reference_no',
-              key: 'reference_no',
-              width: 120,
-              ellipsis: false,
-              render: (v: string) => wrapRender(v),
-            },
-            {
-              title: 'Company',
-              dataIndex: 'company_name',
-              key: 'company_name',
-              width: 180,
-              ellipsis: false,
-              render: (v: string) => wrapRender(v),
-            },
-            {
-              title: 'Stage',
-              dataIndex: 'stage',
-              key: 'stage',
-              width: 140,
-              ellipsis: false,
-              render: (v: string) => wrapRender(v),
-            },
-            {
-              title: 'Assigned POC',
-              dataIndex: 'assigned_poc_name',
-              key: 'assigned_poc',
-              width: 140,
-              ellipsis: false,
-              render: (v: string) => wrapRender(v),
-            },
-          ]}
-          pagination={{ pageSize: 20 }}
-          size="small"
-        />
+        <TableWithSkeletonLoading loading={loading} columns={5} rows={12}>
+          <Table
+            loading={false}
+            dataSource={filteredLeads}
+            rowKey="id"
+            onRow={(record) => ({
+              onClick: () => navigate(ROUTES.LEAD_DETAIL.replace(':id', record.reference_no)),
+              style: { cursor: 'pointer' },
+            })}
+            columns={[
+              {
+                title: 'Timestamp',
+                dataIndex: 'created_at',
+                key: 'created_at',
+                width: 160,
+                render: (v: string) => (v ? dayjs(v).format('DD MMM YYYY HH:mm') : '—'),
+              },
+              {
+                title: 'Reference No',
+                dataIndex: 'reference_no',
+                key: 'reference_no',
+                width: 120,
+                ellipsis: false,
+                render: (v: string) => wrapRender(v),
+              },
+              {
+                title: 'Company',
+                dataIndex: 'company_name',
+                key: 'company_name',
+                width: 180,
+                ellipsis: false,
+                render: (v: string) => wrapRender(v),
+              },
+              {
+                title: 'Stage',
+                dataIndex: 'stage',
+                key: 'stage',
+                width: 140,
+                ellipsis: false,
+                render: (v: string) => wrapRender(v),
+              },
+              {
+                title: 'Assigned POC',
+                dataIndex: 'assigned_poc_name',
+                key: 'assigned_poc',
+                width: 140,
+                ellipsis: false,
+                render: (v: string) => wrapRender(v),
+              },
+            ]}
+            pagination={{ pageSize: 20 }}
+            size="small"
+          />
+        </TableWithSkeletonLoading>
       </Card>
 
       <Modal

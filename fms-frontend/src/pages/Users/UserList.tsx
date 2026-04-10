@@ -21,6 +21,7 @@ import { usersApi } from '../../api/users'
 import type { User } from '../../types/auth'
 import type { SectionPermission, RoleOption } from '../../api/users'
 import { PrintExport } from '../../components/common/PrintExport'
+import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 import { formatDate } from '../../utils/helpers'
 import { useRole } from '../../hooks/useRole'
 import { ROLE_DISPLAY_NAMES, SECTION_LABELS, PERMISSION_SECTION_KEYS } from '../../utils/constants'
@@ -310,23 +311,25 @@ export const UserList = () => {
           />
         </Space>
 
-        <Table
-          columns={columns}
-          dataSource={users}
-          rowKey="id"
-          loading={loading}
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            showTotal: (total) => `Total ${total} users`,
-            onChange: (newPage, newPageSize) => {
-              setPage(newPage)
-              if (newPageSize) setPageSize(newPageSize)
-            },
-          }}
-        />
+        <TableWithSkeletonLoading loading={loading} columns={6} rows={12}>
+          <Table
+            columns={columns}
+            dataSource={users}
+            rowKey="id"
+            loading={false}
+            pagination={{
+              current: page,
+              pageSize,
+              total,
+              showSizeChanger: true,
+              showTotal: (total) => `Total ${total} users`,
+              onChange: (newPage, newPageSize) => {
+                setPage(newPage)
+                if (newPageSize) setPageSize(newPageSize)
+              },
+            }}
+          />
+        </TableWithSkeletonLoading>
       </Card>
 
       <Modal

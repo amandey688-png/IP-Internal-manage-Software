@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Card, Result, Spin, Typography } from 'antd'
+import { Card, Result, Skeleton, Typography } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import { apiClient } from '../../api/axios'
 import { PrintExport } from '../../components/common/PrintExport'
@@ -41,8 +41,13 @@ export const ApprovalConfirmPage = () => {
 
   if (status === 'loading') {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60vh' }}>
-        <Spin size="large" tip="Processing..." />
+      <div style={{ maxWidth: 400, margin: '48px auto', padding: 24 }}>
+        <Card>
+          <Skeleton active title={{ width: '55%' }} paragraph={{ rows: 4 }} />
+          <Text type="secondary" style={{ display: 'block', marginTop: 16 }}>
+            Processing…
+          </Text>
+        </Card>
       </div>
     )
   }
