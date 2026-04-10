@@ -13,7 +13,6 @@ import {
 import dayjs from 'dayjs'
 import './dashboard-kpi.css'
 import {
-  DASHBOARD_KPI_NAMES,
   dashboardKpiApi,
   MONTHS,
   WEEKS,
@@ -22,7 +21,7 @@ import {
   type DashboardKpiResponse,
   type SupportFmsDelayItem,
 } from '../../api/dashboardKpi'
-import { weekOfMonth } from './kpiWeekUtils'
+import { getDefaultPreviousWeekFilter, maxWeekOfMonth, weekOfMonth } from './kpiWeekUtils'
 
 const { Title, Text } = Typography
 
@@ -57,10 +56,11 @@ const getPerformanceLevel = (value?: number) => {
 }
 
 export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi' }: DashboardKPIPageProps) => {
+  const previousWeekDefaults = getDefaultPreviousWeekFilter()
   const [selectedPerson, setSelectedPerson] = useState<DashboardKpiPerson | null>(forceOpen ? defaultPerson : null)
-  const [month, setMonth] = useState<string>(MONTHS[dayjs().month()])
-  const [year, setYear] = useState<string>(String(dayjs().year()))
-  const [week, setWeek] = useState<string>('week 2')
+  const [month, setMonth] = useState<string>(MONTHS[previousWeekDefaults.monthIndex] ?? MONTHS[dayjs().month()])
+  const [year, setYear] = useState<string>(previousWeekDefaults.year || String(dayjs().year()))
+  const [week, setWeek] = useState<string>(`week ${previousWeekDefaults.week}`)
   const [data, setData] = useState<DashboardKpiResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [detailModal, setDetailModal] = useState<{ title: string; items: SupportFmsDelayItem[] } | null>(null)
@@ -73,14 +73,16 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
   >(null)
   const [graphModal, setGraphModal] = useState<'checklist' | 'delegation' | 'supportFMS' | 'successKpi' | null>(null)
 
-  // Default filters: same calendar week as ~7 days ago (week-of-month matches backend _week_of_month)
+  // Keep week valid for selected month/year; avoids stale week value after filter changes.
   useEffect(() => {
-    const today = dayjs()
-    const previousWeekDate = today.subtract(7, 'day')
-    setMonth(MONTHS[previousWeekDate.month()])
-    setYear(String(previousWeekDate.year()))
-    setWeek(`week ${weekOfMonth(previousWeekDate)}`)
-  }, [])
+    const monthIndex = MONTHS.findIndex((m) => m === month)
+    if (monthIndex < 0) return
+    const y = Number(year)
+    if (!Number.isFinite(y)) return
+    const maxWeek = maxWeekOfMonth(dayjs().year(y).month(monthIndex).date(1))
+    const parsed = Number((week || '').replace(/[^\d]/g, '')) || weekOfMonth(dayjs())
+    if (parsed > maxWeek) setWeek(`week ${maxWeek}`)
+  }, [month, year, week])
 
   const loadData = useCallback(() => {
     if (!selectedPerson) return
@@ -154,7 +156,6 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
   }
 
   // Data view for selected person
-  const applied = data?.meta?.applied
   const monthly = data?.monthlyPercentages
   const checklist = data?.checklist
   const delegation = data?.delegation
