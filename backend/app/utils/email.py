@@ -1,8 +1,7 @@
 """
 Async email sender.
-- Postmark HTTP API: works on Render (use POSTMARK_SERVER_TOKEN).
-- SendGrid HTTP API: works on Render (use SENDGRID_API_KEY).
-- SMTP: for localhost/dev (Postmark, etc.).
+- SendGrid HTTP API: set SENDGRID_API_KEY + SENDGRID_FROM_EMAIL (works on Render without SMTP ports).
+- SMTP: Brevo, Gmail, etc. (SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL).
 
 Supported SMTP ports (via SMTP_PORT env):
   587  - default, STARTTLS
@@ -21,7 +20,7 @@ except ImportError:
 async def send_email(to_email: str, subject: str, html_content: str, plain_fallback: str | None = None):
     """
     Send an email with HTML content.
-    Order: Postmark API -> SendGrid API -> SMTP.
+    Order: SendGrid API -> SMTP.
     Returns True if sent, False otherwise.
     """
     to_email = (to_email or "").strip()
@@ -30,47 +29,7 @@ async def send_email(to_email: str, subject: str, html_content: str, plain_fallb
 
     plain = (plain_fallback or "This email requires HTML support.").strip()
 
-    # 1. Postmark HTTP API - works on Render (same token as SMTP)
-    postmark_token = (os.getenv("POSTMARK_SERVER_TOKEN") or os.getenv("SMTP_USER") or "").strip()
-    from_email = (os.getenv("SMTP_FROM_EMAIL") or "").strip()
-    smtp_host_check = (os.getenv("SMTP_HOST") or "").lower()
-    use_postmark_api = postmark_token and httpx and from_email and (
-        os.getenv("POSTMARK_SERVER_TOKEN") or "postmark" in smtp_host_check
-    )
-    if use_postmark_api:
-        try:
-            from_val = f"IP Internal Management <{from_email}>"
-            stream = (os.getenv("SMTP_POSTMARK_STREAM") or "outbound").strip()
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.post(
-                    "https://api.postmarkapp.com/email",
-                    headers={
-                        "X-Postmark-Server-Token": postmark_token,
-                        "Accept": "application/json",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "From": from_val,
-                        "To": to_email,
-                        "Subject": subject,
-                        "TextBody": plain,
-                        "HtmlBody": html_content,
-                        "MessageStream": stream,
-                    },
-                )
-                if resp.status_code == 200:
-                    try:
-                        data = resp.json() if resp.content else {}
-                        if data.get("ErrorCode", 0) == 0:
-                            return True
-                    except Exception:
-                        pass
-                _log(f"Postmark API error: {resp.status_code} {resp.text[:200]}")
-        except Exception as e:
-            _log(f"Postmark API error: {e}")
-        return False
-
-    # 2. SendGrid HTTP API - works on Render
+    # 1. SendGrid HTTP API - works on Render
     sg_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
     sg_from = (os.getenv("SENDGRID_FROM_EMAIL") or os.getenv("SMTP_FROM_EMAIL") or "").strip()
     sg_name = (os.getenv("SENDGRID_FROM_NAME") or "IP Internal Management").strip()
@@ -97,7 +56,7 @@ async def send_email(to_email: str, subject: str, html_content: str, plain_fallb
             _log(f"SendGrid API error: {e}")
         return False
 
-    # 3. SMTP fallback (localhost/dev - blocked on Render free tier)
+    # 2. SMTP (Brevo, Gmail, etc.)
     import aiosmtplib
     from email.message import EmailMessage
 
@@ -108,7 +67,21 @@ async def send_email(to_email: str, subject: str, html_content: str, plain_fallb
     smtp_from = (os.getenv("SMTP_FROM_EMAIL") or "").strip()
 
     if not all([smtp_host, smtp_user, smtp_pass, smtp_from]):
-        _log("send_email: set POSTMARK_SERVER_TOKEN (or SENDGRID_API_KEY) for Render, or SMTP vars for localhost")
+        missing = [
+            name
+            for name, val in (
+                ("SMTP_HOST", smtp_host),
+                ("SMTP_USER", smtp_user),
+                ("SMTP_PASSWORD or SMTP_PASS", smtp_pass),
+                ("SMTP_FROM_EMAIL", smtp_from),
+            )
+            if not val
+        ]
+        _log(
+            "send_email: no SendGrid key; SMTP incomplete — missing: "
+            + ", ".join(missing)
+            + ". Save backend/.env and restart."
+        )
         return False
 
     message = EmailMessage()
@@ -117,10 +90,6 @@ async def send_email(to_email: str, subject: str, html_content: str, plain_fallb
     message["Subject"] = subject
     message.set_content(plain)
     message.add_alternative(html_content, subtype="html")
-
-    smtp_stream = (os.getenv("SMTP_POSTMARK_STREAM") or "").strip()
-    if smtp_stream:
-        message["X-PM-Message-Stream"] = smtp_stream
 
     # Port 465 = SSL from start; 587, 2525, 25 = STARTTLS
     use_tls = smtp_port == 465

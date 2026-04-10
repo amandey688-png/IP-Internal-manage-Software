@@ -26,7 +26,7 @@ This guide covers the **daily pending task email** for Support: **Chores & Bug**
 
 ## 2. Prerequisites
 
-- Backend can send email (SMTP, Postmark, or SendGrid – see below).
+- Backend can send email (SMTP or SendGrid API – see below).
 - Database has:
   - `delegation_tasks` and `pending_reminder_sent` (run `database/DELEGATION_AND_PENDING_REMINDER.sql`).
   - `users_view` with email (from `auth.users`); Level 1 & 2 users must have a valid email in Auth.
@@ -70,21 +70,13 @@ In `backend/.env` (local) and in your **production** env (e.g. Render):
 
 | Variable | Description |
 |----------|-------------|
-| `SMTP_HOST` | e.g. `smtp.postmarkapp.com` or `smtp.resend.com` |
-| `SMTP_PORT` | `587` or `465` |
-| `SMTP_USER` | Token/username (e.g. Postmark server token) |
-| `SMTP_PASSWORD` | Password (often same as token for Postmark) |
+| `SMTP_HOST` | e.g. `smtp-relay.brevo.com` or `smtp.resend.com` |
+| `SMTP_PORT` | `587` or `465` (try `2525` if your host blocks 587) |
+| `SMTP_USER` | SMTP login from your provider |
+| `SMTP_PASSWORD` | SMTP password / API key from your provider |
 | `SMTP_FROM_EMAIL` | Verified sender email |
 
-**Or Postmark API:**
-
-| Variable | Description |
-|----------|-------------|
-| `POSTMARK_SERVER_TOKEN` | Postmark server API token |
-| `SMTP_FROM_EMAIL` | Sender email |
-| `SMTP_HOST` | Can include `postmark` so code uses Postmark API |
-
-**Or SendGrid:**
+**Or SendGrid (HTTP API — works when host blocks SMTP ports):**
 
 | Variable | Description |
 |----------|-------------|
@@ -167,7 +159,7 @@ If you have Chores/Bug tickets pending, they appear under “Support – Chores 
 
 Deploy your backend to your host (e.g. Render, Railway) as usual. Ensure the same env vars are set in production:
 
-- SMTP or Postmark or SendGrid (as above)
+- SMTP or SendGrid (as above)
 - `PENDING_REMINDER_CRON_SECRET` or `CHECKLIST_CRON_SECRET`
 
 ### 5.2 Schedule 9 AM daily (cron)
@@ -220,7 +212,7 @@ Use any cron service that can do HTTP requests daily at 9 AM in your timezone.
 | Check | Action |
 |-------|--------|
 | Response `sent: 0` | Ensure at least one user has role admin/master_admin/approver and email in Auth; run the SQL in 3.1 to verify. |
-| Response `sent: 1` but no email | Check spam; verify SMTP/Postmark/SendGrid env vars in production; check provider dashboard for bounces or errors. |
+| Response `sent: 1` but no email | Check spam; verify SMTP/SendGrid env vars in production; check provider dashboard for bounces or errors. |
 | 401 on cron | Secret mismatch: cron must send the same value as `PENDING_REMINDER_CRON_SECRET` or `CHECKLIST_CRON_SECRET`. |
 | 404 on cron | Wrong URL or backend not deployed; use exact path `/reminders/send-pending-digest`. |
 

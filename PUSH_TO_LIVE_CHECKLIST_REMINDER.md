@@ -43,12 +43,11 @@ In **Render** → your backend service → **Environment**:
 | Variable | Value |
 |----------|-------|
 | `CHECKLIST_CRON_SECRET` | e.g. `mysecret123` (same value you'll use in cron) |
-| `SMTP_HOST` | `smtp.postmarkapp.com` (or your SMTP) |
+| `SMTP_HOST` | e.g. `smtp-relay.brevo.com` |
 | `SMTP_PORT` | `587` |
-| `SMTP_USER` | Postmark server token |
-| `SMTP_PASSWORD` | Same as SMTP_USER for Postmark |
+| `SMTP_USER` | SMTP login |
+| `SMTP_PASSWORD` | SMTP key |
 | `SMTP_FROM_EMAIL` | e.g. `aman@industryprime.com` |
-| `SMTP_POSTMARK_STREAM` | `outbound` (optional) |
 
 Save and **redeploy** the backend.
 

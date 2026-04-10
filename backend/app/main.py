@@ -9438,6 +9438,55 @@ async def send_checklist_daily_reminders(
     return {"status": "started", "message": "Checklist reminder job started. Check server logs for result."}
 
 
+class SmtpTestBody(BaseModel):
+    """Optional recipient; defaults to SMTP_FROM_EMAIL from env."""
+
+    to: EmailStr | None = None
+
+
+@api_router.post("/smtp/test")
+async def smtp_send_test_email(request: Request, body: SmtpTestBody = SmtpTestBody()):
+    """
+    Send one test message via send_email() (SendGrid API or SMTP).
+    Set SMTP_TEST_SECRET in backend/.env, restart, then send header X-SMTP-Test-Secret with the same value.
+    JSON body optional: {"to": "recipient@example.com"} — else uses SMTP_FROM_EMAIL.
+    """
+    secret = (os.getenv("SMTP_TEST_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(
+            503,
+            "Set SMTP_TEST_SECRET in backend/.env to any random string, restart uvicorn, then send header X-SMTP-Test-Secret with that value.",
+        )
+    hdr = (request.headers.get("X-SMTP-Test-Secret") or request.headers.get("x-smtp-test-secret") or "").strip()
+    if hdr != secret:
+        raise HTTPException(403, "Missing or invalid X-SMTP-Test-Secret header.")
+
+    to = str(body.to).strip() if body.to else (os.getenv("SMTP_FROM_EMAIL") or "").strip()
+    if not to:
+        raise HTTPException(
+            400,
+            'Set SMTP_FROM_EMAIL in .env or POST JSON {"to": "you@example.com"}.',
+        )
+    from app.utils.email import send_email
+
+    ok = await send_email(
+        to_email=to,
+        subject="FMS backend: SMTP test",
+        html_content=(
+            "<html><body><p>This is a <strong>test email</strong> from your IP FMS backend.</p>"
+            "<p>If you received it, SendGrid or SMTP is configured correctly.</p></body></html>"
+        ),
+        plain_fallback="FMS SMTP test: plain text OK means send_email ran.",
+    )
+    if not ok:
+        raise HTTPException(
+            500,
+            "send_email returned false. Check server logs ([email] lines). "
+            "If you use Brevo SMTP only, leave SENDGRID_API_KEY unset.",
+        )
+    return {"ok": True, "to": to, "message": "Test email sent — check inbox and spam."}
+
+
 # ---------- Delegation Daily Reminder (same pattern as Checklist) ----------
 async def _send_delegation_reminder_email(to_email: str, task_titles: list[str], assignee_name: str) -> bool:
     """Send delegation reminder email via utils/email.py. Returns True if sent."""
@@ -9572,7 +9621,7 @@ async def send_delegation_daily_reminders(
 # ---------------------------------------------------------------------------
 
 def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) -> bool:
-    """Send pending digest email. Uses SMTP, Postmark API, or SendGrid. Returns True if sent."""
+    """Send pending digest email via SMTP or SendGrid API. Returns True if sent."""
     subject = "Pending Task Reminder – Checklist, Delegation & Support"
     to_email = (to_email or "").strip()
     if not to_email:
@@ -9594,9 +9643,6 @@ def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) ->
             msg["Subject"] = subject
             msg["From"] = smtp_from
             msg["To"] = to_email
-            smtp_stream = (os.getenv("SMTP_POSTMARK_STREAM") or "").strip()
-            if smtp_stream:
-                msg["X-PM-Message-Stream"] = smtp_stream
             msg.attach(MIMEText(body, "plain"))
             if smtp_port == 465:
                 with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
@@ -9613,40 +9659,11 @@ def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) ->
             _log(f"Pending digest SMTP error: {e}")
             return False
 
-    postmark_token = (os.getenv("POSTMARK_SERVER_TOKEN") or os.getenv("SMTP_USER") or "").strip()
-    postmark_from = (os.getenv("SMTP_FROM_EMAIL") or "").strip()
-    postmark_host = (os.getenv("SMTP_HOST") or "").lower()
-    if postmark_token and postmark_from and ("postmark" in postmark_host or os.getenv("POSTMARK_SERVER_TOKEN")):
-        try:
-            from_val = f"IP Internal Management <{postmark_from}>"
-            stream = (os.getenv("SMTP_POSTMARK_STREAM") or "outbound").strip()
-            resp = httpx.post(
-                "https://api.postmarkapp.com/email",
-                headers={"X-Postmark-Server-Token": postmark_token, "Content-Type": "application/json"},
-                json={
-                    "From": from_val,
-                    "To": to_email,
-                    "Subject": subject,
-                    "TextBody": body,
-                    "MessageStream": stream,
-                },
-                timeout=15.0,
-            )
-            if resp.status_code == 200:
-                data = resp.json() if resp.content else {}
-                if data.get("ErrorCode", 0) == 0:
-                    _log(f"Pending digest sent to {to_email} (Postmark)")
-                    return True
-            _log(f"Postmark API error: {resp.status_code} {resp.text[:200]}")
-        except Exception as e:
-            _log(f"Pending digest Postmark error: {e}")
-        return False
-
     api_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
     from_email = (os.getenv("SENDGRID_FROM_EMAIL") or smtp_from or "").strip()
     from_name = (os.getenv("SENDGRID_FROM_NAME") or "IP Internal Management").strip()
     if not api_key or not from_email:
-        _log("Pending digest: no SMTP, Postmark, or SENDGRID_API_KEY configured, skip send")
+        _log("Pending digest: no SMTP or SENDGRID_API_KEY configured, skip send")
         return False
     try:
         resp = httpx.post(

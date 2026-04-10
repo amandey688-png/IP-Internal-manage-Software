@@ -240,7 +240,7 @@ https://ip-internal-manage-software.onrender.com/checklist/send-daily-reminders?
 
 ## SendGrid SMTP (Alternative for Localhost)
 
-For local development, you can use SendGrid SMTP instead of Postmark:
+For local development, you can use SendGrid SMTP:
 
 | Env Var | Value |
 |---------|-------|

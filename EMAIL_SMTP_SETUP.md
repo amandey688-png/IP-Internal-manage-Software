@@ -39,7 +39,6 @@ Use any provider that supports SMTP. Examples:
 | **Brevo** (ex-Sendinblue) | Free tier, SMTP. |
 | **SendGrid** (Twilio) | SMTP and API. |
 | **AWS SES** | Cheap, requires AWS account; use SMTP. |
-| **Postmark** | Good for transactional email. |
 | **Gmail / Google Workspace** | Use “App password” + SMTP (see below). |
 
 Pick one and get: **host**, **port**, **username**, **password**, and a **sender email** (e.g. `no-reply@yourdomain.com` or your Gmail).
