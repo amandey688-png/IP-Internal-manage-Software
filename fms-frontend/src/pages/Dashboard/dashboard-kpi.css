@@ -117,6 +117,14 @@
   color: #4a6bff;
 }
 
+.kpi-card--akash {
+  background: linear-gradient(135deg, #e0f2fe 0%, #ccfbf1 40%, #f0fdfa 100%);
+}
+
+.kpi-card--akash .kpi-card-icon {
+  color: #0d9488;
+}
+
 .kpi-card--rimpa .kpi-card-icon {
   color: #f97316;
 }
@@ -308,5 +316,19 @@
 .dashboard-kpi-page .ant-select {
   min-width: 0;
   max-width: 100%;
+}
+
+/* Akash — third monthly gauge (lavender, matches Rimpa-style summary row) */
+.kpi-summary-card--akash-overall {
+  background: linear-gradient(135deg, #eef2ff 0%, #e0e7ff 55%, #f5f3ff 100%);
+}
+
+/* Akash CUSTOMER SUPPORT inner card — keep header + metrics readable */
+.kpi-akash-cs-card .ant-card-head-title {
+  white-space: normal;
+  line-height: 1.25;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 

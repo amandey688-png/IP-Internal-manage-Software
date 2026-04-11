@@ -59,7 +59,7 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
 
   const sectionLabel = viewApproval ? 'Approval Status' : section === 'chores-bugs' ? 'Chores & Bugs' : section === 'completed-chores-bugs' ? 'Completed Chores & Bugs' : section === 'completed-feature' ? 'Completed Feature' : section === 'solutions' ? 'Solution' : ''
   const breadcrumb = location.pathname === ROUTES.DASHBOARD
-    ? 'Support / Support Overview'
+    ? ''
     : location.pathname === ROUTES.DASHBOARD_KPI
       ? 'Dashboard - KPI'
       : location.pathname.startsWith(ROUTES.TICKETS)
@@ -105,7 +105,11 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
         )}
         <Space size="small">
           <img src="/logo.png" alt="Logo" style={{ height: 32, width: 'auto', objectFit: 'contain' }} />
-          <Text className="breadcrumb-text" style={{ marginLeft: 12, color: '#343A40' }}>{breadcrumb}</Text>
+          {breadcrumb ? (
+            <Text className="breadcrumb-text" style={{ marginLeft: 12, color: '#343A40' }}>
+              {breadcrumb}
+            </Text>
+          ) : null}
         </Space>
       </Space>
       <Space size="middle">

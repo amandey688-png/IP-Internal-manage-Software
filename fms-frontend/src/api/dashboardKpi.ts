@@ -1,6 +1,6 @@
 import { apiClient } from './axios'
 
-export const DASHBOARD_KPI_NAMES = ['Shreyasi', 'Rimpa'] as const
+export const DASHBOARD_KPI_NAMES = ['Shreyasi', 'Rimpa', 'Akash'] as const
 export type DashboardKpiPerson = (typeof DASHBOARD_KPI_NAMES)[number]
 
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
@@ -40,6 +40,8 @@ export interface SupportFmsDelayItem {
   delay_time?: string
   query_arrival?: string
   month?: string
+  /** Akash Customer Support detail rows */
+  ticket_status?: string
 }
 
 export interface SupportFmsSection {
@@ -87,6 +89,71 @@ export interface SuccessKpiSection {
   details: SuccessKpiDetailLists
 }
 
+export interface AkashKpiMetricRow {
+  label: string
+  value: string
+}
+
+export interface AkashKpiPillar {
+  key: string
+  title: string
+  weight: number
+  weight_percent_display: number
+  score_percent: number
+  metrics: AkashKpiMetricRow[]
+}
+
+export interface AkashCustomerSupportMeta {
+  selectedWeekNum?: number
+  dataWeekNum?: number
+  dataMonth?: string
+  dataYear?: string
+  dataRangeLabel?: string
+  helpNote?: string
+}
+
+export interface AkashCustomerSupportBlock {
+  scorePercent?: number
+  /** Support health % for the same week as Month/Year/Week filters (used in headline blend) */
+  scorePercentFilterWeek?: number
+  totalIssues?: number
+  responseDelayCount?: number
+  completionDelayCount?: number
+  pendingCount?: number
+  responseTimeDisplay?: string
+  meta?: AkashCustomerSupportMeta
+  /** @deprecated use split detail arrays */
+  details?: SupportFmsDelayItem[]
+  detailsResponseDelay?: SupportFmsDelayItem[]
+  detailsCompletionDelay?: SupportFmsDelayItem[]
+  detailsPending?: SupportFmsDelayItem[]
+}
+
+export interface AkashKpiResponse {
+  weights_raw: Record<string, number>
+  weights_normalized_100: Record<string, number>
+  weight_sum_raw: number
+  overall_score_percent: number
+  pillars: AkashKpiPillar[]
+  customerSupport?: AkashCustomerSupportBlock
+  /** True when item/video/AI weekly aggregates used the KPI daily work log for the filter week */
+  dailyLogWeekApplied?: boolean
+  /** Only for akash@ / aman@ — show Add KPI (daily log editor) */
+  kpiDailyLogEditor?: boolean
+}
+
+/** One row from GET/PUT `/dashboard/kpi-daily-log` (spreadsheet yellow cells). */
+export interface KpiDailyLogApiRow {
+  work_date: string
+  items_cleaned?: number | null
+  errors_found?: number | null
+  accuracy_pct?: number | null
+  videos_created?: number | null
+  video_type?: string | null
+  ai_tasks_used?: number | null
+  process_improved?: number | null
+}
+
 export interface SuccessKpiResponse {
   pocCollected: SuccessKpiSection
   weeklyTrainingTarget: SuccessKpiSection
@@ -124,6 +191,7 @@ export interface DashboardKpiResponse {
     weeklyPercentage?: number
   }
   successKpi?: SuccessKpiResponse
+  akashKpi?: AkashKpiResponse | null
   monthlyPercentages?: {
     checklist: number
     delegation: number
@@ -150,4 +218,14 @@ export const dashboardKpiApi = {
         },
       })
       .then((r) => r.data),
+
+  getKpiDailyLog: (year: number, month: number) =>
+    apiClient
+      .get<{ rows: KpiDailyLogApiRow[] }>('/dashboard/kpi-daily-log', {
+        params: { year, month },
+      })
+      .then((r) => r.data),
+
+  putKpiDailyLog: (body: KpiDailyLogApiRow) =>
+    apiClient.put<{ ok: boolean; work_date: string }>('/dashboard/kpi-daily-log', body).then((r) => r.data),
 }
