@@ -4805,6 +4805,77 @@ def create_client_payment(payload: dict, auth: dict = Depends(get_current_user))
         raise HTTPException(400, str(e)[:200])
 
 
+@api_router.put("/onboarding/client-payment/{client_payment_id}")
+def update_client_payment(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Update core Raised Invoice fields (same as create). Allowed within 30 days of ``timestamp`` and only while unpaid."""
+    try:
+        r0 = (
+            supabase.table("onboarding_client_payment")
+            .select("id,timestamp,payment_received_date")
+            .eq("id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        row0 = (r0.data or [None])[0]
+        if not row0:
+            raise HTTPException(404, "Raised Invoice not found")
+        pr = row0.get("payment_received_date")
+        if pr is not None and str(pr).strip():
+            raise HTTPException(400, "Cannot edit: payment already received for this invoice")
+        ts = row0.get("timestamp")
+        if not ts:
+            raise HTTPException(400, "Missing timestamp on record")
+        try:
+            created = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+        except Exception:
+            raise HTTPException(400, "Invalid timestamp on record")
+        if (datetime.now(timezone.utc) - created).days > 30:
+            raise HTTPException(400, "Edit window expired: company / invoice fields can only be changed within 30 days of creation (Timestamp)")
+
+        company_name = (payload.get("company_name") or "").strip()
+        if not company_name:
+            raise HTTPException(400, "company_name is required")
+        invoice_date = payload.get("invoice_date")
+        invoice_amount = (payload.get("invoice_amount") or "").strip()
+        invoice_number = (payload.get("invoice_number") or "").strip()
+        genre = (payload.get("genre") or "").strip().upper()
+        if invoice_amount and (not invoice_amount.isdigit() or len(invoice_amount) > 11):
+            raise HTTPException(400, "invoice_amount must be digits only, max 11 characters")
+        if invoice_number and len(invoice_number) > 50:
+            raise HTTPException(400, "invoice_number max 50 characters")
+        if genre not in ("M", "Q", "HY", "Y"):
+            raise HTTPException(400, "genre must be one of M, Q, HY, Y")
+
+        patch = {
+            "company_name": company_name,
+            "invoice_date": invoice_date,
+            "invoice_amount": invoice_amount or None,
+            "invoice_number": invoice_number or None,
+            "genre": genre,
+        }
+        # postgrest-py: .update().eq() returns SyncFilterRequestBuilder — no .select(); fetch row after update.
+        supabase.table("onboarding_client_payment").update(patch).eq("id", client_payment_id).execute()
+        r = (
+            supabase.table("onboarding_client_payment")
+            .select(_OCP_LIST_COLUMNS)
+            .eq("id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        updated = (r.data or [None])[0]
+        if not updated:
+            raise HTTPException(400, "Raised Invoice not found after update")
+        _enrich_client_payment_list_items([updated])
+        return updated
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"client payment update: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
 @api_router.get("/onboarding/client-payment/{client_payment_id}/sent")
 def get_client_payment_sent(client_payment_id: str, auth: dict = Depends(get_current_user)):
     """Get Invoice Sent details for a Raised Invoice. Creates empty shell on first access."""
