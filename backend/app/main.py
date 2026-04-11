@@ -1117,6 +1117,18 @@ class SupportTicketDraftPayload(BaseModel):
     draft_data: dict
 
 
+class KpiDailyLogUpsertBody(BaseModel):
+    """One row of KPI daily work log (yellow cells); grey/score derived on dashboard."""
+    work_date: str  # YYYY-MM-DD
+    items_cleaned: float | None = None
+    errors_found: float | None = None
+    accuracy_pct: float | None = None
+    videos_created: float | None = None
+    video_type: str | None = None
+    ai_tasks_used: float | None = None
+    process_improved: float | None = None
+
+
 _DRAFT_EXPIRY_HOURS = 24
 
 
@@ -2451,6 +2463,337 @@ def _parse_iso_to_date(value) -> date | None:
         return None
 
 
+def _dashboard_kpi_is_akash(name: str | None) -> bool:
+    return "akash" in (name or "").strip().lower()
+
+
+def _akash_customer_support_data_week(sel_week: int, year: int, month_num: int) -> tuple[int, int, int]:
+    """Support-style week **before** the selected KPI week (e.g. Week 2 selected → use Week 1 in same month)."""
+    if sel_week > 1:
+        return sel_week - 1, year, month_num
+    if month_num > 1:
+        py, pm = year, month_num - 1
+    else:
+        py, pm = year - 1, 12
+    for wn in range(5, 0, -1):
+        if _dashboard_kpi_week_range(py, pm, f"week {wn}"):
+            return wn, py, pm
+    return 1, py, pm
+
+
+def _akash_support_tickets_in_week(tickets: list, data_week: int, data_year: int, data_month: int) -> list:
+    """Same week bucketing as Support Dashboard weekly-details (`_get_ticket_week`)."""
+    out = []
+    for t in tickets:
+        tw, tm, ty = _get_ticket_week(t)
+        if tw == data_week and ty == data_year and tm == data_month:
+            out.append(t)
+    return out
+
+
+def _akash_stage4_or_quality_done(t: dict) -> bool:
+    if str(t.get("status_4") or "").lower() == "completed":
+        return True
+    qs = t.get("quality_solution")
+    if qs is None:
+        return False
+    s = str(qs).strip().lower()
+    return s not in ("", "null", "none")
+
+
+def _akash_avg_response_minutes(tickets: list) -> float | None:
+    vals: list[float] = []
+    for t in tickets:
+        qa = t.get("query_arrival_at") or t.get("created_at")
+        qr = t.get("query_response_at")
+        if not qa or not qr:
+            continue
+        try:
+            a = datetime.fromisoformat(str(qa).replace("Z", "+00:00"))
+            r = datetime.fromisoformat(str(qr).replace("Z", "+00:00"))
+            if a.tzinfo is None:
+                a = a.replace(tzinfo=timezone.utc)
+            if r.tzinfo is None:
+                r = r.replace(tzinfo=timezone.utc)
+            vals.append((r - a).total_seconds() / 60.0)
+        except Exception:
+            continue
+    if not vals:
+        return None
+    return sum(vals) / len(vals)
+
+
+def _akash_support_detail_row(ticket: dict, month_display: str, delay_note: str | None = None) -> dict:
+    """Row shape compatible with KPI detail modal; includes ticket_status for Support-style list."""
+    created = ticket.get("created_at") or ""
+    ref = (ticket.get("reference_no") or "").strip() or "N/A"
+    company_val = (ticket.get("company_name") or "").strip() or "—"
+    q_arr = ticket.get("query_arrival_at") or created
+    has_resp, resp_text = _has_response_delay(q_arr, ticket.get("query_response_at"))
+    st = (ticket.get("status") or "").strip() or "—"
+    if delay_note is not None:
+        note = delay_note
+    else:
+        note = resp_text if has_resp else "—"
+    return {
+        "type": (ticket.get("type") or "Chore").title(),
+        "company": company_val,
+        "requested_person": "",
+        "submitted_by": (ticket.get("user_name") or "").strip() or "—",
+        "title": (ticket.get("title") or "").strip() or "—",
+        "description": (ticket.get("description") or "").strip() or "",
+        "reference_no": ref,
+        "query_arrival": _normalize_query_arrival_iso(q_arr),
+        "month": month_display,
+        "delay_time": note or "—",
+        "ticket_status": st,
+    }
+
+
+_AKASH_KPI_DAILY_LOG_EMAILS = frozenset({"akash@industryprime.com", "aman@industryprime.com"})
+
+
+def _kpi_daily_log_email_allowed(email: str | None) -> bool:
+    return (email or "").strip().lower() in _AKASH_KPI_DAILY_LOG_EMAILS
+
+
+def _kpi_daily_work_log_owner_user_id() -> str | None:
+    """Profile id that owns `kpi_daily_work_log` rows — same as dashboard KPI for name=Akash.
+
+    Bulk SQL and the Akash dashboard aggregate use this user_id. Editors (akash@ / aman@) share one log.
+    """
+    return _dashboard_kpi_resolve_user_id("Akash")
+
+
+def _count_weekdays_in_kpi_range(a: date, b: date) -> int:
+    n = 0
+    d = a
+    while d <= b:
+        if d.weekday() != 6:
+            n += 1
+        d += timedelta(days=1)
+    return max(1, n)
+
+
+def _aggregate_kpi_daily_log_for_week(rows: list, range_start: date, range_end: date) -> dict:
+    """Aggregate `kpi_daily_work_log` rows whose work_date falls in [range_start, range_end]."""
+    empty: dict = {
+        "has_rows": False,
+        "has_item_cleaning": False,
+        "items_cleaned": 0,
+        "errors_found": 0.0,
+        "accuracy_values": [],
+        "videos_created": 0,
+        "video_types": [],
+        "ai_tasks_used": 0,
+        "process_improved": 0,
+        "cleaning_score": 0,
+        "video_score": 0,
+        "ai_score": 0,
+    }
+    if not rows:
+        return empty
+    wd = _count_weekdays_in_kpi_range(range_start, range_end)
+    in_week: list = []
+    for r in rows:
+        wd_raw = r.get("work_date")
+        if not wd_raw:
+            continue
+        try:
+            d = date.fromisoformat(str(wd_raw)[:10])
+        except Exception:
+            continue
+        if range_start <= d <= range_end:
+            in_week.append(r)
+    if not in_week:
+        return empty
+    out = {**empty, "has_rows": True}
+    acc_vals: list[float] = []
+    vtypes: list[str] = []
+    for r in in_week:
+        if r.get("items_cleaned") is not None:
+            out["items_cleaned"] += int(r.get("items_cleaned") or 0)
+            out["has_item_cleaning"] = True
+        if r.get("errors_found") is not None and str(r.get("errors_found")).strip() != "":
+            try:
+                out["errors_found"] += float(r.get("errors_found"))
+            except (TypeError, ValueError):
+                pass
+            out["has_item_cleaning"] = True
+        ap = r.get("accuracy_pct")
+        if ap is not None and str(ap).strip() != "":
+            try:
+                acc_vals.append(float(ap))
+            except (TypeError, ValueError):
+                pass
+            out["has_item_cleaning"] = True
+        if r.get("videos_created") is not None:
+            out["videos_created"] += int(r.get("videos_created") or 0)
+        vt = (r.get("video_type") or "").strip()
+        if vt:
+            vtypes.append(vt)
+        if r.get("ai_tasks_used") is not None:
+            out["ai_tasks_used"] += int(r.get("ai_tasks_used") or 0)
+        if r.get("process_improved") is not None:
+            out["process_improved"] += int(r.get("process_improved") or 0)
+    out["accuracy_values"] = acc_vals
+    out["video_types"] = vtypes
+    if out["has_item_cleaning"]:
+        if acc_vals:
+            out["cleaning_score"] = max(0, min(100, round(sum(acc_vals) / len(acc_vals))))
+        elif out["items_cleaned"] > 0:
+            er = out["errors_found"]
+            pct = 100.0 * max(0.0, 1.0 - min(1.0, er / float(out["items_cleaned"])))
+            out["cleaning_score"] = max(0, min(100, round(pct)))
+        else:
+            out["cleaning_score"] = 0
+    if out["videos_created"] > 0 or vtypes:
+        out["video_score"] = max(0, min(100, round(100.0 * out["videos_created"] / float(wd))))
+    ai_units = out["ai_tasks_used"] + out["process_improved"]
+    if ai_units > 0:
+        out["ai_score"] = max(0, min(100, round(100.0 * ai_units / float(wd))))
+    return out
+
+
+def _build_akash_kpi_payload(
+    checklist_weekly_pct: int,
+    checklist_done: int,
+    checklist_pending: int,
+    customer_support_bundle: dict,
+    daily_week: dict | None,
+) -> dict:
+    """Akash Dashboard — four KPI pillars (weights 35+25+15+10=85); UI shows % renormalized to 100."""
+    raw_weights = {"item_cleaning": 35, "customer_support": 25, "video_content": 15, "ai_learning": 10}
+    wsum = sum(raw_weights.values()) or 1
+    norm = {k: round(100 * v / wsum) for k, v in raw_weights.items()}
+    keys = list(norm.keys())
+    drift = 100 - sum(norm.values())
+    if drift != 0 and keys:
+        norm[keys[0]] = norm[keys[0]] + drift
+    cs = customer_support_bundle or {}
+    cs_score = int(cs.get("score_percent") or 0)
+    cs_score_filter_week = int(cs.get("score_percent_filter_week", cs_score))
+    total_issues = int(cs.get("total_issues") or 0)
+    rd_ct = int(cs.get("response_delay_count") or 0)
+    cd_ct = int(cs.get("completion_delay_count") or 0)
+    pend_ct = int(cs.get("pending_count") or 0)
+    resp_line = str(cs.get("response_time_display") or "—")
+    dw = daily_week or {}
+    has_daily = bool(dw.get("has_rows"))
+    has_item = bool(dw.get("has_item_cleaning"))
+    item_score_daily = int(dw.get("cleaning_score") or 0)
+    video_pct = int(dw.get("video_score") or 0)
+    ai_pct = int(dw.get("ai_score") or 0)
+    item_for_overall = item_score_daily if has_item else checklist_weekly_pct
+    # Headline overall: filter-week checklist OR daily log item score + support + daily video/AI
+    overall = round(
+        (
+            item_for_overall * raw_weights["item_cleaning"]
+            + cs_score_filter_week * raw_weights["customer_support"]
+            + video_pct * raw_weights["video_content"]
+            + ai_pct * raw_weights["ai_learning"]
+        )
+        / wsum
+    )
+    if has_item:
+        acc_vals = dw.get("accuracy_values") or []
+        if acc_vals:
+            accuracy_line = f"{round(sum(acc_vals) / len(acc_vals), 1)}%"
+        elif dw.get("items_cleaned", 0) > 0:
+            er = float(dw.get("errors_found") or 0)
+            ic = float(dw.get("items_cleaned") or 1)
+            accuracy_line = f"{round(100.0 * max(0.0, 1.0 - min(1.0, er / ic)), 1)}%"
+        else:
+            accuracy_line = f"{checklist_weekly_pct}%"
+        item_metrics = [
+            {"label": "Items Cleaned (daily log)", "value": str(int(dw.get("items_cleaned") or 0))},
+            {"label": "Errors Found (daily log)", "value": str(dw.get("errors_found") or 0)},
+            {"label": "Accuracy % ≥ 98%", "value": accuracy_line},
+        ]
+        item_score_show = item_score_daily
+    else:
+        accuracy_line = f"{checklist_weekly_pct}%"
+        item_metrics = [
+            {"label": "Items Cleaned", "value": str(checklist_done)},
+            {"label": "Errors Found", "value": str(checklist_pending)},
+            {"label": "Accuracy % ≥ 98%", "value": accuracy_line},
+        ]
+        item_score_show = checklist_weekly_pct
+    vtypes = dw.get("video_types") or []
+    vt_display = ", ".join(vtypes) if vtypes else "—"
+    video_metrics = [
+        {"label": "Videos Created", "value": str(int(dw.get("videos_created") or 0))},
+        {"label": "Video Type", "value": vt_display},
+    ]
+    ai_metrics = [
+        {"label": "AI Tasks Used", "value": str(int(dw.get("ai_tasks_used") or 0))},
+        {"label": "Process Improved", "value": str(int(dw.get("process_improved") or 0))},
+    ]
+    pillars = [
+        {
+            "key": "item_cleaning",
+            "title": "ITEM CLEANING",
+            "weight": raw_weights["item_cleaning"],
+            "weight_percent_display": norm["item_cleaning"],
+            "score_percent": item_score_show,
+            "metrics": item_metrics,
+        },
+        {
+            "key": "customer_support",
+            "title": "CUSTOMER SUPPORT",
+            "weight": raw_weights["customer_support"],
+            "weight_percent_display": norm["customer_support"],
+            "score_percent": cs_score,
+            "metrics": [
+                {"label": "Total tickets (data week)", "value": str(total_issues)},
+                {"label": "Response delays", "value": str(rd_ct)},
+                {"label": "Completion delays", "value": str(cd_ct)},
+                {"label": "Pending", "value": str(pend_ct)},
+                {"label": "Avg response (min)", "value": resp_line},
+            ],
+        },
+        {
+            "key": "video_content",
+            "title": "VIDEO CONTENT",
+            "weight": raw_weights["video_content"],
+            "weight_percent_display": norm["video_content"],
+            "score_percent": video_pct,
+            "metrics": video_metrics,
+        },
+        {
+            "key": "ai_learning",
+            "title": "AI LEARNING",
+            "weight": raw_weights["ai_learning"],
+            "weight_percent_display": norm["ai_learning"],
+            "score_percent": ai_pct,
+            "metrics": ai_metrics,
+        },
+    ]
+    out = {
+        "weights_raw": raw_weights,
+        "weights_normalized_100": norm,
+        "weight_sum_raw": wsum,
+        "overall_score_percent": overall,
+        "pillars": pillars,
+        "dailyLogWeekApplied": has_daily,
+    }
+    if cs:
+        out["customerSupport"] = {
+            "scorePercent": cs.get("score_percent", 0),
+            "scorePercentFilterWeek": cs.get("score_percent_filter_week", 0),
+            "totalIssues": cs.get("total_issues", 0),
+            "responseDelayCount": cs.get("response_delay_count", 0),
+            "completionDelayCount": cs.get("completion_delay_count", 0),
+            "pendingCount": cs.get("pending_count", 0),
+            "responseTimeDisplay": cs.get("response_time_display", "—"),
+            "meta": cs.get("meta") or {},
+            "detailsResponseDelay": cs.get("details_response_delay") or [],
+            "detailsCompletionDelay": cs.get("details_completion_delay") or [],
+            "detailsPending": cs.get("details_pending") or [],
+        }
+    return out
+
+
 @api_router.get("/dashboard/kpi")
 def dashboard_kpi(
     name: str = Query(..., description="Person name: Shreyasi, Rimpa, etc."),
@@ -2464,6 +2807,8 @@ def dashboard_kpi(
         user_id = _dashboard_kpi_resolve_user_id(name)
         if not user_id:
             return {"success": False, "error": f"User not found for name: {name!r}"}
+
+        is_akash = _dashboard_kpi_is_akash(name)
 
         month_num = 1
         for i, m in enumerate(_MONTH_NAMES, 1):
@@ -2612,109 +2957,110 @@ def dashboard_kpi(
         pending_details = []
         tickets = []
         stage2_completed_in_week = 0
-        try:
-            types_cb = ["chore", "bug"]
-            cols = (
-                "id, reference_no, title, description, type, company_id, company_name, created_by, created_at, assignee_id, "
-                "status, status_4, quality_solution, actual_4, query_arrival_at, query_response_at, "
-                "planned_2, actual_2, actual_1, status_2"
-            )
-            # Support FMS should match Support Dashboard logic (global Chores & Bugs, not per-user)
-            tickets = []
+        if not is_akash:
             try:
-                q = supabase.table("tickets").select(cols).in_("type", types_cb)
-                r = q.execute()
-                tickets = r.data or []
-            except Exception:
+                types_cb = ["chore", "bug"]
+                cols = (
+                    "id, reference_no, title, description, type, company_id, company_name, created_by, created_at, assignee_id, "
+                    "status, status_4, quality_solution, actual_4, query_arrival_at, query_response_at, "
+                    "planned_2, actual_2, actual_1, status_2"
+                )
+                # Support FMS should match Support Dashboard logic (global Chores & Bugs, not per-user)
+                tickets = []
                 try:
-                    r1 = supabase.table("tickets").select(cols).in_("type", types_cb).execute()
-                    tickets = r1.data or []
-                except Exception as e2:
-                    _log(f"dashboard/kpi tickets fetch: {e2}")
+                    q = supabase.table("tickets").select(cols).in_("type", types_cb)
+                    r = q.execute()
+                    tickets = r.data or []
+                except Exception:
+                    try:
+                        r1 = supabase.table("tickets").select(cols).in_("type", types_cb).execute()
+                        tickets = r1.data or []
+                    except Exception as e2:
+                        _log(f"dashboard/kpi tickets fetch: {e2}")
 
-            week_num_selected = _parse_kpi_week_num(week, default=2)
+                week_num_selected = _parse_kpi_week_num(week, default=2)
 
-            # Enrich all chores/bugs once (company names) — used for weekly slice and Stage 2 completion week
-            _enrich_tickets_with_lookups(tickets)
+                # Enrich all chores/bugs once (company names) — used for weekly slice and Stage 2 completion week
+                _enrich_tickets_with_lookups(tickets)
 
-            week_tickets = []
-            for t in tickets:
-                d_arrival = _parse_iso_to_date(t.get("query_arrival_at") or t.get("created_at"))
-                if _date_in_dashboard_kpi_week(d_arrival, y, month_num, week_num_selected):
-                    week_tickets.append(t)
+                week_tickets = []
+                for t in tickets:
+                    d_arrival = _parse_iso_to_date(t.get("query_arrival_at") or t.get("created_at"))
+                    if _date_in_dashboard_kpi_week(d_arrival, y, month_num, week_num_selected):
+                        week_tickets.append(t)
 
-            def _support_fms_row_item(ticket: dict) -> dict:
-                created = ticket.get("created_at") or ""
-                ref = (ticket.get("reference_no") or "").strip() or "N/A"
-                company_val = (ticket.get("company_name") or "").strip() or "—"
-                return {
-                    "type": (ticket.get("type") or "Chore").title(),
-                    "company": company_val,
-                    "requested_person": "",
-                    "submitted_by": "",
-                    "title": (ticket.get("title") or "").strip() or "—",
-                    "description": (ticket.get("description") or "").strip() or "",
-                    "reference_no": ref,
-                    "query_arrival": _normalize_query_arrival_iso(ticket.get("query_arrival_at") or created),
-                    "month": month,
-                }
+                def _support_fms_row_item(ticket: dict) -> dict:
+                    created = ticket.get("created_at") or ""
+                    ref = (ticket.get("reference_no") or "").strip() or "N/A"
+                    company_val = (ticket.get("company_name") or "").strip() or "—"
+                    return {
+                        "type": (ticket.get("type") or "Chore").title(),
+                        "company": company_val,
+                        "requested_person": "",
+                        "submitted_by": "",
+                        "title": (ticket.get("title") or "").strip() or "—",
+                        "description": (ticket.get("description") or "").strip() or "",
+                        "reference_no": ref,
+                        "query_arrival": _normalize_query_arrival_iso(ticket.get("query_arrival_at") or created),
+                        "month": month,
+                    }
 
-            for t in week_tickets:
-                row_item = _support_fms_row_item(t)
-                # Response delay: same SLA logic as Support Dashboard (30 min from query_arrival to response)
-                has_resp, resp_text = _has_response_delay(
-                    t.get("query_arrival_at") or t.get("created_at"),
-                    t.get("query_response_at"),
-                )
-                if has_resp:
-                    response_delay_count += 1
-                    response_delay_details.append({**row_item, "delay_time": resp_text or "Delay"})
-
-                # Pending chores & bugs for this owner in the selected week
-                status = t.get("status") or ""
-                if _is_pending(status) and not _is_resolved(status, t.get("status_4")):
-                    pending_count += 1
-                    pending_details.append(
-                        {**row_item, "delay_time": _stage2_delay_text_for_ticket(t)}
+                for t in week_tickets:
+                    row_item = _support_fms_row_item(t)
+                    # Response delay: same SLA logic as Support Dashboard (30 min from query_arrival to response)
+                    has_resp, resp_text = _has_response_delay(
+                        t.get("query_arrival_at") or t.get("created_at"),
+                        t.get("query_response_at"),
                     )
+                    if has_resp:
+                        response_delay_count += 1
+                        response_delay_details.append({**row_item, "delay_time": resp_text or "Delay"})
 
-            # Completion delay (Stage 2): bucket by week of actual_2 (when Stage 2 completed), not ticket creation week.
-            # So CH-0265 / CH-0264 appear in the week they crossed Stage 2 TAT, even if created earlier.
-            stage2_completed_tickets = []
-            for t in tickets:
-                if not _stage2_marked_completed(t.get("status_2")):
-                    continue
-                if not (str(t.get("actual_2") or "").strip()):
-                    continue
-                d2 = _parse_iso_to_date(t.get("actual_2"))
-                if _date_in_dashboard_kpi_week(d2, y, month_num, week_num_selected):
-                    stage2_completed_tickets.append(t)
-            stage2_completed_in_week = len(stage2_completed_tickets)
+                    # Pending chores & bugs for this owner in the selected week
+                    status = t.get("status") or ""
+                    if _is_pending(status) and not _is_resolved(status, t.get("status_4")):
+                        pending_count += 1
+                        pending_details.append(
+                            {**row_item, "delay_time": _stage2_delay_text_for_ticket(t)}
+                        )
 
-            # Completion Delay includes only tickets completed at Stage 2 in selected week
-            # and whose Stage 2 TAT crossed the SLA.
-            for t in stage2_completed_tickets:
-                has_comp, comp_text = _has_completion_delay(
-                    resolved_at=t.get("actual_4"),
-                    created_at=t.get("created_at"),
-                    ticket_type=t.get("type"),
-                    planned_2=t.get("planned_2"),
-                    actual_2=t.get("actual_2"),
-                    status_2=t.get("status_2"),
-                    actual_1=t.get("actual_1"),
-                )
-                if not has_comp:
-                    continue
-                completion_delay_count += 1
-                completion_delay_details.append({**_support_fms_row_item(t), "delay_time": comp_text or "TAT crossed"})
+                # Completion delay (Stage 2): bucket by week of actual_2 (when Stage 2 completed), not ticket creation week.
+                # So CH-0265 / CH-0264 appear in the week they crossed Stage 2 TAT, even if created earlier.
+                stage2_completed_tickets = []
+                for t in tickets:
+                    if not _stage2_marked_completed(t.get("status_2")):
+                        continue
+                    if not (str(t.get("actual_2") or "").strip()):
+                        continue
+                    d2 = _parse_iso_to_date(t.get("actual_2"))
+                    if _date_in_dashboard_kpi_week(d2, y, month_num, week_num_selected):
+                        stage2_completed_tickets.append(t)
+                stage2_completed_in_week = len(stage2_completed_tickets)
 
-            # Target = total chores & bugs for this week (same as Support Dashboard weekly stats)
-            total_cb = len(week_tickets)
-            target_pending = max(total_cb, 1)
-            support_fms_weekly_pct = round(((total_cb - pending_count) / total_cb * 100) if total_cb else 0)
-        except Exception as e:
-            _log(f"dashboard/kpi support FMS: {e}")
-            support_fms_weekly_pct = 0
+                # Completion Delay includes only tickets completed at Stage 2 in selected week
+                # and whose Stage 2 TAT crossed the SLA.
+                for t in stage2_completed_tickets:
+                    has_comp, comp_text = _has_completion_delay(
+                        resolved_at=t.get("actual_4"),
+                        created_at=t.get("created_at"),
+                        ticket_type=t.get("type"),
+                        planned_2=t.get("planned_2"),
+                        actual_2=t.get("actual_2"),
+                        status_2=t.get("status_2"),
+                        actual_1=t.get("actual_1"),
+                    )
+                    if not has_comp:
+                        continue
+                    completion_delay_count += 1
+                    completion_delay_details.append({**_support_fms_row_item(t), "delay_time": comp_text or "TAT crossed"})
+
+                # Target = total chores & bugs for this week (same as Support Dashboard weekly stats)
+                total_cb = len(week_tickets)
+                target_pending = max(total_cb, 1)
+                support_fms_weekly_pct = round(((total_cb - pending_count) / total_cb * 100) if total_cb else 0)
+            except Exception as e:
+                _log(f"dashboard/kpi support FMS: {e}")
+                support_fms_weekly_pct = 0
 
         # ----- Success KPI (Rimpa): ALL Success module data; selected week vs fixed targets 16/1/25/2 -----
         from app.dashboard_success_kpi import compute_success_kpi_for_dashboard
@@ -2825,6 +3171,126 @@ def dashboard_kpi(
         except Exception as e:
             _log(f"dashboard/kpi weeklyProgress: {e}")
 
+        ch_done = sum(1 for r in checklist_rows if (r.get("status") or "").lower() == "done")
+        ch_pending = sum(1 for r in checklist_rows if (r.get("status") or "").lower() != "done")
+        akash_kpi = None
+        if is_akash:
+            customer_support_bundle: dict = {}
+            try:
+                cols = (
+                    "id, reference_no, title, description, type, company_id, company_name, created_by, created_at, "
+                    "assignee_id, user_name, status, status_4, quality_solution, actual_4, query_arrival_at, "
+                    "query_response_at, planned_2, actual_2, actual_1, status_2, resolved_at"
+                )
+                qa = supabase.table("tickets").select(cols).in_("type", ["chore", "bug"])
+                qa = qa.or_("staging_planned.is.null,live_review_status.eq.completed")
+                qa = qa.or_("status_2.is.null,status_2.neq.staging")
+                ak_tickets = (qa.execute().data or [])
+                _enrich_tickets_with_lookups(ak_tickets)
+            except Exception as e:
+                _log(f"dashboard/kpi akash support tickets: {e}")
+                ak_tickets = []
+            sel_w = _parse_kpi_week_num(week, default=2)
+            dw, dy, dm = _akash_customer_support_data_week(sel_w, y, month_num)
+            data_month_label = _MONTH_NAMES[dm - 1]
+            week_slice = _akash_support_tickets_in_week(ak_tickets, dw, dy, dm)
+            total_cs = len(week_slice)
+            pending_cs = sum(
+                1
+                for t in week_slice
+                if _is_pending(t.get("status") or "") and not _is_resolved(t.get("status"), t.get("status_4"))
+            )
+            cs_score = round(((total_cs - pending_cs) / total_cs) * 100) if total_cs else 0
+            # Same formula for the **filter week** (aligns checklist + support in headline overall)
+            week_slice_filter = _akash_support_tickets_in_week(ak_tickets, sel_w, y, month_num)
+            total_cf = len(week_slice_filter)
+            pending_cf = sum(
+                1
+                for t in week_slice_filter
+                if _is_pending(t.get("status") or "") and not _is_resolved(t.get("status"), t.get("status_4"))
+            )
+            cs_score_filter_week = round(((total_cf - pending_cf) / total_cf) * 100) if total_cf else 0
+            avg_m = _akash_avg_response_minutes(week_slice)
+            if avg_m is None:
+                resp_disp = "—"
+            else:
+                resp_disp = str(round(avg_m))
+            range_lbl = _week_date_range(dw, dm, dy)
+            help_note = (
+                f"Support (chores & bugs): same week rules as Support Dashboard. "
+                f"UI week {sel_w} → data week {dw} ({data_month_label} {dy})."
+            )
+            details_resp: list = []
+            details_comp: list = []
+            details_pend: list = []
+            for t in week_slice:
+                qa = t.get("query_arrival_at") or t.get("created_at")
+                has_rd, rd_txt = _has_response_delay(qa, t.get("query_response_at"))
+                if has_rd:
+                    details_resp.append(_akash_support_detail_row(t, data_month_label, rd_txt or "Response SLA issue"))
+                has_cd, cd_txt = _has_completion_delay(
+                    resolved_at=t.get("actual_4"),
+                    created_at=t.get("created_at"),
+                    ticket_type=t.get("type"),
+                    planned_2=t.get("planned_2"),
+                    actual_2=t.get("actual_2"),
+                    status_2=t.get("status_2"),
+                    actual_1=t.get("actual_1"),
+                )
+                if has_cd:
+                    details_comp.append(_akash_support_detail_row(t, data_month_label, cd_txt or "Stage 2 TAT crossed"))
+                if _is_pending(t.get("status") or "") and not _is_resolved(t.get("status"), t.get("status_4")):
+                    details_pend.append(
+                        _akash_support_detail_row(t, data_month_label, _stage2_delay_text_for_ticket(t))
+                    )
+            customer_support_bundle = {
+                "score_percent": cs_score,
+                "score_percent_filter_week": cs_score_filter_week,
+                "total_issues": total_cs,
+                "response_delay_count": len(details_resp),
+                "completion_delay_count": len(details_comp),
+                "pending_count": len(details_pend),
+                "response_time_display": resp_disp,
+                "meta": {
+                    "selectedWeekNum": sel_w,
+                    "dataWeekNum": dw,
+                    "dataMonth": data_month_label,
+                    "dataYear": str(dy),
+                    "dataRangeLabel": range_lbl,
+                    "helpNote": help_note,
+                },
+                "details_response_delay": details_resp,
+                "details_completion_delay": details_comp,
+                "details_pending": details_pend,
+            }
+            daily_rows_week: list = []
+            try:
+                qlog = (
+                    supabase.table("kpi_daily_work_log")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .gte("work_date", range_start.isoformat())
+                    .lte("work_date", range_end.isoformat())
+                )
+                daily_rows_week = (qlog.execute().data or [])
+            except Exception as e:
+                _log(f"dashboard/kpi kpi_daily_work_log: {e}")
+                daily_rows_week = []
+            daily_agg = _aggregate_kpi_daily_log_for_week(daily_rows_week, range_start, range_end)
+            akash_kpi = _build_akash_kpi_payload(
+                checklist_weekly_pct,
+                ch_done,
+                ch_pending,
+                customer_support_bundle,
+                daily_agg,
+            )
+            akash_kpi["kpiDailyLogEditor"] = _kpi_daily_log_email_allowed(auth.get("email"))
+        support_fms_monthly_pct = round(
+            ((target_pending - pending_count) / target_pending * 100) if target_pending else 0
+        )
+        if is_akash:
+            support_fms_monthly_pct = 0
+
         applied = {"name": name, "month": month, "year": year, "week": week}
         return {
             "success": True,
@@ -2865,10 +3331,11 @@ def dashboard_kpi(
                 "weeklyPercentage": support_fms_weekly_pct,
             },
             "successKpi": success_kpi,
+            "akashKpi": akash_kpi,
             "monthlyPercentages": {
                 "checklist": checklist_monthly_pct,
                 "delegation": delegation_monthly_pct,
-                "supportFMS": round(( (target_pending - pending_count) / target_pending * 100 ) if target_pending else 0),
+                "supportFMS": support_fms_monthly_pct,
             },
             "weeklyProgress": {
                 "weeks": weekly_progress_weeks,
@@ -3082,6 +3549,78 @@ def _has_completion_delay_stage4(ticket: dict) -> tuple[bool, str]:
         return False, ""
     except Exception:
         return False, ""
+
+
+@api_router.get("/dashboard/kpi-daily-log")
+def get_kpi_daily_log(
+    year: int,
+    month: int,
+    auth: dict = Depends(get_current_user),
+):
+    """List KPI daily work log rows for a calendar month (Akash/Aman editor only)."""
+    if not _kpi_daily_log_email_allowed(auth.get("email")):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    if month < 1 or month > 12:
+        raise HTTPException(status_code=400, detail="Invalid month")
+    owner_id = _kpi_daily_work_log_owner_user_id()
+    if not owner_id:
+        raise HTTPException(
+            status_code=503,
+            detail="KPI daily log owner not found: add an Akash user profile (full_name) in user_profiles.",
+        )
+    start = date(year, month, 1)
+    if month == 12:
+        end = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        end = date(year, month + 1, 1) - timedelta(days=1)
+    start_s = start.isoformat()
+    end_s = end.isoformat()
+    r = (
+        supabase.table("kpi_daily_work_log")
+        .select(
+            "work_date, items_cleaned, errors_found, accuracy_pct, videos_created, video_type, ai_tasks_used, process_improved"
+        )
+        .eq("user_id", owner_id)
+        .gte("work_date", start_s)
+        .lte("work_date", end_s)
+        .order("work_date", desc=False)
+        .execute()
+    )
+    return {"rows": r.data or []}
+
+
+@api_router.put("/dashboard/kpi-daily-log")
+def upsert_kpi_daily_log(
+    body: KpiDailyLogUpsertBody,
+    auth: dict = Depends(get_current_user),
+):
+    """Create or update one KPI daily work log row (Akash/Aman editor only)."""
+    if not _kpi_daily_log_email_allowed(auth.get("email")):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    owner_id = _kpi_daily_work_log_owner_user_id()
+    if not owner_id:
+        raise HTTPException(
+            status_code=503,
+            detail="KPI daily log owner not found: add an Akash user profile (full_name) in user_profiles.",
+        )
+    try:
+        wd = date.fromisoformat(body.work_date.strip())
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid work_date; use YYYY-MM-DD")
+    row = {
+        "user_id": owner_id,
+        "work_date": wd.isoformat(),
+        "items_cleaned": body.items_cleaned,
+        "errors_found": body.errors_found,
+        "accuracy_pct": body.accuracy_pct,
+        "videos_created": body.videos_created,
+        "video_type": body.video_type,
+        "ai_tasks_used": body.ai_tasks_used,
+        "process_improved": body.process_improved,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    supabase.table("kpi_daily_work_log").upsert(row, on_conflict="user_id,work_date").execute()
+    return {"ok": True, "work_date": wd.isoformat()}
 
 
 @api_router.get("/support-dashboard/stats")
@@ -8158,7 +8697,7 @@ def _map_role(name: str) -> str:
 # Section keys for user_section_permissions (match frontend PERMISSION_SECTION_KEYS / Edit User matrix).
 # No row in DB => no access. New keys added here are unchecked until a Master Admin grants them.
 SECTION_KEYS = [
-    "dashboard", "support_dashboard", "all_tickets", "chores_bugs", "staging", "feature",
+    "dashboard", "dashboard_kpi", "support_dashboard", "all_tickets", "chores_bugs", "staging", "feature",
     "approval_status", "completed_chores_bugs", "rejected_tickets", "completed_feature",
     "solution", "task", "success_performance", "success_comp_perform",
     "client_to_lead", "leads", "onboarding", "onboarding_payment_status", "client_payment",

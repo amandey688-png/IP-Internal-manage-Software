@@ -3,6 +3,7 @@ import { AuthContext, AuthContextType } from './AuthContext'
 import { storage } from '../utils/storage'
 import { authApi } from '../api/auth'
 import type { User } from '../types/auth'
+import { normalizeUserSectionPermissions } from '../utils/helpers'
 
 /** Refresh access token every 50 min so session does not expire until user logs out (JWT often expires in 1 hr). */
 const PROACTIVE_REFRESH_INTERVAL_MS = 50 * 60 * 1000
@@ -65,7 +66,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       }
 
       setToken(storedToken)
-      setUser(storedUser)
+      setUser(normalizeUserSectionPermissions(storedUser))
 
       try {
         const response = await authApi.getCurrentUser()
@@ -75,8 +76,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             setToken(null)
             setUser(null)
           } else {
-            setUser(response.data)
-            storage.setUser(response.data)
+            const merged = normalizeUserSectionPermissions(response.data)
+            setUser(merged)
+            storage.setUser(merged)
             const currentToken = storage.getToken()
             if (currentToken) setToken(currentToken)
           }
@@ -118,8 +120,9 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
             setToken(refreshed.access_token)
             const retry = await authApi.getCurrentUser()
             if (retry.data && retry.data.is_active !== false) {
-              setUser(retry.data)
-              storage.setUser(retry.data)
+              const merged = normalizeUserSectionPermissions(retry.data)
+              setUser(merged)
+              storage.setUser(merged)
               const ct = storage.getToken()
               if (ct) setToken(ct)
               setIsLoading(false)
@@ -150,10 +153,11 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }, [])
 
   const login = (newToken: string, newUser: User, refreshToken?: string) => {
+    const merged = normalizeUserSectionPermissions(newUser)
     setToken(newToken)
-    setUser(newUser)
+    setUser(merged)
     storage.setToken(newToken)
-    storage.setUser(newUser)
+    storage.setUser(merged)
     if (refreshToken) storage.setRefreshToken(refreshToken)
   }
 
@@ -170,25 +174,28 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }
 
   const register = (newToken: string, newUser: User, refreshToken?: string) => {
+    const merged = normalizeUserSectionPermissions(newUser)
     setToken(newToken)
-    setUser(newUser)
+    setUser(merged)
     storage.setToken(newToken)
-    storage.setUser(newUser)
+    storage.setUser(merged)
     if (refreshToken) storage.setRefreshToken(refreshToken)
   }
 
   const verifyOTP = (newToken: string, newUser: User, refreshToken?: string) => {
+    const merged = normalizeUserSectionPermissions(newUser)
     setToken(newToken)
-    setUser(newUser)
+    setUser(merged)
     storage.setToken(newToken)
-    storage.setUser(newUser)
+    storage.setUser(merged)
     if (refreshToken) storage.setRefreshToken(refreshToken)
     storage.removeOTPEmail() // Clear OTP email after successful verification
   }
 
   const refreshUser = (updatedUser: User) => {
-    setUser(updatedUser)
-    storage.setUser(updatedUser)
+    const merged = normalizeUserSectionPermissions(updatedUser)
+    setUser(merged)
+    storage.setUser(merged)
   }
 
   const setLoading = (loading: boolean) => {

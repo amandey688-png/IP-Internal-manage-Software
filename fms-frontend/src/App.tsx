@@ -158,7 +158,7 @@ function App() {
             <Route
               path={ROUTES.DASHBOARD_KPI}
               element={
-                <ProtectedRoute sectionKeys={["dashboard"]}>
+                <ProtectedRoute sectionKeys={["dashboard_kpi"]}>
                   <AppLayout>
                     <ErrorBoundary>
                       <DashboardKPIPage />
@@ -446,7 +446,9 @@ function App() {
               element={
                 <ProtectedRoute requiredRole={ROLES.ADMIN} sectionKeys={["users"]}>
                   <AppLayout>
-                    <UserList />
+                    <ErrorBoundary>
+                      <UserList />
+                    </ErrorBoundary>
                   </AppLayout>
                 </ProtectedRoute>
               }

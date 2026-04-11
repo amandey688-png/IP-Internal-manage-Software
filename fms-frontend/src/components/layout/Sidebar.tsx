@@ -187,6 +187,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   ]
 
   const showDashboard = canViewSectionByKey('dashboard')
+  const showDashboardKpi = canViewSectionByKey('dashboard_kpi')
   const hasAnySupportSection = (supportItems?.length ?? 0) > 0
   const showClientToLead = canViewSectionByKey('leads') || canViewSectionByKey('client_to_lead')
   const showOnboarding = canViewSectionByKey('onboarding') || canViewSectionByKey('onboarding_payment_status')
@@ -196,6 +197,15 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const menuItems: MenuProps['items'] = [
     ...(showDashboard ? [{ key: ROUTES.DASHBOARD, icon: <DashboardOutlined />, label: <Link to={ROUTES.DASHBOARD} style={linkStyle}>Dashboard</Link> }] : []),
+    ...(showDashboardKpi
+      ? [
+          {
+            key: ROUTES.DASHBOARD_KPI,
+            icon: <LineChartOutlined />,
+            label: <Link to={ROUTES.DASHBOARD_KPI} style={linkStyle}>Dashboard - KPI</Link>,
+          },
+        ]
+      : []),
     ...(hasAnySupportSection ? [{
       key: 'support',
       icon: <FileTextOutlined />,
@@ -292,7 +302,9 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     onClose?.()
   }
 
-  const selectedKeys = [location.pathname, location.pathname + (location.search || '')]
+  const selectedKeys = Array.from(
+    new Set([location.pathname, `${location.pathname}${location.search || ''}`])
+  )
   const openKeys = [
     ...(supportOpen ? ['support'] : []),
     ...(taskOpen ? ['task'] : []),

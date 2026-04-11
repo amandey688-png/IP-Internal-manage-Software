@@ -1,16 +1,35 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Typography, Card, Button, Select, Row, Col, Table, Progress, Tag, Space, message, Modal, Alert } from 'antd'
-import { DashboardOutlined, ArrowLeftOutlined, CheckSquareOutlined, SwapOutlined, CustomerServiceOutlined, UnorderedListOutlined } from '@ant-design/icons'
+import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
 import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
-import dayjs from 'dayjs'
+  Typography,
+  Card,
+  Button,
+  Select,
+  Row,
+  Col,
+  Table,
+  Progress,
+  Tag,
+  Space,
+  message,
+  Modal,
+  Alert,
+  Spin,
+  Tabs,
+  Input,
+  InputNumber,
+  DatePicker,
+} from 'antd'
+import {
+  DashboardOutlined,
+  ArrowLeftOutlined,
+  CheckSquareOutlined,
+  SwapOutlined,
+  CustomerServiceOutlined,
+  UnorderedListOutlined,
+  PieChartOutlined,
+  PlusOutlined,
+} from '@ant-design/icons'
+import dayjs, { type Dayjs } from 'dayjs'
 import './dashboard-kpi.css'
 import {
   dashboardKpiApi,
@@ -20,9 +39,13 @@ import {
   type DashboardKpiPerson,
   type DashboardKpiResponse,
   type SupportFmsDelayItem,
+  type AkashCustomerSupportBlock,
+  type KpiDailyLogApiRow,
 } from '../../api/dashboardKpi'
 import { DashboardBlockSkeleton } from '../../components/common/skeletons'
 import { getDefaultPreviousWeekFilter, maxWeekOfMonth, weekOfMonth } from './kpiWeekUtils'
+
+const LazyWeeklyBarChart = lazy(() => import('./DashboardKPIWeeklyBarChart'))
 
 const { Title, Text } = Typography
 
@@ -36,7 +59,16 @@ interface DashboardKPIPageProps {
 const DASHBOARD_OPTIONS: { key: DashboardKpiPerson; label: string }[] = [
   { key: 'Shreyasi', label: 'Shreyasi Dashboard' },
   { key: 'Rimpa', label: 'Rimpa Dashboard' },
+  { key: 'Akash', label: 'Akash Dashboard' },
 ]
+
+/** Pastel inner cards for Akash KPI pillars — same classes as Rimpa Success KPI */
+const AKASH_KPI_PILLAR_CARD_CLASS: Record<string, string> = {
+  item_cleaning: 'kpi-success-card--poc',
+  customer_support: 'kpi-success-card--training',
+  video_content: 'kpi-success-card--followup',
+  ai_learning: 'kpi-success-card--increase',
+}
 
 /** Format ISO date/time as 'YYYY-MM-DD hh:mm AM/PM' for Query Arrival display */
 const formatQueryArrival = (val: string | null | undefined): string => {
@@ -44,6 +76,74 @@ const formatQueryArrival = (val: string | null | undefined): string => {
   const d = dayjs(val)
   return d.isValid() ? d.format('YYYY-MM-DD hh:mm A') : String(val)
 }
+
+/** Table columns for Akash Customer Support ticket lists (tabs modal) */
+const AKASH_CS_TABLE_COLUMNS = [
+  { title: 'Ref', dataIndex: 'reference_no', key: 'reference_no', width: 100 },
+  { title: 'Type', dataIndex: 'type', key: 'type', width: 80 },
+  {
+    title: 'Company',
+    dataIndex: 'company',
+    key: 'company',
+    width: 140,
+    ellipsis: false,
+    render: (val: string) => (
+      <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{val ?? '—'}</span>
+    ),
+  },
+  {
+    title: 'Submitted by',
+    dataIndex: 'submitted_by',
+    key: 'submitted_by',
+    width: 110,
+    ellipsis: true,
+    render: (v: string) => v ?? '—',
+  },
+  {
+    title: 'Status',
+    dataIndex: 'ticket_status',
+    key: 'ticket_status',
+    width: 110,
+    ellipsis: true,
+    render: (v: string) => v ?? '—',
+  },
+  {
+    title: 'Title & Description',
+    key: 'title_description',
+    width: 240,
+    ellipsis: true,
+    render: (_: unknown, record: SupportFmsDelayItem) => (
+      <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+        <span style={{ fontWeight: 600 }}>{record.title ?? '—'}</span>
+        {record.description ? (
+          <>
+            <br />
+            <span style={{ fontWeight: 400 }}>{record.description}</span>
+          </>
+        ) : null}
+      </div>
+    ),
+  },
+  {
+    title: 'Query Arrival',
+    dataIndex: 'query_arrival',
+    key: 'query_arrival',
+    width: 140,
+    render: (v: string) => formatQueryArrival(v),
+  },
+  {
+    title: 'Note',
+    dataIndex: 'delay_time',
+    key: 'delay_note',
+    width: 130,
+    render: (v: string) => v ?? '—',
+  },
+]
+
+type KpiDailyLogTableRow = KpiDailyLogApiRow & { dayName: string }
+
+/** Entire calendar month ended before today (local) — log hidden until user picks a month in the modal. */
+const isKpiLogMonthCompleted = (m: Dayjs) => m.endOf('month').isBefore(dayjs(), 'day')
 
 const getPerformanceLevel = (value?: number) => {
   const pct = typeof value === 'number' ? value : 0
@@ -65,6 +165,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
   const [data, setData] = useState<DashboardKpiResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [detailModal, setDetailModal] = useState<{ title: string; items: SupportFmsDelayItem[] } | null>(null)
+  const [akashCsModal, setAkashCsModal] = useState<AkashCustomerSupportBlock | null>(null)
   const [successModal, setSuccessModal] = useState<
     | null
     | {
@@ -73,6 +174,113 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
       }
   >(null)
   const [graphModal, setGraphModal] = useState<'checklist' | 'delegation' | 'supportFMS' | 'successKpi' | null>(null)
+  const [kpiDailyLogOpen, setKpiDailyLogOpen] = useState(false)
+  const [kpiDailyLogMonth, setKpiDailyLogMonth] = useState<Dayjs | null>(null)
+  /** When false, completed (past) months stay hidden until the user changes the month filter. */
+  const [kpiDailyLogTableVisible, setKpiDailyLogTableVisible] = useState(true)
+  const [kpiDailyLogRows, setKpiDailyLogRows] = useState<KpiDailyLogTableRow[]>([])
+  const [kpiDailyLogLoading, setKpiDailyLogLoading] = useState(false)
+  const kpiDailyLogDirtyRef = useRef<Set<string>>(new Set())
+  const kpiDailyLogRowsRef = useRef<KpiDailyLogTableRow[]>([])
+  kpiDailyLogRowsRef.current = kpiDailyLogRows
+
+  const loadKpiDailyLogMonth = useCallback(async () => {
+    if (!kpiDailyLogMonth) return
+    const y = kpiDailyLogMonth.year()
+    const mi = kpiDailyLogMonth.month()
+    setKpiDailyLogLoading(true)
+    try {
+      const res = await dashboardKpiApi.getKpiDailyLog(y, mi + 1)
+      const byDate = new Map((res.rows ?? []).map((r) => [r.work_date, r]))
+      const base = kpiDailyLogMonth.date(1)
+      const n = base.daysInMonth()
+      const next: KpiDailyLogTableRow[] = []
+      for (let d = 1; d <= n; d += 1) {
+        const dj = base.date(d)
+        const iso = dj.format('YYYY-MM-DD')
+        const ex = byDate.get(iso)
+        next.push({
+          work_date: iso,
+          dayName: dj.format('dddd'),
+          items_cleaned: ex?.items_cleaned ?? null,
+          errors_found: ex?.errors_found ?? null,
+          accuracy_pct: ex?.accuracy_pct ?? null,
+          videos_created: ex?.videos_created ?? null,
+          video_type: ex?.video_type ?? null,
+          ai_tasks_used: ex?.ai_tasks_used ?? null,
+          process_improved: ex?.process_improved ?? null,
+        })
+      }
+      setKpiDailyLogRows(next)
+      kpiDailyLogDirtyRef.current = new Set()
+    } catch {
+      message.error('Failed to load KPI daily work log')
+    } finally {
+      setKpiDailyLogLoading(false)
+    }
+  }, [kpiDailyLogMonth])
+
+  const openKpiDailyLog = useCallback(() => {
+    const y = Number(year)
+    const mi = MONTHS.indexOf(month as (typeof MONTHS)[number])
+    if (!Number.isFinite(y) || mi < 0) {
+      message.error('Pick month and year on the dashboard first')
+      return
+    }
+    const m = dayjs().year(y).month(mi).date(1)
+    setKpiDailyLogMonth(m)
+    const completed = isKpiLogMonthCompleted(m)
+    setKpiDailyLogTableVisible(!completed)
+    if (completed) {
+      setKpiDailyLogRows([])
+      kpiDailyLogDirtyRef.current = new Set()
+    }
+    setKpiDailyLogOpen(true)
+  }, [month, year])
+
+  useEffect(() => {
+    if (!kpiDailyLogOpen || !kpiDailyLogMonth || !kpiDailyLogTableVisible) return
+    void loadKpiDailyLogMonth()
+  }, [kpiDailyLogOpen, kpiDailyLogMonth, kpiDailyLogTableVisible, loadKpiDailyLogMonth])
+
+  const patchKpiDailyLogRow = (workDate: string, patch: Partial<KpiDailyLogApiRow>) => {
+    kpiDailyLogDirtyRef.current.add(workDate)
+    setKpiDailyLogRows((rows) => rows.map((r) => (r.work_date === workDate ? { ...r, ...patch } : r)))
+  }
+
+  const saveKpiDailyLogChanges = async () => {
+    if (!kpiDailyLogTableVisible) {
+      message.info('Choose a month in the date filter to show the log before saving.')
+      return
+    }
+    const dirty = new Set(kpiDailyLogDirtyRef.current)
+    if (dirty.size === 0) {
+      message.info('No changes to save')
+      return
+    }
+    try {
+      for (const wd of dirty) {
+        const r = kpiDailyLogRowsRef.current.find((x) => x.work_date === wd)
+        if (!r) continue
+        await dashboardKpiApi.putKpiDailyLog({
+          work_date: r.work_date,
+          items_cleaned: r.items_cleaned ?? null,
+          errors_found: r.errors_found ?? null,
+          accuracy_pct: r.accuracy_pct ?? null,
+          videos_created: r.videos_created ?? null,
+          video_type: r.video_type?.trim() || null,
+          ai_tasks_used: r.ai_tasks_used ?? null,
+          process_improved: r.process_improved ?? null,
+        })
+      }
+      kpiDailyLogDirtyRef.current.clear()
+      message.success('KPI daily log saved')
+      loadData()
+    } catch {
+      message.error('Could not save KPI daily log')
+      throw new Error('save failed')
+    }
+  }
 
   // Keep week valid for selected month/year; avoids stale week value after filter changes.
   useEffect(() => {
@@ -162,6 +370,8 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
   const delegation = data?.delegation
   const supportFMS = data?.supportFMS
   const successKpi = data?.successKpi
+  const akashKpi = data?.akashKpi
+  const isAkashLayout = selectedPerson === 'Akash' && akashKpi != null
 
   return (
     <div className="dashboard-kpi-page">
@@ -174,9 +384,25 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
           </Space>
         )}
 
-        <Title level={4} style={{ marginBottom: 0 }}>
-          {selectedPerson} Dashboard
-        </Title>
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            marginBottom: 0,
+          }}
+        >
+          <Title level={4} style={{ marginBottom: 0 }}>
+            {selectedPerson} Dashboard
+          </Title>
+          {selectedPerson === 'Akash' && akashKpi?.kpiDailyLogEditor && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openKpiDailyLog}>
+              Add KPI
+            </Button>
+          )}
+        </div>
 
         <Space wrap size="middle">
           <span>
@@ -277,6 +503,36 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                   </Card>
                 </Col>
                 )}
+                {selectedPerson === 'Akash' && akashKpi != null && (
+                  <Col xs={24} sm={24} md={8}>
+                    <Card
+                      size="small"
+                      title="KPI overall (weekly)"
+                      className="kpi-summary-card kpi-summary-card--akash-overall"
+                      style={{ borderTop: '3px solid #0d9488', cursor: 'default' }}
+                    >
+                      <Space direction="vertical" align="center">
+                        <Progress
+                          type="circle"
+                          percent={akashKpi.overall_score_percent ?? 0}
+                          size={80}
+                          strokeColor="#0d9488"
+                        />
+                        <div
+                          className="kpi-performance-pill"
+                          style={getPerformanceLevel(akashKpi.overall_score_percent)}
+                        >
+                          {getPerformanceLevel(akashKpi.overall_score_percent).label} Performance
+                        </div>
+                        <Text type="secondary" style={{ fontSize: 12, textAlign: 'center' }}>
+                          {akashKpi.dailyLogWeekApplied
+                            ? 'Includes Item cleaning / Video / AI from your KPI daily work log for the filter week (weights renormalize when categories are blank).'
+                            : 'Same week as your filters: checklist + support chores/bugs (video and AI use daily log when entered).'}
+                        </Text>
+                      </Space>
+                    </Card>
+                  </Col>
+                )}
                 {selectedPerson === 'Rimpa' && data?.successKpi != null && (
                 <Col xs={24} sm={24} md={8}>
                   <Card
@@ -302,132 +558,210 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
               </Row>
             )}
 
-            {/* Checklist */}
-            {checklist && (
-              <Card
-                className="kpi-section-card"
-                title={
-                  <Space>
-                    <CheckSquareOutlined />
-                    Checklist (Weekly: {checklist.weeklyPercentage ?? 0}%)
-                  </Space>
-                }
-              >
-                {(checklist.rows?.length ?? 0) > 0 ? (
-                  <Table
-                    size="small"
-                    dataSource={checklist.rows?.map((r, i) => ({ ...r, key: i })) ?? []}
-                    columns={[
-                      { title: 'Task', dataIndex: 'task_name', key: 'task_name' },
-                      { title: 'Frequency', dataIndex: 'frequency', key: 'frequency', width: 100 },
-                      {
-                        title: 'Status',
-                        dataIndex: 'status',
-                        key: 'status',
-                        width: 120,
-                        render: (s: string) => {
-                          const done = (s || '').toLowerCase() === 'done'
-                          return (
-                            <Tag
-                              style={done
-                                ? {
+            <>
+              {checklist && (
+                <Card
+                  className="kpi-section-card"
+                  title={
+                    <Space>
+                      <CheckSquareOutlined />
+                      Checklist (Weekly: {checklist.weeklyPercentage ?? 0}%)
+                    </Space>
+                  }
+                >
+                  {(checklist.rows?.length ?? 0) > 0 ? (
+                    <Table
+                      size="small"
+                      dataSource={checklist.rows?.map((r, i) => ({ ...r, key: i })) ?? []}
+                      columns={[
+                        { title: 'Task', dataIndex: 'task_name', key: 'task_name' },
+                        { title: 'Frequency', dataIndex: 'frequency', key: 'frequency', width: 100 },
+                        {
+                          title: 'Status',
+                          dataIndex: 'status',
+                          key: 'status',
+                          width: 120,
+                          render: (s: string) => {
+                            const done = (s || '').toLowerCase() === 'done'
+                            return (
+                              <Tag
+                                style={done
+                                  ? {
+                                      background: 'rgba(40,167,69,0.1)',
+                                      color: '#28A745',
+                                      borderColor: 'rgba(40,167,69,0.2)',
+                                    }
+                                  : {
+                                      background: 'rgba(255,193,7,0.1)',
+                                      color: '#FFC107',
+                                      borderColor: 'rgba(255,193,7,0.2)',
+                                    }}
+                              >
+                                {done ? 'Completed' : 'Pending'}
+                              </Tag>
+                            )
+                          },
+                        },
+                      ]}
+                      pagination={false}
+                    />
+                  ) : (
+                    <Text type="secondary">No checklist occurrences for this week. Try another week or month.</Text>
+                  )}
+                </Card>
+              )}
+
+              {delegation && (
+                <Card
+                  className="kpi-section-card"
+                  title={
+                    <Space>
+                      <SwapOutlined />
+                      Delegation (Weekly: {delegation.weeklyPercentage ?? 0}%)
+                    </Space>
+                  }
+                >
+                  {(delegation.rows?.length ?? 0) > 0 ? (
+                    <Table
+                      size="small"
+                      dataSource={delegation.rows?.map((r, i) => ({ ...r, key: i })) ?? []}
+                      columns={[
+                        { title: 'Task', dataIndex: 'task', key: 'task' },
+                        {
+                          title: 'Status',
+                          dataIndex: 'status',
+                          key: 'status',
+                          width: 140,
+                          render: (s: string) => {
+                            const v = (s || '').toLowerCase()
+                            if (v === 'completed') {
+                              return (
+                                <Tag
+                                  style={{
                                     background: 'rgba(40,167,69,0.1)',
                                     color: '#28A745',
                                     borderColor: 'rgba(40,167,69,0.2)',
-                                  }
-                                : {
-                                    background: 'rgba(255,193,7,0.1)',
-                                    color: '#FFC107',
-                                    borderColor: 'rgba(255,193,7,0.2)',
                                   }}
-                            >
-                              {done ? 'Completed' : 'Pending'}
-                            </Tag>
-                          )
+                                >
+                                  Completed
+                                </Tag>
+                              )
+                            }
+                            if (v === 'in progress') {
+                              return (
+                                <Tag
+                                  style={{
+                                    background: 'rgba(23,162,184,0.1)',
+                                    color: '#17A2B8',
+                                    borderColor: 'rgba(23,162,184,0.2)',
+                                  }}
+                                >
+                                  In Progress
+                                </Tag>
+                              )
+                            }
+                            return (
+                              <Tag
+                                style={{
+                                  background: 'rgba(255,193,7,0.1)',
+                                  color: '#FFC107',
+                                  borderColor: 'rgba(255,193,7,0.2)',
+                                }}
+                              >
+                                Pending
+                              </Tag>
+                            )
+                          },
                         },
-                      },
-                    ]}
-                    pagination={false}
-                  />
-                ) : (
-                  <Text type="secondary">No checklist occurrences for this week. Try another week or month.</Text>
-                )}
-              </Card>
-            )}
+                        { title: 'Shifted Week', dataIndex: 'shifted_week', key: 'shifted_week', width: 100 },
+                        { title: 'Month', dataIndex: 'month', key: 'month', width: 80 },
+                      ]}
+                      pagination={false}
+                    />
+                  ) : (
+                    <Text type="secondary">No delegation tasks for this week. Try another week or month.</Text>
+                  )}
+                </Card>
+              )}
 
-            {/* Delegation */}
-            {delegation && (
-              <Card
-                className="kpi-section-card"
-                title={
-                  <Space>
-                    <SwapOutlined />
-                    Delegation (Weekly: {delegation.weeklyPercentage ?? 0}%)
-                  </Space>
-                }
-              >
-                {(delegation.rows?.length ?? 0) > 0 ? (
-                  <Table
-                    size="small"
-                    dataSource={delegation.rows?.map((r, i) => ({ ...r, key: i })) ?? []}
-                    columns={[
-                      { title: 'Task', dataIndex: 'task', key: 'task' },
-                      {
-                        title: 'Status',
-                        dataIndex: 'status',
-                        key: 'status',
-                        width: 140,
-                        render: (s: string) => {
-                          const v = (s || '').toLowerCase()
-                          if (v === 'completed') {
-                            return (
-                              <Tag
-                                style={{
-                                  background: 'rgba(40,167,69,0.1)',
-                                  color: '#28A745',
-                                  borderColor: 'rgba(40,167,69,0.2)',
-                                }}
-                              >
-                                Completed
-                              </Tag>
-                            )
-                          }
-                          if (v === 'in progress') {
-                            return (
-                              <Tag
-                                style={{
-                                  background: 'rgba(23,162,184,0.1)',
-                                  color: '#17A2B8',
-                                  borderColor: 'rgba(23,162,184,0.2)',
-                                }}
-                              >
-                                In Progress
-                              </Tag>
-                            )
-                          }
-                          return (
-                            <Tag
-                              style={{
-                                background: 'rgba(255,193,7,0.1)',
-                                color: '#FFC107',
-                                borderColor: 'rgba(255,193,7,0.2)',
-                              }}
-                            >
-                              Pending
-                            </Tag>
-                          )
-                        },
-                      },
-                      { title: 'Shifted Week', dataIndex: 'shifted_week', key: 'shifted_week', width: 100 },
-                      { title: 'Month', dataIndex: 'month', key: 'month', width: 80 },
-                    ]}
-                    pagination={false}
-                  />
-                ) : (
-                  <Text type="secondary">No delegation tasks for this week. Try another week or month.</Text>
-                )}
-              </Card>
-            )}
+              {isAkashLayout && akashKpi && (
+                <Card
+                  className="kpi-section-card"
+                  title={
+                    <Space wrap>
+                      <PieChartOutlined />
+                      KPI
+                      <Tag color="cyan" style={{ marginLeft: 4 }}>
+                        {akashKpi.overall_score_percent ?? 0}% weekly overall ({week})
+                      </Tag>
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        Overall uses your filter week for checklist + support. Customer Support counts below use the
+                        prior KPI week vs your filter (see Support data window).
+                      </Text>
+                    </Space>
+                  }
+                >
+                  {akashKpi.customerSupport?.meta?.helpNote && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message="Support data window"
+                      description={akashKpi.customerSupport.meta.helpNote}
+                    />
+                  )}
+                  <Row gutter={[16, 16]}>
+                    {akashKpi.pillars.map((pillar) => {
+                      const cs = akashKpi.customerSupport
+                      const isCs = pillar.key === 'customer_support'
+                      const rd = cs?.responseDelayCount ?? 0
+                      const cd = cs?.completionDelayCount ?? 0
+                      const pd = cs?.pendingCount ?? 0
+                      const total = cs?.totalIssues ?? 0
+                      return (
+                        <Col xs={24} md={6} key={pillar.key}>
+                          <Card
+                            size="small"
+                            className={`kpi-success-card ${AKASH_KPI_PILLAR_CARD_CLASS[pillar.key] ?? 'kpi-success-card--poc'}${isCs ? ' kpi-akash-cs-card' : ''}`}
+                            bordered={false}
+                            title={pillar.title}
+                            styles={
+                              isCs
+                                ? {
+                                    header: { minHeight: 44, paddingTop: 10, paddingBottom: 10 },
+                                    body: { paddingTop: 10 },
+                                  }
+                                : undefined
+                            }
+                            hoverable
+                            style={{ cursor: isCs ? 'pointer' : 'default' }}
+                            onClick={isCs ? () => setAkashCsModal(cs ?? null) : undefined}
+                            extra={
+                              isCs ? (
+                                <UnorderedListOutlined title="View response / completion / pending lists" />
+                              ) : null
+                            }
+                          >
+                            {pillar.metrics.map((m) => (
+                              <div key={m.label} style={{ fontSize: isCs ? 11 : 12, marginTop: 3, lineHeight: 1.35 }}>
+                                <Text type="secondary">{m.label}: </Text>
+                                <Text>{m.value}</Text>
+                              </div>
+                            ))}
+                            {isCs && (
+                              <Text type="secondary" style={{ fontSize: 10, display: 'block', marginTop: 8, lineHeight: 1.35 }}>
+                                Click for lists · {total} in data week · resp delay {rd}, completion delay {cd},
+                                pending {pd}
+                              </Text>
+                            )}
+                          </Card>
+                        </Col>
+                      )
+                    })}
+                  </Row>
+                </Card>
+              )}
+            </>
 
             {/* Support FMS – Shreyasi only; clickable cards open detail modal; show Weekly % in title */}
             {supportFMS && selectedPerson === 'Shreyasi' && (
@@ -771,34 +1105,15 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
               className="kpi-modal kpi-graph-modal"
             >
               {graphModal && data?.weeklyProgress && (
-                <div style={{ width: '100%', minHeight: 320 }}>
-                  <ResponsiveContainer width="100%" height={320}>
-                    <BarChart
-                      data={(data.weeklyProgress.weeks ?? []).map((weekName, i) => ({
-                        name: weekName,
-                        percentage: graphModal === 'checklist'
-                          ? (data.weeklyProgress!.checklist?.[i] ?? 0)
-                          : graphModal === 'delegation'
-                            ? (data.weeklyProgress!.delegation?.[i] ?? 0)
-                            : graphModal === 'supportFMS'
-                              ? (data.weeklyProgress!.supportFMS?.[i] ?? 0)
-                              : (data.weeklyProgress!.successKpi?.[i] ?? 0),
-                      }))}
-                      margin={{ top: 16, right: 24, left: 0, bottom: 24 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
-                      <Tooltip formatter={(value: number) => [`${value}%`, 'Weekly %']} labelFormatter={(label) => `${label}`} />
-                      <Bar
-                        dataKey="percentage"
-                        name="Weekly %"
-                        fill={graphModal === 'checklist' ? '#4A6BFF' : graphModal === 'delegation' ? '#28A745' : graphModal === 'supportFMS' ? '#FFC107' : '#FAAD14'}
-                        radius={[4, 4, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <Suspense
+                  fallback={
+                    <div style={{ width: '100%', minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Spin tip="Loading chart…" />
+                    </div>
+                  }
+                >
+                  <LazyWeeklyBarChart graphModal={graphModal} weeklyProgress={data.weeklyProgress} />
+                </Suspense>
               )}
               {graphModal && (!data?.weeklyProgress || (data.weeklyProgress.weeks?.length ?? 0) === 0) && (
                 <Text type="secondary">No weekly data available for this month.</Text>
@@ -875,7 +1190,249 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
               )}
             </Modal>
 
-            {!checklist && !delegation && !supportFMS && data.success && (
+            <Modal
+              title="KPI daily work log"
+              open={kpiDailyLogOpen}
+              onCancel={() => setKpiDailyLogOpen(false)}
+              width="min(98vw, 1280px)"
+              className="kpi-modal"
+              okText="Save changes"
+              cancelText="Close"
+              okButtonProps={{ disabled: !kpiDailyLogTableVisible }}
+              onOk={() => saveKpiDailyLogChanges()}
+              destroyOnClose
+            >
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginBottom: 12 }}
+                message="One month at a time"
+                description={
+                  <>
+                    Rows are generated for the full calendar month you select. When you first open this dialog, the
+                    month comes from the dashboard <strong>{month}</strong> <strong>{year}</strong> filters. Past
+                    months stay hidden until you change the <strong>Log month</strong> picker. The Akash KPI week still
+                    uses rows whose dates fall in the selected KPI week.
+                  </>
+                }
+              />
+              <Row gutter={[16, 12]} align="middle" style={{ marginBottom: 12 }}>
+                <Col xs={24} sm={12}>
+                  <Text strong>Log month</Text>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      Change the month to show the table (including completed months).
+                    </Text>
+                  </div>
+                </Col>
+                <Col xs={24} sm={12} style={{ textAlign: 'right' }}>
+                  <DatePicker
+                    picker="month"
+                    value={kpiDailyLogMonth}
+                    format="MMM YYYY"
+                    allowClear={false}
+                    onChange={(d) => {
+                      if (!d) return
+                      const next = d.startOf('month')
+                      setKpiDailyLogMonth(next)
+                      setKpiDailyLogTableVisible(true)
+                    }}
+                  />
+                </Col>
+              </Row>
+              {!kpiDailyLogTableVisible && (
+                <Alert
+                  type="warning"
+                  showIcon
+                  style={{ marginBottom: 12 }}
+                  message="Table hidden for this completed month"
+                  description="Pick another month above, or re-select the same month, to load the daily log."
+                />
+              )}
+              <Spin spinning={kpiDailyLogLoading}>
+                <Table<KpiDailyLogTableRow>
+                  size="small"
+                  rowKey="work_date"
+                  dataSource={kpiDailyLogTableVisible ? kpiDailyLogRows : []}
+                  scroll={{ x: 1180 }}
+                  pagination={
+                    kpiDailyLogTableVisible && kpiDailyLogRows.length > 0
+                      ? { pageSize: 31, showSizeChanger: false, hideOnSinglePage: true }
+                      : false
+                  }
+                  columns={[
+                    {
+                      title: 'Date',
+                      dataIndex: 'work_date',
+                      key: 'work_date',
+                      width: 108,
+                      fixed: 'left',
+                      render: (iso: string) => dayjs(iso).format('D-MMM-YY'),
+                    },
+                    { title: 'Day', dataIndex: 'dayName', key: 'dayName', width: 92 },
+                    {
+                      title: 'Items cleaned',
+                      key: 'items_cleaned',
+                      width: 118,
+                      render: (_: unknown, row) => (
+                        <InputNumber
+                          min={0}
+                          controls={false}
+                          style={{ width: '100%' }}
+                          value={row.items_cleaned ?? undefined}
+                          onChange={(v) => patchKpiDailyLogRow(row.work_date, { items_cleaned: v ?? null })}
+                        />
+                      ),
+                    },
+                    {
+                      title: 'Errors found',
+                      key: 'errors_found',
+                      width: 110,
+                      render: (_: unknown, row) => (
+                        <InputNumber
+                          min={0}
+                          step={0.1}
+                          controls={false}
+                          style={{ width: '100%' }}
+                          value={row.errors_found ?? undefined}
+                          onChange={(v) => patchKpiDailyLogRow(row.work_date, { errors_found: v ?? null })}
+                        />
+                      ),
+                    },
+                    {
+                      title: 'Videos created',
+                      key: 'videos_created',
+                      width: 118,
+                      render: (_: unknown, row) => (
+                        <InputNumber
+                          min={0}
+                          controls={false}
+                          style={{ width: '100%' }}
+                          value={row.videos_created ?? undefined}
+                          onChange={(v) => patchKpiDailyLogRow(row.work_date, { videos_created: v ?? null })}
+                        />
+                      ),
+                    },
+                    {
+                      title: 'Video type',
+                      dataIndex: 'video_type',
+                      key: 'video_type',
+                      width: 120,
+                      render: (_: string | null | undefined, row) => (
+                        <Input
+                          size="small"
+                          placeholder="e.g. Short"
+                          value={row.video_type ?? ''}
+                          onChange={(e) => patchKpiDailyLogRow(row.work_date, { video_type: e.target.value || null })}
+                        />
+                      ),
+                    },
+                    {
+                      title: 'AI tasks used',
+                      key: 'ai_tasks_used',
+                      width: 112,
+                      render: (_: unknown, row) => (
+                        <InputNumber
+                          min={0}
+                          controls={false}
+                          style={{ width: '100%' }}
+                          value={row.ai_tasks_used ?? undefined}
+                          onChange={(v) => patchKpiDailyLogRow(row.work_date, { ai_tasks_used: v ?? null })}
+                        />
+                      ),
+                    },
+                    {
+                      title: 'Process improved',
+                      key: 'process_improved',
+                      width: 120,
+                      render: (_: unknown, row) => (
+                        <InputNumber
+                          min={0}
+                          controls={false}
+                          style={{ width: '100%' }}
+                          value={row.process_improved ?? undefined}
+                          onChange={(v) => patchKpiDailyLogRow(row.work_date, { process_improved: v ?? null })}
+                        />
+                      ),
+                    },
+                  ]}
+                />
+              </Spin>
+            </Modal>
+
+            <Modal
+              title={
+                akashCsModal
+                  ? `Customer Support – Week ${akashCsModal.meta?.dataWeekNum ?? '—'} (${akashCsModal.meta?.dataRangeLabel ?? ''})`
+                  : ''
+              }
+              open={!!akashCsModal}
+              onCancel={() => setAkashCsModal(null)}
+              footer={null}
+              width="min(96vw, 960px)"
+              className="kpi-modal"
+            >
+              {akashCsModal?.meta?.helpNote && (
+                <Alert type="info" showIcon style={{ marginBottom: 12 }} message="Data window" description={akashCsModal.meta.helpNote} />
+              )}
+              {akashCsModal && (
+                <Tabs
+                  defaultActiveKey="response"
+                  items={[
+                    {
+                      key: 'response',
+                      label: `Response delays (${akashCsModal.responseDelayCount ?? 0})`,
+                      children: (
+                        <Table
+                          size="small"
+                          rowKey={(_, i) => `rd-${i}`}
+                          dataSource={(akashCsModal.detailsResponseDelay ?? []).map((r, i) => ({ ...r, key: i }))}
+                          columns={AKASH_CS_TABLE_COLUMNS.map((c) =>
+                            c.key === 'delay_note' ? { ...c, title: 'Response SLA / note' } : c,
+                          )}
+                          pagination={(akashCsModal.detailsResponseDelay?.length ?? 0) > 10 ? { pageSize: 10 } : false}
+                          scroll={{ x: 'max-content' }}
+                        />
+                      ),
+                    },
+                    {
+                      key: 'completion',
+                      label: `Completion delays (${akashCsModal.completionDelayCount ?? 0})`,
+                      children: (
+                        <Table
+                          size="small"
+                          rowKey={(_, i) => `cd-${i}`}
+                          dataSource={(akashCsModal.detailsCompletionDelay ?? []).map((r, i) => ({ ...r, key: i }))}
+                          columns={AKASH_CS_TABLE_COLUMNS.map((c) =>
+                            c.key === 'delay_note' ? { ...c, title: 'Stage 2 completion note' } : c,
+                          )}
+                          pagination={(akashCsModal.detailsCompletionDelay?.length ?? 0) > 10 ? { pageSize: 10 } : false}
+                          scroll={{ x: 'max-content' }}
+                        />
+                      ),
+                    },
+                    {
+                      key: 'pending',
+                      label: `Pending (${akashCsModal.pendingCount ?? 0})`,
+                      children: (
+                        <Table
+                          size="small"
+                          rowKey={(_, i) => `pd-${i}`}
+                          dataSource={(akashCsModal.detailsPending ?? []).map((r, i) => ({ ...r, key: i }))}
+                          columns={AKASH_CS_TABLE_COLUMNS.map((c) =>
+                            c.key === 'delay_note' ? { ...c, title: 'Open vs Stage 2 SLA' } : c,
+                          )}
+                          pagination={(akashCsModal.detailsPending?.length ?? 0) > 10 ? { pageSize: 10 } : false}
+                          scroll={{ x: 'max-content' }}
+                        />
+                      ),
+                    },
+                  ]}
+                />
+              )}
+            </Modal>
+
+            {!checklist && !delegation && !supportFMS && data.success && !akashKpi && (
               <Card>
                 <Text type="secondary">No data for the selected filters. Try another month, year, or week.</Text>
               </Card>
