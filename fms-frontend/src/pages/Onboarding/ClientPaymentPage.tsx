@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { Button, Card, DatePicker, Descriptions, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tooltip, Typography, message } from 'antd'
 import { CheckCircleOutlined, EditOutlined, FormOutlined } from '@ant-design/icons'
@@ -58,6 +58,9 @@ export function ClientPaymentPage() {
   const [sentSubmitted, setSentSubmitted] = useState(false)
   const [sentForm] = Form.useForm()
   const [form] = Form.useForm()
+  const [editInvoiceModalOpen, setEditInvoiceModalOpen] = useState(false)
+  const [editInvoiceSubmitLoading, setEditInvoiceSubmitLoading] = useState(false)
+  const [editInvoiceForm] = Form.useForm()
 
   const [followupModalOpen, setFollowupModalOpen] = useState(false)
   const [followupLoading, setFollowupLoading] = useState(false)
@@ -114,6 +117,7 @@ export function ClientPaymentPage() {
   const [paymRecModalOpen, setPaymRecModalOpen] = useState(false)
   const [paymRecForm] = Form.useForm()
   const [currentFollowupNo, setCurrentFollowupNo] = useState(1)
+  const [companyNameFilter, setCompanyNameFilter] = useState('')
 
   const location = useLocation()
   const completedSection = location.pathname.includes('/completed/') ? location.pathname.split('/completed/')[1]?.split('/')[0] || null : null
@@ -140,7 +144,7 @@ export function ClientPaymentPage() {
   }, [location.pathname])
 
   useEffect(() => {
-    if (!modalOpen || companies.length > 0) return
+    if ((!modalOpen && !editInvoiceModalOpen) || companies.length > 0) return
     setCompaniesLoading(true)
     apiClient
       .get<{ id: string; name: string }[]>('/companies')
@@ -150,7 +154,7 @@ export function ClientPaymentPage() {
       })
       .catch(() => setCompanies([]))
       .finally(() => setCompaniesLoading(false))
-  }, [modalOpen, companies.length])
+  }, [modalOpen, editInvoiceModalOpen, companies.length])
 
   const openModal = () => {
     form.resetFields()
@@ -189,6 +193,56 @@ export function ClientPaymentPage() {
           }
         })
         .finally(() => setSubmitLoading(false))
+    }).catch(() => {
+      message.warning('Please fill all required fields')
+    })
+  }
+
+  const openEditInvoiceModal = () => {
+    if (!selectedRecord) return
+    editInvoiceForm.setFieldsValue({
+      company_name: selectedRecord.company_name,
+      invoice_date: selectedRecord.invoice_date ? dayjs(selectedRecord.invoice_date) : undefined,
+      invoice_amount:
+        selectedRecord.invoice_amount != null && String(selectedRecord.invoice_amount).trim() !== ''
+          ? Number(String(selectedRecord.invoice_amount).replace(/,/g, ''))
+          : undefined,
+      invoice_number: selectedRecord.invoice_number ?? '',
+      genre: selectedRecord.genre,
+    })
+    setEditInvoiceModalOpen(true)
+  }
+
+  const handleEditInvoiceSubmit = () => {
+    if (!selectedRecord?.id) return
+    editInvoiceForm.validateFields().then((values) => {
+      setEditInvoiceSubmitLoading(true)
+      const payload = {
+        company_name: values.company_name as string,
+        invoice_date: values.invoice_date ? (values.invoice_date as Dayjs).format('YYYY-MM-DD') : null,
+        invoice_amount: values.invoice_amount != null ? String(values.invoice_amount).trim() : null,
+        invoice_number: values.invoice_number != null ? String(values.invoice_number).trim() : null,
+        genre: values.genre as 'M' | 'Q' | 'HY' | 'Y',
+      }
+      apiClient
+        .put<ClientPaymentRecord>(API_ENDPOINTS.CLIENT_PAYMENT.UPDATE(selectedRecord.id), payload)
+        .then((res) => {
+          const updated = res.data
+          message.success('Raised Invoice updated')
+          setEditInvoiceModalOpen(false)
+          editInvoiceForm.resetFields()
+          const merged: ClientPaymentRecord = { ...selectedRecord, ...updated }
+          setSelectedRecord(merged)
+          loadDrawerData(merged)
+          loadData()
+        })
+        .catch((err) => {
+          const raw = err?.response?.data?.detail
+          const detail =
+            typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0]?.msg : raw?.message || 'Failed to update Raised Invoice'
+          message.error(detail)
+        })
+        .finally(() => setEditInvoiceSubmitLoading(false))
     }).catch(() => {
       message.warning('Please fill all required fields')
     })
@@ -667,24 +721,54 @@ export function ClientPaymentPage() {
     !interceptHasTaggedUser2
   const showDiscontinuationByDate = dayOfMonth >= 25
   const isCompleted = selectedRecord?.status === 'Completed'
+  /** Core "Add Invoice" fields: editable within 30 days of row Timestamp (Payment Management / open list only). */
+  const daysSinceCreated = selectedRecord?.timestamp ? dayjs().diff(dayjs(selectedRecord.timestamp), 'day') : 999
+  const canEditRaisedInvoiceCore =
+    isOpenList && !!selectedRecord && !isCompleted && daysSinceCreated >= 0 && daysSinceCreated <= 30
+
+  const companyFilterNorm = companyNameFilter.trim().toLowerCase()
+  const filteredRecords = useMemo(() => {
+    if (!companyFilterNorm) return records
+    return records.filter((r) => (r.company_name || '').toLowerCase().includes(companyFilterNorm))
+  }, [records, companyFilterNorm])
 
   return (
     <div style={{ padding: 24 }}>
-      <Space style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <Space
+        style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between', alignItems: 'center' }}
+        wrap
+        size="middle"
+      >
         <Title level={4} style={{ margin: 0 }}>
           {pageTitle}
         </Title>
-        {isOpenList && (
-          <Button type="primary" onClick={openModal}>
-            Add Invoice
-          </Button>
-        )}
+        <Space wrap align="center" size="middle">
+          <Input.Search
+            allowClear
+            placeholder="Search company name"
+            style={{ width: 'min(100vw - 48px, 320px)', minWidth: 200 }}
+            value={companyNameFilter}
+            onChange={(e) => setCompanyNameFilter(e.target.value)}
+            onSearch={(v) => setCompanyNameFilter(v)}
+            aria-label="Filter raised invoices by company name"
+          />
+          {companyFilterNorm ? (
+            <Text type="secondary">
+              {filteredRecords.length} of {records.length} rows
+            </Text>
+          ) : null}
+          {isOpenList && (
+            <Button type="primary" onClick={openModal}>
+              Add Invoice
+            </Button>
+          )}
+        </Space>
       </Space>
 
       <Card>
         <TableWithSkeletonLoading loading={loading} columns={9} rows={12}>
           <Table
-            dataSource={records}
+            dataSource={filteredRecords}
             columns={columns}
             rowKey="id"
             loading={false}
@@ -731,6 +815,16 @@ export function ClientPaymentPage() {
                 {typeof selectedRecord.aging_days === 'number' ? selectedRecord.aging_days : 0}
               </Descriptions.Item>
             </Descriptions>
+            {isOpenList && canEditRaisedInvoiceCore && (
+              <Button type="default" icon={<EditOutlined />} onClick={openEditInvoiceModal} style={{ marginTop: 12 }}>
+                Edit
+              </Button>
+            )}
+            {isOpenList && !canEditRaisedInvoiceCore && !isCompleted && (
+              <Text type="secondary" style={{ display: 'block', marginTop: 12 }}>
+                Company and invoice fields can be edited within 30 days of Timestamp (record creation).
+              </Text>
+            )}
             <Divider>Invoice Sent details & Follow up</Divider>
             {drawerStatusLoading ? (
               <div style={{ padding: 8, color: '#888' }}>Loading…</div>
@@ -1152,6 +1246,97 @@ export function ClientPaymentPage() {
             <Space>
               <Button type="primary" htmlType="submit">Save</Button>
               <Button onClick={() => setPaymRecModalOpen(false)}>Cancel</Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="Edit Raised Invoice"
+        open={editInvoiceModalOpen}
+        onCancel={() => {
+          setEditInvoiceModalOpen(false)
+          editInvoiceForm.resetFields()
+        }}
+        footer={null}
+        destroyOnClose
+        width={520}
+      >
+        <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+          Changes are allowed for 30 days after the original Timestamp, and only until payment is received.
+        </Text>
+        <Form form={editInvoiceForm} layout="vertical" style={{ marginTop: 8 }} onFinish={handleEditInvoiceSubmit}>
+          <Form.Item
+            name="company_name"
+            label="Company Name"
+            rules={[{ required: true, message: 'Company Name is required' }]}
+          >
+            <Select
+              showSearch
+              loading={companiesLoading}
+              placeholder={companiesLoading ? 'Loading companies…' : 'Select company'}
+              options={companies.map((c) => ({ label: c.name, value: c.name }))}
+              filterOption={(input, option) =>
+                (option?.label as string).toLowerCase().includes(input.toLowerCase())
+              }
+            />
+          </Form.Item>
+
+          <Form.Item name="invoice_date" label="Invoice Date" rules={[{ required: true, message: 'Invoice Date is required' }]}>
+            <DatePicker style={{ width: '100%' }} format="DD-MMM-YYYY" />
+          </Form.Item>
+
+          <Form.Item
+            name="invoice_amount"
+            label="Invoice Amount"
+            rules={[
+              { required: true, message: 'Invoice Amount is required' },
+              {
+                validator: (_, value) => {
+                  if (value === undefined || value === null || value === '') return Promise.resolve()
+                  const s = String(value).trim()
+                  if (!/^\d+$/.test(s)) return Promise.reject(new Error('Amount must be digits only'))
+                  if (s.length > 11) return Promise.reject(new Error('Max 11 digits allowed'))
+                  return Promise.resolve()
+                },
+              },
+            ]}
+          >
+            <InputNumber style={{ width: '100%' }} maxLength={11} />
+          </Form.Item>
+
+          <Form.Item
+            name="invoice_number"
+            label="Invoice Number"
+            rules={[
+              { required: true, message: 'Invoice Number is required' },
+              { max: 50, message: 'Max 50 characters allowed' },
+            ]}
+          >
+            <Input maxLength={50} placeholder="Invoice number (alphanumeric / special characters allowed)" />
+          </Form.Item>
+
+          <Form.Item
+            name="genre"
+            label="Genre"
+            rules={[{ required: true, message: 'Genre is required' }]}
+          >
+            <Select placeholder="Select frequency" options={GENRE_OPTIONS} />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Space>
+              <Button type="primary" htmlType="submit" loading={editInvoiceSubmitLoading}>
+                Save
+              </Button>
+              <Button
+                onClick={() => {
+                  setEditInvoiceModalOpen(false)
+                  editInvoiceForm.resetFields()
+                }}
+              >
+                Cancel
+              </Button>
             </Space>
           </Form.Item>
         </Form>

@@ -44,14 +44,13 @@ Invoke-WebRequest -Uri "http://127.0.0.1:8000/checklist/send-daily-reminders" -M
 
 Add these to your production backend (e.g. Render, Railway).
 
-### 2.1 SMTP (Postmark)
+### 2.1 SMTP (e.g. Brevo)
 
-- `SMTP_HOST` = smtp.postmarkapp.com
+- `SMTP_HOST` = smtp-relay.brevo.com
 - `SMTP_PORT` = 587
 - `SMTP_USER` = 025fddbf-90e2-43d5-a642-3fee36bb3acc
 - `SMTP_PASSWORD` = 025fddbf-90e2-43d5-a642-3fee36bb3acc
 - `SMTP_FROM_EMAIL` = aman@industryprime.com
-- `SMTP_POSTMARK_STREAM` = outbound
 
 ### 2.2 Cron secret
 
@@ -143,7 +142,7 @@ Invoke-WebRequest -Uri "https://ip-internal-manage-software.onrender.com/checkli
 
 | Issue | Action |
 |-------|--------|
-| No email received | Check spam, Postmark dashboard, SMTP env vars |
+| No email received | Check spam, provider dashboard, SMTP env vars |
 | 401 from cron | Ensure header value matches `CHECKLIST_CRON_SECRET` |
 | `sent: 0` | Normal if no tasks due today; create a test task |
 | Backend not reachable | Check URL, CORS, and that backend is running |

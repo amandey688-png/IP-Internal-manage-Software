@@ -24,11 +24,10 @@ Your `backend/.env` should have:
 
 | Variable | Example value |
 |----------|---------------|
-| `SMTP_HOST` | `smtp.postmarkapp.com` |
-| `SMTP_USER` | Your Postmark Server Token |
-| `SMTP_PASSWORD` | Same as SMTP_USER |
-| `SMTP_FROM_EMAIL` | `aman@industryprime.com` |
-| `SMTP_POSTMARK_STREAM` | `outbound` |
+| `SMTP_HOST` | `smtp-relay.brevo.com` (or your provider) |
+| `SMTP_USER` | SMTP login from Brevo (or provider) |
+| `SMTP_PASSWORD` | SMTP key |
+| `SMTP_FROM_EMAIL` | Verified sender |
 | `CHECKLIST_CRON_SECRET` | `mysecret123` |
 
 ---

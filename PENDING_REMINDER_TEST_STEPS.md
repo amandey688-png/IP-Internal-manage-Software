@@ -42,12 +42,11 @@ In `backend/.env` and **Render** dashboard:
 
 | Variable | Description |
 |----------|-------------|
-| `SMTP_HOST` | e.g. `smtp.postmarkapp.com` |
+| `SMTP_HOST` | e.g. `smtp-relay.brevo.com` |
 | `SMTP_PORT` | `587` or `465` |
-| `SMTP_USER` | Postmark token |
-| `SMTP_PASSWORD` | Same as SMTP_USER for Postmark |
+| `SMTP_USER` | SMTP login from your provider |
+| `SMTP_PASSWORD` | SMTP password or key |
 | `SMTP_FROM_EMAIL` | Verified sender email |
-| `SMTP_POSTMARK_STREAM` | `outbound` (optional) |
 | `CHECKLIST_CRON_SECRET` | Secret for cron (e.g. `mysecret123`) |
 | `PENDING_REMINDER_CRON_SECRET` | Optional; falls back to `CHECKLIST_CRON_SECRET` |
 

@@ -73,10 +73,10 @@ Then run the reminder again.
 
 1. In **Render** → your service → **Environment**
 2. Set:
-   - `SMTP_HOST` = `smtp.postmarkapp.com`
+   - `SMTP_HOST` = e.g. `smtp-relay.brevo.com`
    - `SMTP_PORT` = `587`
-   - `SMTP_USER` = Postmark token
-   - `SMTP_PASSWORD` = Postmark token
+   - `SMTP_USER` = SMTP login from provider
+   - `SMTP_PASSWORD` = SMTP key
    - `SMTP_FROM_EMAIL` = verified sender email
 3. Save and redeploy
 

@@ -36,16 +36,16 @@ Your backend now supports these SMTP ports via `SMTP_PORT` env:
 
 ### Step 2.3: Add/Update Variables
 
-**Postmark HTTP API** (recommended – works on Render, no SMTP ports needed):
+**SendGrid HTTP API** (works on Render when SMTP ports are blocked):
 
 | Key | Value |
 |-----|-------|
-| `POSTMARK_SERVER_TOKEN` | Your Postmark Server API token |
-| `SMTP_FROM_EMAIL` | `aman@industryprime.com` |
-| `SMTP_POSTMARK_STREAM` | `outbound` |
+| `SENDGRID_API_KEY` | Your SendGrid API key |
+| `SENDGRID_FROM_EMAIL` | Verified sender |
+| `SMTP_FROM_EMAIL` | Same as sender if you use one env for both |
 | `CHECKLIST_CRON_SECRET` | `mysecret123` |
 
-Get the token from [Postmark](https://account.postmarkapp.com) → Server → API Tokens (same as SMTP token).
+**Or** use **Brevo/other SMTP** with `SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL` (may require port `2525` on some hosts).
 
 ---
 
@@ -85,10 +85,10 @@ Get the token from [Postmark](https://account.postmarkapp.com) → Server → AP
 |-------|-------|
 | **Sender email** | `aman@industryprime.com` |
 | **Sender name** | `IP Internal Management` (or your app name) |
-| **Host** | `smtp.postmarkapp.com` |
+| **Host** | e.g. `smtp-relay.brevo.com` (your SMTP provider) |
 | **Port** | `587` or `2525` |
-| **Username** | Your Postmark server token |
-| **Password** | Same token |
+| **Username** | From your provider’s SMTP screen |
+| **Password** | SMTP key / password |
 
 3. Use the **same port** as Render (`SMTP_PORT`)
 
@@ -242,4 +242,4 @@ Check the inbox of the user who has tasks due today.
 | `no_email=1` | Run migration; ensure users have email in auth |
 | `send_failed=1` | Try `SMTP_PORT=2525` or switch to Resend |
 | Auth emails not sent | Check Supabase SMTP settings, port, credentials |
-| 587 blocked | Use Postmark HTTP API (`POSTMARK_SERVER_TOKEN`) |
+| 587 blocked | Use SendGrid API (`SENDGRID_API_KEY`) or try SMTP port `2525` |

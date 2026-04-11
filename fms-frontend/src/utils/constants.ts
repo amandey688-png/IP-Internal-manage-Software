@@ -218,6 +218,7 @@ export const API_ENDPOINTS = {
     LIST_OPEN: '/onboarding/client-payment?status=open',
     LIST_COMPLETED: (section: string) => `/onboarding/client-payment?status=completed&section=${encodeURIComponent(section)}`,
     CREATE: '/onboarding/client-payment',
+    UPDATE: (id: string) => `/onboarding/client-payment/${id}`,
     PAYMENT_AGEING_REPORT: '/onboarding/client-payment/payment-ageing-report',
   },
   LEADS: {

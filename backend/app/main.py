@@ -4805,6 +4805,77 @@ def create_client_payment(payload: dict, auth: dict = Depends(get_current_user))
         raise HTTPException(400, str(e)[:200])
 
 
+@api_router.put("/onboarding/client-payment/{client_payment_id}")
+def update_client_payment(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
+    """Update core Raised Invoice fields (same as create). Allowed within 30 days of ``timestamp`` and only while unpaid."""
+    try:
+        r0 = (
+            supabase.table("onboarding_client_payment")
+            .select("id,timestamp,payment_received_date")
+            .eq("id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        row0 = (r0.data or [None])[0]
+        if not row0:
+            raise HTTPException(404, "Raised Invoice not found")
+        pr = row0.get("payment_received_date")
+        if pr is not None and str(pr).strip():
+            raise HTTPException(400, "Cannot edit: payment already received for this invoice")
+        ts = row0.get("timestamp")
+        if not ts:
+            raise HTTPException(400, "Missing timestamp on record")
+        try:
+            created = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            if created.tzinfo is None:
+                created = created.replace(tzinfo=timezone.utc)
+        except Exception:
+            raise HTTPException(400, "Invalid timestamp on record")
+        if (datetime.now(timezone.utc) - created).days > 30:
+            raise HTTPException(400, "Edit window expired: company / invoice fields can only be changed within 30 days of creation (Timestamp)")
+
+        company_name = (payload.get("company_name") or "").strip()
+        if not company_name:
+            raise HTTPException(400, "company_name is required")
+        invoice_date = payload.get("invoice_date")
+        invoice_amount = (payload.get("invoice_amount") or "").strip()
+        invoice_number = (payload.get("invoice_number") or "").strip()
+        genre = (payload.get("genre") or "").strip().upper()
+        if invoice_amount and (not invoice_amount.isdigit() or len(invoice_amount) > 11):
+            raise HTTPException(400, "invoice_amount must be digits only, max 11 characters")
+        if invoice_number and len(invoice_number) > 50:
+            raise HTTPException(400, "invoice_number max 50 characters")
+        if genre not in ("M", "Q", "HY", "Y"):
+            raise HTTPException(400, "genre must be one of M, Q, HY, Y")
+
+        patch = {
+            "company_name": company_name,
+            "invoice_date": invoice_date,
+            "invoice_amount": invoice_amount or None,
+            "invoice_number": invoice_number or None,
+            "genre": genre,
+        }
+        # postgrest-py: .update().eq() returns SyncFilterRequestBuilder — no .select(); fetch row after update.
+        supabase.table("onboarding_client_payment").update(patch).eq("id", client_payment_id).execute()
+        r = (
+            supabase.table("onboarding_client_payment")
+            .select(_OCP_LIST_COLUMNS)
+            .eq("id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        updated = (r.data or [None])[0]
+        if not updated:
+            raise HTTPException(400, "Raised Invoice not found after update")
+        _enrich_client_payment_list_items([updated])
+        return updated
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"client payment update: {e}")
+        raise HTTPException(400, str(e)[:200])
+
+
 @api_router.get("/onboarding/client-payment/{client_payment_id}/sent")
 def get_client_payment_sent(client_payment_id: str, auth: dict = Depends(get_current_user)):
     """Get Invoice Sent details for a Raised Invoice. Creates empty shell on first access."""
@@ -9438,6 +9509,55 @@ async def send_checklist_daily_reminders(
     return {"status": "started", "message": "Checklist reminder job started. Check server logs for result."}
 
 
+class SmtpTestBody(BaseModel):
+    """Optional recipient; defaults to SMTP_FROM_EMAIL from env."""
+
+    to: EmailStr | None = None
+
+
+@api_router.post("/smtp/test")
+async def smtp_send_test_email(request: Request, body: SmtpTestBody = SmtpTestBody()):
+    """
+    Send one test message via send_email() (SendGrid API or SMTP).
+    Set SMTP_TEST_SECRET in backend/.env, restart, then send header X-SMTP-Test-Secret with the same value.
+    JSON body optional: {"to": "recipient@example.com"} — else uses SMTP_FROM_EMAIL.
+    """
+    secret = (os.getenv("SMTP_TEST_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(
+            503,
+            "Set SMTP_TEST_SECRET in backend/.env to any random string, restart uvicorn, then send header X-SMTP-Test-Secret with that value.",
+        )
+    hdr = (request.headers.get("X-SMTP-Test-Secret") or request.headers.get("x-smtp-test-secret") or "").strip()
+    if hdr != secret:
+        raise HTTPException(403, "Missing or invalid X-SMTP-Test-Secret header.")
+
+    to = str(body.to).strip() if body.to else (os.getenv("SMTP_FROM_EMAIL") or "").strip()
+    if not to:
+        raise HTTPException(
+            400,
+            'Set SMTP_FROM_EMAIL in .env or POST JSON {"to": "you@example.com"}.',
+        )
+    from app.utils.email import send_email
+
+    ok = await send_email(
+        to_email=to,
+        subject="FMS backend: SMTP test",
+        html_content=(
+            "<html><body><p>This is a <strong>test email</strong> from your IP FMS backend.</p>"
+            "<p>If you received it, SendGrid or SMTP is configured correctly.</p></body></html>"
+        ),
+        plain_fallback="FMS SMTP test: plain text OK means send_email ran.",
+    )
+    if not ok:
+        raise HTTPException(
+            500,
+            "send_email returned false. Check server logs ([email] lines). "
+            "If you use Brevo SMTP only, leave SENDGRID_API_KEY unset.",
+        )
+    return {"ok": True, "to": to, "message": "Test email sent — check inbox and spam."}
+
+
 # ---------- Delegation Daily Reminder (same pattern as Checklist) ----------
 async def _send_delegation_reminder_email(to_email: str, task_titles: list[str], assignee_name: str) -> bool:
     """Send delegation reminder email via utils/email.py. Returns True if sent."""
@@ -9572,7 +9692,7 @@ async def send_delegation_daily_reminders(
 # ---------------------------------------------------------------------------
 
 def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) -> bool:
-    """Send pending digest email. Uses SMTP, Postmark API, or SendGrid. Returns True if sent."""
+    """Send pending digest email via SMTP or SendGrid API. Returns True if sent."""
     subject = "Pending Task Reminder – Checklist, Delegation & Support"
     to_email = (to_email or "").strip()
     if not to_email:
@@ -9594,9 +9714,6 @@ def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) ->
             msg["Subject"] = subject
             msg["From"] = smtp_from
             msg["To"] = to_email
-            smtp_stream = (os.getenv("SMTP_POSTMARK_STREAM") or "").strip()
-            if smtp_stream:
-                msg["X-PM-Message-Stream"] = smtp_stream
             msg.attach(MIMEText(body, "plain"))
             if smtp_port == 465:
                 with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
@@ -9613,40 +9730,11 @@ def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) ->
             _log(f"Pending digest SMTP error: {e}")
             return False
 
-    postmark_token = (os.getenv("POSTMARK_SERVER_TOKEN") or os.getenv("SMTP_USER") or "").strip()
-    postmark_from = (os.getenv("SMTP_FROM_EMAIL") or "").strip()
-    postmark_host = (os.getenv("SMTP_HOST") or "").lower()
-    if postmark_token and postmark_from and ("postmark" in postmark_host or os.getenv("POSTMARK_SERVER_TOKEN")):
-        try:
-            from_val = f"IP Internal Management <{postmark_from}>"
-            stream = (os.getenv("SMTP_POSTMARK_STREAM") or "outbound").strip()
-            resp = httpx.post(
-                "https://api.postmarkapp.com/email",
-                headers={"X-Postmark-Server-Token": postmark_token, "Content-Type": "application/json"},
-                json={
-                    "From": from_val,
-                    "To": to_email,
-                    "Subject": subject,
-                    "TextBody": body,
-                    "MessageStream": stream,
-                },
-                timeout=15.0,
-            )
-            if resp.status_code == 200:
-                data = resp.json() if resp.content else {}
-                if data.get("ErrorCode", 0) == 0:
-                    _log(f"Pending digest sent to {to_email} (Postmark)")
-                    return True
-            _log(f"Postmark API error: {resp.status_code} {resp.text[:200]}")
-        except Exception as e:
-            _log(f"Pending digest Postmark error: {e}")
-        return False
-
     api_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
     from_email = (os.getenv("SENDGRID_FROM_EMAIL") or smtp_from or "").strip()
     from_name = (os.getenv("SENDGRID_FROM_NAME") or "IP Internal Management").strip()
     if not api_key or not from_email:
-        _log("Pending digest: no SMTP, Postmark, or SENDGRID_API_KEY configured, skip send")
+        _log("Pending digest: no SMTP or SENDGRID_API_KEY configured, skip send")
         return False
     try:
         resp = httpx.post(

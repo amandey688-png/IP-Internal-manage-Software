@@ -77,7 +77,7 @@ Because the backend now returns immediately, a **30 second timeout** in cron-job
 - At ~9:11 AM look for:  
   - `Checklist reminder background: sent N for YYYY-MM-DD`  
   - `Pending digest background: sent N for YYYY-MM-DD`  
-- If you see errors (Supabase, Postmark, etc.), the traceback will be there.
+- If you see errors (Supabase, email provider, etc.), the traceback will be there.
 
 ---
 
@@ -86,7 +86,7 @@ Because the backend now returns immediately, a **30 second timeout** in cron-job
 | Check | What to do |
 |-------|------------|
 | 503 on reminder at 9 AM | Ensure a 5‑minute **/health** ping is running (UptimeRobot or second cron-job). |
-| 200 but no emails | Check Render logs for “background: sent 0” or errors; fix recipients / SMTP or Postmark. |
+| 200 but no emails | Check Render logs for “background: sent 0” or errors; fix recipients / SMTP or SendGrid. |
 | 401 on reminder | Cron request must send the same secret as `CHECKLIST_CRON_SECRET` or `PENDING_REMINDER_CRON_SECRET` in Render env. |
 
 ---

@@ -49,10 +49,10 @@ Supabase uses its own SMTP config for **auth emails** (confirmation, reset passw
    - Or: **Project Settings** → **Auth** → **SMTP Settings**
 3. Enable **Custom SMTP** and enter:
 4. Set:
-   - **Host**: `smtp.postmarkapp.com` (or your provider)
+   - **Host**: e.g. `smtp-relay.brevo.com` (or your provider)
    - **Port**: `2525` or `587` or `25`
-   - **Username**: Postmark token (or your provider user)
-   - **Password**: same token
+   - **Username**: from your provider’s SMTP screen
+   - **Password**: SMTP key / password
    - **Sender email**: `noreply@yourdomain.com` or `aman@industryprime.com`
 
 ### Via Supabase Management API
@@ -66,10 +66,10 @@ curl -X PATCH "https://api.supabase.com/v1/projects/$PROJECT_REF/config/auth" \
   -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "smtp_host": "smtp.postmarkapp.com",
+    "smtp_host": "smtp-relay.brevo.com",
     "smtp_port": 2525,
-    "smtp_user": "your-postmark-token",
-    "smtp_pass": "your-postmark-token",
+    "smtp_user": "your-smtp-login",
+    "smtp_pass": "your-smtp-password",
     "smtp_admin_email": "aman@industryprime.com",
     "smtp_sender_name": "IP Internal Management"
   }'
@@ -83,10 +83,10 @@ Use the same SMTP provider and port for both:
 
 | Setting | Supabase Auth SMTP | Backend (Render / .env) |
 |---------|--------------------|-------------------------|
-| Host | smtp.postmarkapp.com | SMTP_HOST=smtp.postmarkapp.com |
+| Host | (your provider) | Same value as `SMTP_HOST` in backend |
 | Port | 2525 (or 587) | SMTP_PORT=2525 |
-| User | Postmark token | SMTP_USER=xxx |
-| Password | Postmark token | SMTP_PASSWORD=xxx |
+| User | SMTP login | SMTP_USER=xxx |
+| Password | SMTP key | SMTP_PASSWORD=xxx |
 | From | aman@industryprime.com | SMTP_FROM_EMAIL=aman@industryprime.com |
 
 ---
@@ -95,10 +95,10 @@ Use the same SMTP provider and port for both:
 
 **Backend env vars:**
 ```
-SMTP_HOST=smtp.postmarkapp.com
+SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=2525
-SMTP_USER=your-token
-SMTP_PASSWORD=your-token
+SMTP_USER=your-smtp-login
+SMTP_PASSWORD=your-smtp-key
 SMTP_FROM_EMAIL=aman@industryprime.com
 ```
 

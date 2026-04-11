@@ -59,7 +59,7 @@ cd "c:\Support FMS to APPLICATION"
 
 # Stage and commit
 git add .
-git commit -m "fix: use Postmark HTTP API in production (SMTP blocked on Render)"
+git commit -m "fix: email via SendGrid API or SMTP in production"
 
 # Pull first (integrate any remote changes)
 git pull origin main

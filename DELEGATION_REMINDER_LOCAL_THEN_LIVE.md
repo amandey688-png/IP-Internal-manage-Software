@@ -27,11 +27,11 @@ SELECT * FROM public.delegation_reminder_sent LIMIT 1;
 In `backend/.env`, add or ensure these exist:
 
 ```env
-# SMTP (same as Checklist) – required for sending
-SMTP_HOST=smtp.postmarkapp.com
+# SMTP (e.g. Brevo) – required for sending
+SMTP_HOST=smtp-relay.brevo.com
 SMTP_PORT=587
-SMTP_USER=your_postmark_server_token
-SMTP_PASSWORD=your_postmark_server_token
+SMTP_USER=your_brevo_smtp_login
+SMTP_PASSWORD=your_brevo_smtp_key
 SMTP_FROM_EMAIL=noreply@yourdomain.com
 
 # Cron secret – used for manual test or cron
