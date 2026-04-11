@@ -28,8 +28,8 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
   const viewApproval = searchParams.get('view') === 'approval'
   const hideAddNew = section === 'completed-chores-bugs' || section === 'completed-feature' || section === 'solutions' || location.pathname === ROUTES.STAGING || location.pathname === ROUTES.CHECKLIST || location.pathname === ROUTES.DELEGATION || viewApproval
 
-  const canViewDashboard = user
-    ? canViewSection('dashboard', user.role as UserRole, user.section_permissions)
+  const canViewDashboardKpi = user
+    ? canViewSection('dashboard_kpi', user.role as UserRole, user.section_permissions)
     : false
 
   useEffect(() => {
@@ -109,7 +109,7 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
         </Space>
       </Space>
       <Space size="middle">
-        {canViewDashboard ? (
+        {canViewDashboardKpi ? (
           <Button
             type="default"
             icon={<DashboardOutlined />}

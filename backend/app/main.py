@@ -8158,7 +8158,7 @@ def _map_role(name: str) -> str:
 # Section keys for user_section_permissions (match frontend PERMISSION_SECTION_KEYS / Edit User matrix).
 # No row in DB => no access. New keys added here are unchecked until a Master Admin grants them.
 SECTION_KEYS = [
-    "dashboard", "support_dashboard", "all_tickets", "chores_bugs", "staging", "feature",
+    "dashboard", "dashboard_kpi", "support_dashboard", "all_tickets", "chores_bugs", "staging", "feature",
     "approval_status", "completed_chores_bugs", "rejected_tickets", "completed_feature",
     "solution", "task", "success_performance", "success_comp_perform",
     "client_to_lead", "leads", "onboarding", "onboarding_payment_status", "client_payment",

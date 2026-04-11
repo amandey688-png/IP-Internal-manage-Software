@@ -1,8 +1,11 @@
 import type { User, UserRole } from '../types/auth'
 import { ROLES, PERMISSION_SECTION_KEYS, ROUTES } from './constants'
 
-export const formatDate = (date: string | Date): string => {
+export const formatDate = (date: string | Date | null | undefined): string => {
+  if (date == null) return '—'
+  if (typeof date === 'string' && date.trim() === '') return '—'
   const d = typeof date === 'string' ? new Date(date) : date
+  if (Number.isNaN(d.getTime())) return '—'
   return new Intl.DateTimeFormat('en-US', {
     year: 'numeric',
     month: 'short',
@@ -373,6 +376,7 @@ export const canAccessUsers = (userRole: UserRole): boolean =>
 /** Default path when opening the first section the user is allowed to view (order matches `PERMISSION_SECTION_KEYS`). */
 export const SECTION_KEY_TO_ROUTE: Record<string, string> = {
   dashboard: ROUTES.DASHBOARD,
+  dashboard_kpi: ROUTES.DASHBOARD_KPI,
   support_dashboard: ROUTES.SUPPORT_DASHBOARD,
   all_tickets: ROUTES.TICKETS,
   chores_bugs: '/tickets?section=chores-bugs',

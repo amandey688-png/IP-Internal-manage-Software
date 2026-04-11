@@ -1,15 +1,6 @@
-import { useState, useEffect, useCallback } from 'react'
-import { Typography, Card, Button, Select, Row, Col, Table, Progress, Tag, Space, message, Modal, Alert } from 'antd'
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
+import { Typography, Card, Button, Select, Row, Col, Table, Progress, Tag, Space, message, Modal, Alert, Spin } from 'antd'
 import { DashboardOutlined, ArrowLeftOutlined, CheckSquareOutlined, SwapOutlined, CustomerServiceOutlined, UnorderedListOutlined } from '@ant-design/icons'
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
 import dayjs from 'dayjs'
 import './dashboard-kpi.css'
 import {
@@ -23,6 +14,8 @@ import {
 } from '../../api/dashboardKpi'
 import { DashboardBlockSkeleton } from '../../components/common/skeletons'
 import { getDefaultPreviousWeekFilter, maxWeekOfMonth, weekOfMonth } from './kpiWeekUtils'
+
+const LazyWeeklyBarChart = lazy(() => import('./DashboardKPIWeeklyBarChart'))
 
 const { Title, Text } = Typography
 
@@ -771,34 +764,15 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
               className="kpi-modal kpi-graph-modal"
             >
               {graphModal && data?.weeklyProgress && (
-                <div style={{ width: '100%', minHeight: 320 }}>
-                  <ResponsiveContainer width="100%" height={320}>
-                    <BarChart
-                      data={(data.weeklyProgress.weeks ?? []).map((weekName, i) => ({
-                        name: weekName,
-                        percentage: graphModal === 'checklist'
-                          ? (data.weeklyProgress!.checklist?.[i] ?? 0)
-                          : graphModal === 'delegation'
-                            ? (data.weeklyProgress!.delegation?.[i] ?? 0)
-                            : graphModal === 'supportFMS'
-                              ? (data.weeklyProgress!.supportFMS?.[i] ?? 0)
-                              : (data.weeklyProgress!.successKpi?.[i] ?? 0),
-                      }))}
-                      margin={{ top: 16, right: 24, left: 0, bottom: 24 }}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                      <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 12 }} unit="%" />
-                      <Tooltip formatter={(value: number) => [`${value}%`, 'Weekly %']} labelFormatter={(label) => `${label}`} />
-                      <Bar
-                        dataKey="percentage"
-                        name="Weekly %"
-                        fill={graphModal === 'checklist' ? '#4A6BFF' : graphModal === 'delegation' ? '#28A745' : graphModal === 'supportFMS' ? '#FFC107' : '#FAAD14'}
-                        radius={[4, 4, 0, 0]}
-                      />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
+                <Suspense
+                  fallback={
+                    <div style={{ width: '100%', minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Spin tip="Loading chart…" />
+                    </div>
+                  }
+                >
+                  <LazyWeeklyBarChart graphModal={graphModal} weeklyProgress={data.weeklyProgress} />
+                </Suspense>
               )}
               {graphModal && (!data?.weeklyProgress || (data.weeklyProgress.weeks?.length ?? 0) === 0) && (
                 <Text type="secondary">No weekly data available for this month.</Text>
