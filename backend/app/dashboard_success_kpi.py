@@ -19,7 +19,7 @@ _WD_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
 def _format_dashboard_week_label(week_start: date, week_end: date) -> str:
-    """Mon/Sat KPI range label (Sunday excluded from KPI grouping logic)."""
+    """Human-readable KPI week label (Monday–Sunday range, capped at month end)."""
     sm, em = _MONTH_ABBR[week_start.month - 1], _MONTH_ABBR[week_end.month - 1]
     return (
         f"{_WD_SHORT[week_start.weekday()]} {week_start.day} {sm} – "
@@ -56,7 +56,7 @@ def _company_key(company_id: Any, company_name: str | None) -> str | None:
 
 
 def _kpi_week_range_in_month(year: int, month_num: int, week_idx: int) -> tuple[date, date] | None:
-    """Month-scoped KPI week range: Monday–Saturday model with week1 at month-start."""
+    """Month-scoped KPI week range: Monday–Sunday (week 1 from month start, capped at month end)."""
     import calendar
 
     if week_idx < 1 or week_idx > 5:
@@ -66,13 +66,13 @@ def _kpi_week_range_in_month(year: int, month_num: int, week_idx: int) -> tuple[
     month_end = date(year, month_num, last)
     if week_idx == 1:
         ws = first if first.weekday() != 6 else (first + timedelta(days=1))
-        we = min(ws + timedelta(days=(5 - ws.weekday()) % 7), month_end)
+        we = min(ws + timedelta(days=(6 - ws.weekday()) % 7), month_end)
         return ws, we
     first_monday = first + timedelta(days=(7 - first.weekday()) % 7)
     ws = first_monday + timedelta(days=(week_idx - 2) * 7)
     if ws.month != month_num:
         return None
-    we = min(ws + timedelta(days=5), month_end)
+    we = min(ws + timedelta(days=6), month_end)
     return ws, we
 
 
@@ -384,7 +384,7 @@ def compute_success_kpi_for_dashboard(
         pct_values = [poc_pct, train_pct, fu_pct, success_pct]
         overall_pct = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
 
-        # Weekly graph: KPI weeks (Mon–Sat, month-scoped; Sunday excluded)
+        # Weekly graph: KPI weeks (Mon–Sun, month-scoped)
         for w in range(1, 6):
             rng = _kpi_week_range_in_month(y, month_num, w)
             if not rng:

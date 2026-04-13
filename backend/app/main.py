@@ -2384,12 +2384,12 @@ def _parse_kpi_week_num(week_str: str | None, default: int = 2) -> int:
 
 
 def _week_of_month(dt: datetime) -> int:
-    """Week of month (1-5), KPI rule: week starts Monday and ends Saturday (Sunday excluded)."""
+    """Week of month (1-5), KPI rule: week starts Monday and ends Sunday (full week)."""
     return _week_of_month_kpi_date(dt.date())
 
 
 def _week_of_month_kpi_date(d: date) -> int:
-    """KPI week number (1-5) for a date in its month: week-1 includes month-start until first Saturday."""
+    """KPI week number (1-5) for a date in its month: week-1 includes month-start until first Sunday."""
     first = date(d.year, d.month, 1)
     first_sat = first + timedelta(days=(5 - first.weekday()) % 7)
     if d <= first_sat:
@@ -2402,7 +2402,7 @@ def _week_of_month_kpi_date(d: date) -> int:
 
 
 def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple[date, date] | None:
-    """Return month-scoped KPI week range (Mon–Sat model, Sunday excluded from grouping logic)."""
+    """Return month-scoped KPI week range (Monday–Sunday, capped at month end)."""
     try:
         import calendar
 
@@ -2414,7 +2414,7 @@ def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple
         if week_num == 1:
             # Week starts Monday; if month opens on Sunday, week 1 starts on Monday 2nd.
             start = first if first.weekday() != 6 else (first + timedelta(days=1))
-            end = start + timedelta(days=(5 - start.weekday()) % 7)  # first Saturday on/after start
+            end = start + timedelta(days=(6 - start.weekday()) % 7)  # first Sunday on/after start
             end = min(end, month_end)
             return start, end
 
@@ -2422,19 +2422,17 @@ def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple
         start = first_monday + timedelta(days=(week_num - 2) * 7)
         if start.month != month_num:
             return None
-        end = min(start + timedelta(days=5), month_end)  # Saturday only
+        end = min(start + timedelta(days=6), month_end)  # through Sunday (7-day span)
         return start, end
     except Exception:
         return None
 
 
 def _date_in_dashboard_kpi_week(d: date | None, year: int, month_num: int, week_num: int) -> bool:
-    """True if date belongs to selected KPI month+week under Mon–Sat logic, ignoring Sunday overlap."""
+    """True if date belongs to selected KPI month+week (Monday–Sunday)."""
     if d is None:
         return False
     if d.year != year or d.month != month_num:
-        return False
-    if d.weekday() == 6:  # Sunday is special: exclude from overlap/grouping
         return False
     return _week_of_month_kpi_date(d) == max(1, min(5, week_num))
 
@@ -3413,7 +3411,7 @@ def dashboard_kpi(
 
 # ---------- Support Dashboard Stats (FMS-style: weekly, pending grouped, top companies, features) ----------
 def _week_of_month(dt: datetime) -> int:
-    """Week of month (1-5), KPI rule: week starts Monday and ends Saturday (Sunday excluded)."""
+    """Week of month (1-5), KPI rule: week starts Monday and ends Sunday (full week)."""
     return _week_of_month_kpi_date(dt.date())
 
 
@@ -3893,7 +3891,7 @@ def _stage2_marked_completed(status_2: str | None) -> bool:
 
 
 def _week_date_range(week_num: int, month: int, year: int) -> str:
-    """Human-readable KPI range (Mon–Sat model, Sunday excluded from grouping)."""
+    """Human-readable KPI range (Monday–Sunday, capped at month end)."""
     rng = _dashboard_kpi_week_range(year, month, f"week {week_num}")
     if not rng:
         return f"Week {week_num}"
