@@ -2,10 +2,8 @@ import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 
 /**
- * KPI week-of-month (1–5), matching backend:
- * - week starts Monday, ends Saturday
- * - week 1 includes month-start up to first Saturday
- * - Sunday is excluded from overlap grouping logic
+ * KPI week-of-month (1–5), matching backend `_week_of_month_kpi_date`:
+ * - calendar ranges for each week are Mon–Sun (see API); week-1 bucketing uses first Saturday + Mon-before-first-Monday rule
  */
 export function weekOfMonth(d: Dayjs): number {
   const first = d.startOf('month')
@@ -25,7 +23,6 @@ export function maxWeekOfMonth(reference: Dayjs): number {
   let maxWeek = 1
   for (let day = 1; day <= end; day += 1) {
     const d = reference.date(day)
-    if (d.day() === 0) continue // Sunday excluded from KPI week grouping
     maxWeek = Math.max(maxWeek, weekOfMonth(d))
   }
   return maxWeek
