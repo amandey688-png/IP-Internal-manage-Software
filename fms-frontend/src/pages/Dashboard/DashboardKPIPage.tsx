@@ -30,6 +30,7 @@ import {
   PlusOutlined,
 } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
+import type { AxiosError } from 'axios'
 import './dashboard-kpi.css'
 import {
   dashboardKpiApi,
@@ -44,6 +45,18 @@ import {
 } from '../../api/dashboardKpi'
 import { DashboardBlockSkeleton } from '../../components/common/skeletons'
 import { getDefaultPreviousWeekFilter, maxWeekOfMonth, weekOfMonth } from './kpiWeekUtils'
+
+function kpiDailyLogErrorDetail(err: unknown, fallback: string): string {
+  const ax = err as AxiosError<{ detail?: string | Array<{ msg?: string }> }>
+  const d = ax.response?.data?.detail
+  if (typeof d === 'string' && d.trim()) return d.trim().slice(0, 500)
+  if (Array.isArray(d) && d.length)
+    return d
+      .map((x) => (typeof x === 'object' && x && 'msg' in x ? String((x as { msg?: string }).msg) : JSON.stringify(x)))
+      .join('; ')
+      .slice(0, 500)
+  return fallback
+}
 
 const LazyWeeklyBarChart = lazy(() => import('./DashboardKPIWeeklyBarChart'))
 const LazyAkashMonthlyBarChart = lazy(() => import('./DashboardKPIAkashMonthlyBarChart'))
@@ -220,8 +233,8 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
       }
       setKpiDailyLogRows(next)
       kpiDailyLogDirtyRef.current = new Set()
-    } catch {
-      message.error('Failed to load KPI daily work log')
+    } catch (e) {
+      message.error(kpiDailyLogErrorDetail(e, 'Failed to load KPI daily work log'))
     } finally {
       setKpiDailyLogLoading(false)
     }
@@ -283,8 +296,8 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
       kpiDailyLogDirtyRef.current.clear()
       message.success('KPI daily log saved')
       loadData()
-    } catch {
-      message.error('Could not save KPI daily log')
+    } catch (e) {
+      message.error(kpiDailyLogErrorDetail(e, 'Could not save KPI daily log'))
       throw new Error('save failed')
     }
   }
