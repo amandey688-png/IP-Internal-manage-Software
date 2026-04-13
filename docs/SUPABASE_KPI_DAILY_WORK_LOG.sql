@@ -1,5 +1,8 @@
 -- KPI daily work log (Akash dashboard manual entry) — run in Supabase SQL editor
 -- Matches spreadsheet: Item cleaning, Video content, AI learning (per day, Mon–Fri style use)
+--
+-- Save failures from the app: ensure the API host has SUPABASE_SERVICE_ROLE_KEY set.
+-- Troubleshooting queries: docs/SUPABASE_KPI_DAILY_WORK_LOG_RLS_DELEGATES.sql
 
 create table if not exists public.kpi_daily_work_log (
   id uuid primary key default gen_random_uuid(),

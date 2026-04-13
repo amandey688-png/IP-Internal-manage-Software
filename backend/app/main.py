@@ -1129,6 +1129,34 @@ class KpiDailyLogUpsertBody(BaseModel):
     process_improved: float | None = None
 
 
+def _kpi_daily_optional_int(name: str, v: float | int | None) -> int | None:
+    """Coerce JSON numbers to int for integer DB columns; reject non-whole values."""
+    if v is None:
+        return None
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"Invalid {name!r}; expected a number")
+    if f != f:  # NaN
+        return None
+    r = round(f)
+    if abs(f - r) > 1e-6:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{name} must be a whole number (got {v})",
+        )
+    return int(r)
+
+
+def _kpi_daily_optional_float(name: str, v: float | int | None) -> float | None:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail=f"Invalid {name!r}; expected a number")
+
+
 _DRAFT_EXPIRY_HOURS = 24
 
 
@@ -3634,17 +3662,21 @@ def get_kpi_daily_log(
         end = date(year, month + 1, 1) - timedelta(days=1)
     start_s = start.isoformat()
     end_s = end.isoformat()
-    r = (
-        supabase.table("kpi_daily_work_log")
-        .select(
-            "work_date, items_cleaned, errors_found, accuracy_pct, videos_created, video_type, ai_tasks_used, process_improved"
+    try:
+        r = (
+            supabase.table("kpi_daily_work_log")
+            .select(
+                "work_date, items_cleaned, errors_found, accuracy_pct, videos_created, video_type, ai_tasks_used, process_improved"
+            )
+            .eq("user_id", owner_id)
+            .gte("work_date", start_s)
+            .lte("work_date", end_s)
+            .order("work_date", desc=False)
+            .execute()
         )
-        .eq("user_id", owner_id)
-        .gte("work_date", start_s)
-        .lte("work_date", end_s)
-        .order("work_date", desc=False)
-        .execute()
-    )
+    except Exception as e:
+        _log(f"get_kpi_daily_log: {e}")
+        raise HTTPException(status_code=502, detail=f"kpi_daily_work_log read failed: {str(e)[:400]}")
     return {"rows": r.data or []}
 
 
@@ -3669,16 +3701,28 @@ def upsert_kpi_daily_log(
     row = {
         "user_id": owner_id,
         "work_date": wd.isoformat(),
-        "items_cleaned": body.items_cleaned,
-        "errors_found": body.errors_found,
-        "accuracy_pct": body.accuracy_pct,
-        "videos_created": body.videos_created,
-        "video_type": body.video_type,
-        "ai_tasks_used": body.ai_tasks_used,
-        "process_improved": body.process_improved,
+        "items_cleaned": _kpi_daily_optional_int("items_cleaned", body.items_cleaned),
+        "errors_found": _kpi_daily_optional_float("errors_found", body.errors_found),
+        "accuracy_pct": _kpi_daily_optional_float("accuracy_pct", body.accuracy_pct),
+        "videos_created": _kpi_daily_optional_int("videos_created", body.videos_created),
+        "video_type": (body.video_type or "").strip() or None,
+        "ai_tasks_used": _kpi_daily_optional_int("ai_tasks_used", body.ai_tasks_used),
+        "process_improved": _kpi_daily_optional_int("process_improved", body.process_improved),
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
-    supabase.table("kpi_daily_work_log").upsert(row, on_conflict="user_id,work_date").execute()
+    try:
+        supabase.table("kpi_daily_work_log").upsert(row, on_conflict="user_id,work_date").execute()
+    except Exception as e:
+        msg = str(e)
+        _log(f"upsert_kpi_daily_log: {msg}")
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"kpi_daily_work_log upsert failed: {msg[:350]}. "
+                "If you see RLS or permission errors, set SUPABASE_SERVICE_ROLE_KEY on the API server "
+                "(Supabase → Settings → API → service_role) and redeploy; see docs/SUPABASE_KPI_DAILY_WORK_LOG_RLS_DELEGATES.sql."
+            ),
+        )
     return {"ok": True, "work_date": wd.isoformat()}
 
 
