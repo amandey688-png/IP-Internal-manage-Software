@@ -5056,7 +5056,7 @@ def _compute_payment_ageing_kpis(pay_rows: list, allowed: frozenset[str] | None)
             continue
         amt = _parse_invoice_amount(row.get("invoice_amount"))
         rec = amt if row.get("payment_received_date") else 0
-        g = (row.get("genre") or "").strip().upper()
+        g = _normalize_client_payment_genre(row.get("genre"))
 
         if q_start <= inv_d <= q_end:
             o_raised += amt
@@ -5104,7 +5104,7 @@ def _payment_ageing_report_payload():
     try:
         pr = (
             supabase.table("onboarding_client_payment")
-            .select("company_name,invoice_amount,invoice_date,timestamp,payment_received_date")
+            .select("company_name,invoice_amount,invoice_date,timestamp,payment_received_date,genre")
             .limit(5000)
             .execute()
         )
@@ -5137,9 +5137,11 @@ def _payment_ageing_report_payload():
                 by_name[nm]["display_name"] = (row.get("company_name") or "").strip()
 
     ageing_by_name: dict[str, dict] = {}
+    ageing_rows_raw: list[dict] = []
     try:
         ar = supabase.table("onboarding_client_payment_ageing").select("*").execute()
-        for a in ar.data or []:
+        ageing_rows_raw = list(ar.data or [])
+        for a in ageing_rows_raw:
             cn = _norm_name_company(a.get("company_name"))
             if not cn:
                 continue
@@ -5160,6 +5162,31 @@ def _payment_ageing_report_payload():
             }
     except Exception as e:
         _log(f"payment ageing load: {e}")
+
+    ageing_by_company_id: dict[str, dict] = {}
+    for a in ageing_rows_raw:
+        cid_a = a.get("company_id")
+        if not cid_a:
+            continue
+        sk = str(cid_a)
+        rn = _pa.normalize_quarter_days(a.get("quarter_days"), _nq)
+        if sk not in ageing_by_company_id:
+            ageing_by_company_id[sk] = dict(a)
+            continue
+        prev = ageing_by_company_id[sk]
+        rp = _pa.normalize_quarter_days(prev.get("quarter_days"), _nq)
+        merged_days = [rn[i] if rn[i] is not None else rp[i] for i in range(_nq)]
+        pick_name = (prev.get("company_name") or "").strip()
+        if len((a.get("company_name") or "").strip()) > len(pick_name):
+            pick_name = (a.get("company_name") or "").strip()
+        ageing_by_company_id[sk] = {**prev, "company_name": pick_name, "quarter_days": merged_days}
+
+    company_norm_keys: list[str] = []
+    for c in companies_rows:
+        nm0 = _norm_name_company((c.get("name") or "").strip())
+        if nm0:
+            company_norm_keys.append(nm0)
+    fuzzy_nm_to_ageing_key = _pa.fuzzy_ageing_assignments(company_norm_keys, ageing_by_name)
 
     summary_upload: list | None = None
     try:
@@ -5183,16 +5210,24 @@ def _payment_ageing_report_payload():
         start_idx = _pa.first_invoiced_quarter_index(qroll, first_d) if first_d else 0
 
         age = ageing_by_name.get(nm)
+        if age is None and company_id:
+            age = ageing_by_company_id.get(str(company_id))
+        if age is None:
+            ak = fuzzy_nm_to_ageing_key.get(nm)
+            if ak:
+                age = ageing_by_name.get(ak)
         raw_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
-        slot_days: list[int | None] = []
+        # Always show stored sheet values in the grid; bucket math uses pre–first-invoice mask only.
+        display_days = list(raw_days)
+        bucket_days: list[int | None] = []
         for i in range(_nq):
             if i < start_idx:
-                slot_days.append(None)
+                bucket_days.append(None)
             else:
-                slot_days.append(raw_days[i])
+                bucket_days.append(raw_days[i])
 
-        med = _pa.median_int(slot_days)
-        last_q = slot_days[-1] if len(slot_days) == _nq else None
+        med = _pa.median_int(bucket_days)
+        last_q = display_days[-1] if len(display_days) == _nq else None
         last_quarter_days = int(last_q) if last_q is not None else 0
 
         out_rows.append(
@@ -5200,10 +5235,11 @@ def _payment_ageing_report_payload():
                 "company_id": company_id,
                 "company_name": display_name,
                 "amount_incl_gst": amount_incl_gst,
-                "quarter_days": slot_days,
+                "quarter_days": display_days,
                 "median_value": med,
                 "last_quarter_days": last_quarter_days,
                 "received_amount": received_amt,
+                "first_invoice_date": first_d.isoformat() if first_d else None,
             }
         )
 
@@ -5245,7 +5281,10 @@ def _payment_ageing_report_payload():
         rec = int(r.get("received_amount") or 0)
         med = int(r.get("median_value") or 0)
         bi = _pa.bucket_for_median_days(med)
-        qdays = _pa.normalize_quarter_days(r.get("quarter_days"), _nq)
+        qfull = _pa.normalize_quarter_days(r.get("quarter_days"), _nq)
+        fd = _pa._parse_date(r.get("first_invoice_date"))
+        si = _pa.first_invoiced_quarter_index(qroll, fd) if fd else 0
+        qdays = [None if i < si else qfull[i] for i in range(_nq)]
         bucket_median_sums[bi] += amt
         bucket_received_sums[bi] += rec
         bucket_fy_q4_to_be[bi] += _pa.weighted_fy_amount(amt, qdays, _pa.FY24_25_Q4_IDX)

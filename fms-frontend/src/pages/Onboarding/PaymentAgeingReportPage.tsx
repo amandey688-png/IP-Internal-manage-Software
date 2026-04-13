@@ -48,6 +48,8 @@ type AgeingRow = {
   median_value: number
   last_quarter_days: number
   received_amount: number
+  /** ISO date; used server-side for bucket weighting (optional on older API). */
+  first_invoice_date?: string | null
 }
 
 export type AgeingSummaryRow = {
