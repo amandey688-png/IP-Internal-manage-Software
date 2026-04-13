@@ -46,6 +46,7 @@ import { DashboardBlockSkeleton } from '../../components/common/skeletons'
 import { getDefaultPreviousWeekFilter, maxWeekOfMonth, weekOfMonth } from './kpiWeekUtils'
 
 const LazyWeeklyBarChart = lazy(() => import('./DashboardKPIWeeklyBarChart'))
+const LazyAkashMonthlyBarChart = lazy(() => import('./DashboardKPIAkashMonthlyBarChart'))
 
 const { Title, Text } = Typography
 
@@ -60,7 +61,11 @@ const DASHBOARD_OPTIONS: { key: DashboardKpiPerson; label: string }[] = [
   { key: 'Shreyasi', label: 'Shreyasi Dashboard' },
   { key: 'Rimpa', label: 'Rimpa Dashboard' },
   { key: 'Akash', label: 'Akash Dashboard' },
+  { key: 'Adrija', label: 'Adrija Dashboard' },
 ]
+
+/** Same Success KPI module as Rimpa (Performance Monitoring aggregates). */
+const usesSuccessKpiSection = (person: DashboardKpiPerson | null) => person === 'Rimpa' || person === 'Adrija'
 
 /** Pastel inner cards for Akash KPI pillars — same classes as Rimpa Success KPI */
 const AKASH_KPI_PILLAR_CARD_CLASS: Record<string, string> = {
@@ -173,7 +178,9 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
         title: string
       }
   >(null)
-  const [graphModal, setGraphModal] = useState<'checklist' | 'delegation' | 'supportFMS' | 'successKpi' | null>(null)
+  const [graphModal, setGraphModal] = useState<
+    'checklist' | 'delegation' | 'supportFMS' | 'successKpi' | 'akashMonthly' | null
+  >(null)
   const [kpiDailyLogOpen, setKpiDailyLogOpen] = useState(false)
   const [kpiDailyLogMonth, setKpiDailyLogMonth] = useState<Dayjs | null>(null)
   /** When false, completed (past) months stay hidden until the user changes the month filter. */
@@ -313,7 +320,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
     else setData(null)
   }, [selectedPerson, loadData])
 
-  // List view: show Shreyasi & Rimpa cards
+  // List view: dashboard chooser cards
   if (!forceOpen && selectedPerson === null) {
     return (
       <div className="dashboard-kpi-page">
@@ -327,7 +334,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                 Dashboard - KPI
               </Title>
               <Text className="dashboard-kpi-subtitle">
-                Track Checklist, Delegation and Support FMS performance across dashboards.
+                Track Checklist, Delegation, Support FMS, and Success KPI across team dashboards.
               </Text>
             </div>
           </div>
@@ -335,7 +342,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
 
         <Row gutter={[24, 24]} className="dashboard-kpi-grid">
           {DASHBOARD_OPTIONS.map((opt) => (
-            <Col key={opt.key} xs={24} sm={24} md={12} lg={8}>
+            <Col key={opt.key} xs={24} sm={12} md={12} lg={6}>
               <Card
                 hoverable
                 onClick={() => setSelectedPerson(opt.key)}
@@ -507,33 +514,36 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                   <Col xs={24} sm={24} md={8}>
                     <Card
                       size="small"
-                      title="KPI overall (weekly)"
-                      className="kpi-summary-card kpi-summary-card--akash-overall"
-                      style={{ borderTop: '3px solid #0d9488', cursor: 'default' }}
+                      title="KPI Monthly"
+                      className="kpi-summary-card kpi-summary-card--akash-overall kpi-summary-card--clickable"
+                      style={{ borderTop: '3px solid #0d9488', cursor: 'pointer' }}
+                      onClick={() => setGraphModal('akashMonthly')}
                     >
                       <Space direction="vertical" align="center">
                         <Progress
                           type="circle"
-                          percent={akashKpi.overall_score_percent ?? 0}
+                          percent={akashKpi.overall_score_monthly_percent ?? akashKpi.overall_score_percent ?? 0}
                           size={80}
                           strokeColor="#0d9488"
                         />
                         <div
                           className="kpi-performance-pill"
-                          style={getPerformanceLevel(akashKpi.overall_score_percent)}
+                          style={getPerformanceLevel(
+                            akashKpi.overall_score_monthly_percent ?? akashKpi.overall_score_percent,
+                          )}
                         >
-                          {getPerformanceLevel(akashKpi.overall_score_percent).label} Performance
+                          {
+                            getPerformanceLevel(
+                              akashKpi.overall_score_monthly_percent ?? akashKpi.overall_score_percent,
+                            ).label
+                          }{' '}
+                          Performance
                         </div>
-                        <Text type="secondary" style={{ fontSize: 12, textAlign: 'center' }}>
-                          {akashKpi.dailyLogWeekApplied
-                            ? 'Includes Item cleaning / Video / AI from your KPI daily work log for the filter week (weights renormalize when categories are blank).'
-                            : 'Same week as your filters: checklist + support chores/bugs (video and AI use daily log when entered).'}
-                        </Text>
                       </Space>
                     </Card>
                   </Col>
                 )}
-                {selectedPerson === 'Rimpa' && data?.successKpi != null && (
+                {usesSuccessKpiSection(selectedPerson) && data?.successKpi != null && (
                 <Col xs={24} sm={24} md={8}>
                   <Card
                     size="small"
@@ -694,22 +704,9 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                       <Tag color="cyan" style={{ marginLeft: 4 }}>
                         {akashKpi.overall_score_percent ?? 0}% weekly overall ({week})
                       </Tag>
-                      <Text type="secondary" style={{ fontSize: 12 }}>
-                        Overall uses your filter week for checklist + support. Customer Support counts below use the
-                        prior KPI week vs your filter (see Support data window).
-                      </Text>
                     </Space>
                   }
                 >
-                  {akashKpi.customerSupport?.meta?.helpNote && (
-                    <Alert
-                      type="info"
-                      showIcon
-                      style={{ marginBottom: 12 }}
-                      message="Support data window"
-                      description={akashKpi.customerSupport.meta.helpNote}
-                    />
-                  )}
                   <Row gutter={[16, 16]}>
                     {akashKpi.pillars.map((pillar) => {
                       const cs = akashKpi.customerSupport
@@ -837,8 +834,8 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
               </Card>
             )}
 
-            {/* Success KPI – Rimpa (Performance Monitoring): monthly % + detail cards */}
-            {selectedPerson === 'Rimpa' && successKpi != null && (
+            {/* Success KPI – Rimpa & Adrija (Performance Monitoring): monthly % + detail cards */}
+            {usesSuccessKpiSection(selectedPerson) && successKpi != null && (
               <Card
                 className="kpi-section-card"
                 title={
@@ -925,7 +922,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
             )}
 
             {/* Detail modal for Success KPI cards */}
-            {successKpi && successModal && selectedPerson === 'Rimpa' && (
+            {successKpi && successModal && usesSuccessKpiSection(selectedPerson) && (
               <Modal
                 title={successModal.title}
                 open={!!successModal}
@@ -1097,14 +1094,34 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
 
             {/* Weekly % graph modal – opened when user clicks a monthly summary card */}
             <Modal
-              title={graphModal ? `Weekly % – ${graphModal === 'checklist' ? 'Checklist' : graphModal === 'delegation' ? 'Delegation' : graphModal === 'supportFMS' ? 'Support FMS' : 'Success KPI'} (${month} ${year})` : ''}
+              title={
+                graphModal === 'akashMonthly'
+                  ? `KPI Monthly – pillar scores (${month} ${year})`
+                  : graphModal
+                    ? `Weekly % – ${graphModal === 'checklist' ? 'Checklist' : graphModal === 'delegation' ? 'Delegation' : graphModal === 'supportFMS' ? 'Support FMS' : 'Success KPI'} (${month} ${year})`
+                    : ''
+              }
               open={!!graphModal}
               onCancel={() => setGraphModal(null)}
               footer={null}
-              width="min(96vw, 640)"
+              width={graphModal === 'akashMonthly' ? 'min(96vw, 720px)' : 'min(96vw, 640)'}
               className="kpi-modal kpi-graph-modal"
             >
-              {graphModal && data?.weeklyProgress && (
+              {graphModal === 'akashMonthly' && akashKpi?.monthly?.pillars && akashKpi.monthly.pillars.length > 0 ? (
+                <Suspense
+                  fallback={
+                    <div style={{ width: '100%', minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <Spin tip="Loading chart…" />
+                    </div>
+                  }
+                >
+                  <LazyAkashMonthlyBarChart pillars={akashKpi.monthly.pillars} month={month} year={year} />
+                </Suspense>
+              ) : null}
+              {graphModal === 'akashMonthly' && (!akashKpi?.monthly?.pillars || akashKpi.monthly.pillars.length === 0) ? (
+                <Text type="secondary">No monthly pillar data available.</Text>
+              ) : null}
+              {graphModal && graphModal !== 'akashMonthly' && data?.weeklyProgress && (
                 <Suspense
                   fallback={
                     <div style={{ width: '100%', minHeight: 320, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1115,7 +1132,9 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                   <LazyWeeklyBarChart graphModal={graphModal} weeklyProgress={data.weeklyProgress} />
                 </Suspense>
               )}
-              {graphModal && (!data?.weeklyProgress || (data.weeklyProgress.weeks?.length ?? 0) === 0) && (
+              {graphModal &&
+                graphModal !== 'akashMonthly' &&
+                (!data?.weeklyProgress || (data.weeklyProgress.weeks?.length ?? 0) === 0) && (
                 <Text type="secondary">No weekly data available for this month.</Text>
               )}
             </Modal>
@@ -1202,20 +1221,6 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
               onOk={() => saveKpiDailyLogChanges()}
               destroyOnClose
             >
-              <Alert
-                type="info"
-                showIcon
-                style={{ marginBottom: 12 }}
-                message="One month at a time"
-                description={
-                  <>
-                    Rows are generated for the full calendar month you select. When you first open this dialog, the
-                    month comes from the dashboard <strong>{month}</strong> <strong>{year}</strong> filters. Past
-                    months stay hidden until you change the <strong>Log month</strong> picker. The Akash KPI week still
-                    uses rows whose dates fall in the selected KPI week.
-                  </>
-                }
-              />
               <Row gutter={[16, 12]} align="middle" style={{ marginBottom: 12 }}>
                 <Col xs={24} sm={12}>
                   <Text strong>Log month</Text>

@@ -1,6 +1,6 @@
 import { apiClient } from './axios'
 
-export const DASHBOARD_KPI_NAMES = ['Shreyasi', 'Rimpa', 'Akash'] as const
+export const DASHBOARD_KPI_NAMES = ['Shreyasi', 'Rimpa', 'Akash', 'Adrija'] as const
 export type DashboardKpiPerson = (typeof DASHBOARD_KPI_NAMES)[number]
 
 export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
@@ -129,13 +129,24 @@ export interface AkashCustomerSupportBlock {
   detailsPending?: SupportFmsDelayItem[]
 }
 
+export interface AkashKpiMonthlySummary {
+  overall_score_percent: number
+  pillars: AkashKpiPillar[]
+  /** True when daily work log had rows in the selected calendar month */
+  dailyLogMonthApplied?: boolean
+}
+
 export interface AkashKpiResponse {
   weights_raw: Record<string, number>
   weights_normalized_100: Record<string, number>
   weight_sum_raw: number
   overall_score_percent: number
+  /** Blended headline % for the full selected calendar month (same weights as weekly) */
+  overall_score_monthly_percent?: number
   pillars: AkashKpiPillar[]
   customerSupport?: AkashCustomerSupportBlock
+  /** Pillar-level % for the month; used by KPI Monthly drill-down chart */
+  monthly?: AkashKpiMonthlySummary
   /** True when item/video/AI weekly aggregates used the KPI daily work log for the filter week */
   dailyLogWeekApplied?: boolean
   /** Only for akash@ / aman@ — show Add KPI (daily log editor) */
