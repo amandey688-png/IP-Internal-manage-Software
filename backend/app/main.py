@@ -5501,6 +5501,18 @@ def _payment_ageing_report_payload():
         seen.add(nm)
         build_row(None, agg.get("display_name") or nm, nm)
 
+    # Ageing-sheet rows only: show allowed companies present in onboarding_client_payment_ageing
+    # even when missing from companies master and with no onboarding_client_payment invoices yet.
+    allowed_keys = _pa.PAYMENT_AGEING_ALLOWED_COMPANY_KEYS
+    if allowed_keys:
+        for nm, age_row in ageing_by_name.items():
+            if nm in seen:
+                continue
+            if nm not in allowed_keys:
+                continue
+            seen.add(nm)
+            build_row(None, (age_row.get("company_name") or "").strip() or nm, nm)
+
     out_rows = _dedupe_ageing_display_rows(out_rows, _nq)
     out_rows.sort(key=lambda r: (r.get("company_name") or "").lower())
 

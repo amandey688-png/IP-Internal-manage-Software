@@ -377,7 +377,7 @@ export function PaymentAgeingReportPage() {
         <Card size="small">
           <TableWithSkeletonLoading loading={loading} columns={12} rows={14}>
             <Table<AgeingRow>
-              rowKey={(r) => r.company_id || r.company_name}
+              rowKey={(r) => `${r.company_id ?? ''}::${r.company_name || ''}`}
               loading={false}
               columns={columns}
               dataSource={data?.rows || []}

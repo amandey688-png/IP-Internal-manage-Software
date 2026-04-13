@@ -18,6 +18,8 @@ def normalize_company_name(s: str | None) -> str:
     t = re.sub(r"[.,]", " ", t)
     t = re.sub(r"[&+]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
+    # "BR Refinery" vs "B R Refinery" when the sheet has no space after B
+    t = re.sub(r"\bbr\s+refinery\b", "b r refinery", t)
     t = re.sub(r"\bprivate limited\b", "pvt ltd", t)
     t = re.sub(r"\bprivate ltd\b", "pvt ltd", t)
     t = re.sub(r"\blimited\b", "ltd", t)
@@ -134,7 +136,6 @@ PAYMENT_AGEING_ALLOWED_COMPANY_NAMES: tuple[str, ...] = (
     "Shilphy Steels Pvt. Ltd.",
     "Coffers Metallics Pvt. Ltd.",
     "Bihar Foundry & Casting Limited",
-    "B R Refinery LLP",
     # Legacy aliases (same orgs; names in DB may differ slightly)
     "GM Iron & Steel Company Limited Badampahar",
     "Dadiji Steels Manufacture & Trade Pvt Ltd",
