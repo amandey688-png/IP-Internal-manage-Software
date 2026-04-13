@@ -215,6 +215,8 @@ export function PaymentAgeingReportPage() {
       })
     })
 
+    const latestQuarterLabel = data.quarter_labels[data.quarter_labels.length - 1] || 'Current quarter'
+
     base.push(
       {
         title: 'Median value',
@@ -226,7 +228,7 @@ export function PaymentAgeingReportPage() {
         onFilter: (value, record) => String(record.median_value) === value,
       },
       {
-        title: 'Last Q days',
+        title: `${latestQuarterLabel} (Days)`,
         dataIndex: 'last_quarter_days',
         key: 'last_quarter_days',
         width: 100,

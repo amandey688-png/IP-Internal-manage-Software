@@ -1157,6 +1157,20 @@ def _kpi_daily_optional_float(name: str, v: float | int | None) -> float | None:
         raise HTTPException(status_code=400, detail=f"Invalid {name!r}; expected a number")
 
 
+class AdrijaSocialKpiDayRowIn(BaseModel):
+    work_date: str
+    post: int = 0
+    reel: int = 0
+    linkedin: int = 0
+    post_task_name: str | None = None
+    reel_task_name: str | None = None
+    linkedin_task_name: str | None = None
+
+
+class AdrijaSocialKpiDayBatchBody(BaseModel):
+    rows: list[AdrijaSocialKpiDayRowIn]
+
+
 _DRAFT_EXPIRY_HOURS = 24
 
 
@@ -2494,8 +2508,48 @@ def _dashboard_kpi_is_akash(name: str | None) -> bool:
 
 
 def _dashboard_kpi_has_success_kpi(name: str | None) -> bool:
-    """Rimpa & Adrija dashboards use the same Success / Performance Monitoring KPI module (global counts)."""
-    return (name or "").strip().lower() in ("rimpa", "adrija")
+    """Rimpa dashboard: Success / Performance Monitoring KPI module (global counts)."""
+    return (name or "").strip().lower() == "rimpa"
+
+
+_ADRIJA_SOCIAL_KPI_EDITOR_EMAILS = frozenset({"adrija@industryprime.com", "aman@industryprime.com"})
+
+
+def _adrija_social_kpi_editor(email: str | None) -> bool:
+    return (email or "").strip().lower() in _ADRIJA_SOCIAL_KPI_EDITOR_EMAILS
+
+
+def _adrija_social_kpi_bit(v: int) -> int:
+    return 1 if int(v) != 0 else 0
+
+
+def _fetch_adrija_social_kpi_day_map(d_start: date, d_end: date) -> dict[date, dict]:
+    """work_date -> {post,reel,linkedin,post_task_name,reel_task_name,linkedin_task_name}."""
+    out: dict[date, dict] = {}
+    try:
+        sr = (
+            supabase.table("onboarding_adrija_social_kpi_day")
+            .select("work_date,post,reel,linkedin,post_task_name,reel_task_name,linkedin_task_name")
+            .gte("work_date", d_start.isoformat())
+            .lte("work_date", d_end.isoformat())
+            .execute()
+        )
+        for r in sr.data or []:
+            raw = r.get("work_date")
+            if not raw:
+                continue
+            wd = date.fromisoformat(str(raw)[:10])
+            out[wd] = {
+                "post": _adrija_social_kpi_bit(r.get("post")),
+                "reel": _adrija_social_kpi_bit(r.get("reel")),
+                "linkedin": _adrija_social_kpi_bit(r.get("linkedin")),
+                "post_task_name": (r.get("post_task_name") or "").strip(),
+                "reel_task_name": (r.get("reel_task_name") or "").strip(),
+                "linkedin_task_name": (r.get("linkedin_task_name") or "").strip(),
+            }
+    except Exception as e:
+        _log(f"_fetch_adrija_social_kpi_day_map: {e}")
+    return out
 
 
 def _akash_customer_support_data_week(sel_week: int, year: int, month_num: int) -> tuple[int, int, int]:
@@ -2865,6 +2919,8 @@ def dashboard_kpi(
         _, last_day = calendar.monthrange(y, month_num)
         month_start = date(y, month_num, 1)
         month_end = date(y, month_num, last_day)
+
+        adrija_social_kpi = None
 
         holidays_yr = _get_holidays_for_year(y)
         is_holiday = lambda d, h=holidays_yr: d in h
@@ -3378,6 +3434,66 @@ def dashboard_kpi(
         if is_akash:
             support_fms_monthly_pct = 0
 
+        if (name or "").strip().lower() == "adrija":
+            from app.dashboard_success_kpi import _format_dashboard_week_label
+
+            lo = min(month_start, range_start)
+            hi = max(month_end, range_end)
+            day_map = _fetch_adrija_social_kpi_day_map(lo, hi)
+
+            post_w = reel_w = li_w = 0
+            d = range_start
+            while d <= range_end:
+                prl = day_map.get(d, {})
+                post_w |= int(prl.get("post", 0))
+                reel_w |= int(prl.get("reel", 0))
+                li_w |= int(prl.get("linkedin", 0))
+                d += timedelta(days=1)
+
+            days_in_month = (month_end - month_start).days + 1
+            month_num_total = 0
+            d = month_start
+            post_dates: list[str] = []
+            reel_dates: list[str] = []
+            linkedin_dates: list[str] = []
+            post_details: list[dict] = []
+            reel_details: list[dict] = []
+            linkedin_details: list[dict] = []
+            while d <= month_end:
+                prl = day_map.get(d, {})
+                pv = int(prl.get("post", 0))
+                rv = int(prl.get("reel", 0))
+                lv = int(prl.get("linkedin", 0))
+                month_num_total += pv + rv + lv
+                if pv:
+                    post_dates.append(d.isoformat())
+                    post_details.append({"date": d.isoformat(), "taskName": prl.get("post_task_name") or "—"})
+                if rv:
+                    reel_dates.append(d.isoformat())
+                    reel_details.append({"date": d.isoformat(), "taskName": prl.get("reel_task_name") or "—"})
+                if lv:
+                    linkedin_dates.append(d.isoformat())
+                    linkedin_details.append({"date": d.isoformat(), "taskName": prl.get("linkedin_task_name") or "—"})
+                d += timedelta(days=1)
+            monthly_pct = round(100 * month_num_total / (3 * days_in_month)) if days_in_month else 0
+
+            adrija_social_kpi = {
+                "weekStart": range_start.isoformat(),
+                "weekEnd": range_end.isoformat(),
+                "weekLabel": _format_dashboard_week_label(range_start, range_end),
+                "postWeek": post_w,
+                "reelWeek": reel_w,
+                "linkedinWeek": li_w,
+                "monthlyPercent": monthly_pct,
+                "postCompletionDates": post_dates,
+                "reelCompletionDates": reel_dates,
+                "linkedinCompletionDates": linkedin_dates,
+                "postCompletionDetails": post_details,
+                "reelCompletionDetails": reel_details,
+                "linkedinCompletionDetails": linkedin_details,
+                "editor": _adrija_social_kpi_editor(auth.get("email")),
+            }
+
         applied = {"name": name, "month": month, "year": year, "week": week}
         return {
             "success": True,
@@ -3419,6 +3535,7 @@ def dashboard_kpi(
             },
             "successKpi": success_kpi,
             "akashKpi": akash_kpi,
+            "adrijaSocialKpi": adrija_social_kpi,
             "monthlyPercentages": {
                 "checklist": checklist_monthly_pct,
                 "delegation": delegation_monthly_pct,
@@ -3724,6 +3841,99 @@ def upsert_kpi_daily_log(
             ),
         )
     return {"ok": True, "work_date": wd.isoformat()}
+
+
+@api_router.get("/dashboard/adrija-social-kpi-daily")
+def get_adrija_social_kpi_daily(
+    year: int = Query(..., description="Calendar year"),
+    month: int = Query(..., ge=1, le=12, description="Month 1–12"),
+    auth: dict = Depends(get_current_user),
+):
+    """Adrija social KPI: all calendar days in a month with Post/Reel/LinkedIn flags."""
+    _ = auth
+    try:
+        import calendar
+
+        _, last = calendar.monthrange(year, month)
+        m_start = date(year, month, 1)
+        m_end = date(year, month, last)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid year/month")
+    day_map = _fetch_adrija_social_kpi_day_map(m_start, m_end)
+    rows: list[dict] = []
+    d = m_start
+    while d <= m_end:
+        prl = day_map.get(d, {})
+        rows.append(
+            {
+                "work_date": d.isoformat(),
+                "dayName": d.strftime("%A"),
+                "post": int(prl.get("post", 0)),
+                "reel": int(prl.get("reel", 0)),
+                "linkedin": int(prl.get("linkedin", 0)),
+                "post_task_name": prl.get("post_task_name") or "",
+                "reel_task_name": prl.get("reel_task_name") or "",
+                "linkedin_task_name": prl.get("linkedin_task_name") or "",
+            }
+        )
+        d += timedelta(days=1)
+    return {"rows": rows}
+
+
+@api_router.put("/dashboard/adrija-social-kpi-daily")
+def put_adrija_social_kpi_daily(body: AdrijaSocialKpiDayBatchBody, auth: dict = Depends(get_current_user)):
+    """Upsert Adrija social KPI day rows. Editors: adrija@ & aman@ only."""
+    if not _adrija_social_kpi_editor(auth.get("email")):
+        raise HTTPException(status_code=403, detail="Not allowed")
+    if not body.rows:
+        return {"ok": True, "saved": 0}
+    if len(body.rows) > 40:
+        raise HTTPException(status_code=400, detail="Too many rows in one batch")
+    batch: list[dict] = []
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    def _task_name_or_none(v: str | None) -> str | None:
+        s = (v or "").strip()
+        return s[:200] if s else None
+
+    for row in body.rows:
+        try:
+            wd = date.fromisoformat((row.work_date or "").strip()[:10])
+        except Exception:
+            raise HTTPException(status_code=400, detail=f"Invalid work_date: {row.work_date!r}")
+        p = _adrija_social_kpi_bit(row.post)
+        r = _adrija_social_kpi_bit(row.reel)
+        l = _adrija_social_kpi_bit(row.linkedin)
+        p_name = _task_name_or_none(row.post_task_name)
+        r_name = _task_name_or_none(row.reel_task_name)
+        l_name = _task_name_or_none(row.linkedin_task_name)
+        if p and not p_name:
+            raise HTTPException(status_code=400, detail=f"post_task_name required when Post is checked ({wd.isoformat()})")
+        if r and not r_name:
+            raise HTTPException(status_code=400, detail=f"reel_task_name required when Reel is checked ({wd.isoformat()})")
+        if l and not l_name:
+            raise HTTPException(status_code=400, detail=f"linkedin_task_name required when LinkedIn is checked ({wd.isoformat()})")
+        batch.append(
+            {
+                "work_date": wd.isoformat(),
+                "post": p,
+                "reel": r,
+                "linkedin": l,
+                "post_task_name": p_name,
+                "reel_task_name": r_name,
+                "linkedin_task_name": l_name,
+                "updated_at": now_iso,
+            }
+        )
+    try:
+        supabase.table("onboarding_adrija_social_kpi_day").upsert(batch, on_conflict="work_date").execute()
+    except Exception as e:
+        _log(f"put_adrija_social_kpi_daily: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=str(e)[:400],
+        )
+    return {"ok": True, "saved": len(batch)}
 
 
 @api_router.get("/support-dashboard/stats")
@@ -4915,7 +5125,7 @@ def _dedupe_ageing_display_rows(rows: list[dict], nq: int) -> list[dict]:
             best = max(grp, key=lambda x: int(x.get("amount_incl_gst") or 0))
             name = (best.get("company_name") or "").strip()
             cid = best.get("company_id")
-        med = _pa.median_int(qd)
+        med = _pa.average_int(qd)
         last_q = qd[-1] if len(qd) == nq else None
         out.append(
             {
@@ -5114,6 +5324,8 @@ def _payment_ageing_report_payload():
 
     # Aggregate by normalized company name
     by_name: dict[str, dict] = {}
+    current_fy, current_q = _pa.fy_quarter_key(date.today())
+    current_quarter_days_by_name: dict[str, list[int]] = {}
     for row in pay_rows:
         nm = _norm_name_company(row.get("company_name"))
         if not nm:
@@ -5135,6 +5347,12 @@ def _payment_ageing_report_payload():
             if fd is None or inv_d < fd:
                 by_name[nm]["first_date"] = inv_d
                 by_name[nm]["display_name"] = (row.get("company_name") or "").strip()
+        # Auto-compute latest ongoing quarter days: payment_received_date - invoice_date (per company).
+        pay_d = _pa._parse_date(row.get("payment_received_date"))
+        if inv_d and pay_d and pay_d >= inv_d:
+            fy0, q0 = _pa.fy_quarter_key(pay_d)
+            if fy0 == current_fy and q0 == current_q:
+                current_quarter_days_by_name.setdefault(nm, []).append((pay_d - inv_d).days)
 
     ageing_by_name: dict[str, dict] = {}
     ageing_rows_raw: list[dict] = []
@@ -5200,6 +5418,8 @@ def _payment_ageing_report_payload():
     # Build row list: one per company, plus orphan invoice names
     seen: set[str] = set()
     out_rows: list[dict] = []
+    auto_updates: list[dict] = []
+    current_quarter_idx = len(qroll) - 1 if qroll else -1
 
     def build_row(company_id: str | None, name: str, nm: str):
         agg = by_name.get(nm, {})
@@ -5219,6 +5439,28 @@ def _payment_ageing_report_payload():
         raw_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
         # Always show stored sheet values in the grid; bucket math uses pre–first-invoice mask only.
         display_days = list(raw_days)
+        computed_days = current_quarter_days_by_name.get(nm) or []
+        if current_quarter_idx >= 0 and computed_days:
+            auto_day = _pa.median_int(computed_days)
+            if current_quarter_idx < len(display_days):
+                display_days[current_quarter_idx] = auto_day
+            if current_quarter_idx < len(raw_days):
+                raw_days[current_quarter_idx] = auto_day
+            # Keep DB row synced so current quarter value is persisted.
+            prev_val = None
+            if age and isinstance(age, dict):
+                prev_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
+                if current_quarter_idx < len(prev_days):
+                    prev_val = prev_days[current_quarter_idx]
+            if prev_val != auto_day:
+                auto_updates.append(
+                    {
+                        "company_id": company_id,
+                        "company_name": name or display_name,
+                        "quarter_days": raw_days,
+                        "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    }
+                )
         bucket_days: list[int | None] = []
         for i in range(_nq):
             if i < start_idx:
@@ -5226,7 +5468,7 @@ def _payment_ageing_report_payload():
             else:
                 bucket_days.append(raw_days[i])
 
-        med = _pa.median_int(bucket_days)
+        med = _pa.average_int(display_days)
         last_q = display_days[-1] if len(display_days) == _nq else None
         last_quarter_days = int(last_q) if last_q is not None else 0
 
@@ -5261,6 +5503,12 @@ def _payment_ageing_report_payload():
 
     out_rows = _dedupe_ageing_display_rows(out_rows, _nq)
     out_rows.sort(key=lambda r: (r.get("company_name") or "").lower())
+
+    if auto_updates:
+        try:
+            supabase.table("onboarding_client_payment_ageing").upsert(auto_updates, on_conflict="company_name").execute()
+        except Exception as e:
+            _log(f"payment ageing auto current-quarter sync: {e}")
 
     # Only companies in the quarter's allowed client list (matched after normalize_company_name)
     allowed = _pa.PAYMENT_AGEING_ALLOWED_COMPANY_KEYS
