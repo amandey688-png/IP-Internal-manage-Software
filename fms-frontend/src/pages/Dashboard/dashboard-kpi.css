@@ -129,6 +129,14 @@
   color: #f97316;
 }
 
+.kpi-card--adrija {
+  background: linear-gradient(135deg, #fae8ff 0%, #ede9fe 45%, #faf5ff 100%);
+}
+
+.kpi-card--adrija .kpi-card-icon {
+  color: #9333ea;
+}
+
 .kpi-card-footer {
   margin-top: 16px;
   display: flex;

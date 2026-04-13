@@ -2467,6 +2467,11 @@ def _dashboard_kpi_is_akash(name: str | None) -> bool:
     return "akash" in (name or "").strip().lower()
 
 
+def _dashboard_kpi_has_success_kpi(name: str | None) -> bool:
+    """Rimpa & Adrija dashboards use the same Success / Performance Monitoring KPI module (global counts)."""
+    return (name or "").strip().lower() in ("rimpa", "adrija")
+
+
 def _akash_customer_support_data_week(sel_week: int, year: int, month_num: int) -> tuple[int, int, int]:
     """Support-style week **before** the selected KPI week (e.g. Week 2 selected → use Week 1 in same month)."""
     if sel_week > 1:
@@ -2796,7 +2801,7 @@ def _build_akash_kpi_payload(
 
 @api_router.get("/dashboard/kpi")
 def dashboard_kpi(
-    name: str = Query(..., description="Person name: Shreyasi, Rimpa, etc."),
+    name: str = Query(..., description="Person name: Shreyasi, Rimpa, Akash, Adrija, etc."),
     month: str = Query("Feb", description="Month: Jan..Dec"),
     year: str = Query("2026", description="Year"),
     week: str = Query("week 2", description="Week: week 1..week 5"),
@@ -3068,7 +3073,7 @@ def dashboard_kpi(
         success_kpi = None
         weekly_success_pct: list[float] = []
         try:
-            if (name or "").strip().lower() == "rimpa":
+            if _dashboard_kpi_has_success_kpi(name):
                 success_kpi, weekly_success_pct = compute_success_kpi_for_dashboard(
                     range_start, range_end, y, month_num
                 )
@@ -3092,7 +3097,7 @@ def dashboard_kpi(
             "beforePercentages": [],
             "afterPercentages": [],
         }
-        if (name or "").strip().lower() == "rimpa" and success_kpi is None:
+        if _dashboard_kpi_has_success_kpi(name) and success_kpi is None:
             success_kpi = {
                 "pocCollected": {"currentValue": 0, "targetValue": 16, "percentage": "0/16", "details": _empty_details},
                 "weeklyTrainingTarget": {"currentValue": 0, "targetValue": 1, "percentage": "0/1", "details": _empty_details},
@@ -3284,6 +3289,62 @@ def dashboard_kpi(
                 customer_support_bundle,
                 daily_agg,
             )
+            # Full-calendar-month headline + pillar % (same weight blend as weekly; CS = all chores/bugs with arrival in month)
+            daily_rows_month: list = []
+            try:
+                qm = (
+                    supabase.table("kpi_daily_work_log")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .gte("work_date", month_start.isoformat())
+                    .lte("work_date", month_end.isoformat())
+                )
+                daily_rows_month = (qm.execute().data or [])
+            except Exception as e:
+                _log(f"dashboard/kpi kpi_daily_work_log month: {e}")
+                daily_rows_month = []
+            daily_agg_month = _aggregate_kpi_daily_log_for_week(daily_rows_month, month_start, month_end)
+            month_support_slice: list = []
+            for t in ak_tickets:
+                da = _parse_iso_to_date(t.get("query_arrival_at") or t.get("created_at"))
+                if da and month_start <= da <= month_end:
+                    month_support_slice.append(t)
+            total_m = len(month_support_slice)
+            pending_m = sum(
+                1
+                for t in month_support_slice
+                if _is_pending(t.get("status") or "") and not _is_resolved(t.get("status"), t.get("status_4"))
+            )
+            cs_monthly = round(((total_m - pending_m) / total_m) * 100) if total_m else 0
+            month_cs_bundle = {
+                "score_percent": cs_monthly,
+                "score_percent_filter_week": cs_monthly,
+                "total_issues": total_m,
+                "response_delay_count": 0,
+                "completion_delay_count": 0,
+                "pending_count": pending_m,
+                "response_time_display": "—",
+                "meta": {
+                    "dataRangeLabel": f"{month_start.isoformat()} – {month_end.isoformat()}",
+                    "helpNote": "Monthly support % = chores & bugs with query arrival (or created) in this calendar month.",
+                },
+                "details_response_delay": [],
+                "details_completion_delay": [],
+                "details_pending": [],
+            }
+            akash_monthly = _build_akash_kpi_payload(
+                checklist_monthly_pct,
+                0,
+                0,
+                month_cs_bundle,
+                daily_agg_month,
+            )
+            akash_kpi["overall_score_monthly_percent"] = akash_monthly["overall_score_percent"]
+            akash_kpi["monthly"] = {
+                "overall_score_percent": akash_monthly["overall_score_percent"],
+                "pillars": akash_monthly["pillars"],
+                "dailyLogMonthApplied": bool(daily_agg_month.get("has_rows")),
+            }
             akash_kpi["kpiDailyLogEditor"] = _kpi_daily_log_email_allowed(auth.get("email"))
         support_fms_monthly_pct = round(
             ((target_pending - pending_count) / target_pending * 100) if target_pending else 0
