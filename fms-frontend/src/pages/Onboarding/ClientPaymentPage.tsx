@@ -1008,7 +1008,12 @@ export function ClientPaymentPage() {
           disabled={!sentEditable}
           onFinish={handleSentSubmit}
         >
-          <Form.Item name="email_sent" label="Email Sent" initialValue={false}>
+          <Form.Item
+            name="email_sent"
+            label="Email Sent"
+            initialValue={false}
+            rules={[{ required: true, message: 'Please select Email Sent' }]}
+          >
             <Select
               options={[
                 { label: 'No', value: false },
@@ -1023,11 +1028,12 @@ export function ClientPaymentPage() {
                   name="email"
                   label="Email"
                   rules={[
-                    { required: true, message: 'Email is required' },
                     {
                       validator(_, value) {
+                        const t = String(value || '').trim()
+                        if (!t) return Promise.resolve()
                         const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-                        if (!re.test(String(value || '').trim())) return Promise.reject(new Error('Enter a valid email'))
+                        if (!re.test(t)) return Promise.reject(new Error('Enter a valid email'))
                         return Promise.resolve()
                       },
                     },
@@ -1039,7 +1045,12 @@ export function ClientPaymentPage() {
             }
           </Form.Item>
 
-          <Form.Item name="courier_sent" label="Courier Sent" initialValue={false}>
+          <Form.Item
+            name="courier_sent"
+            label="Courier Sent"
+            initialValue={false}
+            rules={[{ required: true, message: 'Please select Courier Sent' }]}
+          >
             <Select
               options={[
                 { label: 'No', value: false },
@@ -1054,10 +1065,11 @@ export function ClientPaymentPage() {
                   name="tracking_details"
                   label="Tracking details"
                   rules={[
-                    { required: true, message: 'Tracking details required' },
                     {
                       validator(_, value) {
-                        if (!/^[0-9A-Za-z-]+$/.test(String(value || '').trim())) {
+                        const t = String(value || '').trim()
+                        if (!t) return Promise.resolve()
+                        if (!/^[0-9A-Za-z-]+$/.test(t)) {
                           return Promise.reject(new Error('Use only numbers/letters/-'))
                         }
                         return Promise.resolve()
@@ -1071,7 +1083,12 @@ export function ClientPaymentPage() {
             }
           </Form.Item>
 
-          <Form.Item name="whatsapp_sent" label="WhatsApp Sent" initialValue={false}>
+          <Form.Item
+            name="whatsapp_sent"
+            label="WhatsApp Sent"
+            initialValue={false}
+            rules={[{ required: true, message: 'Please select WhatsApp Sent' }]}
+          >
             <Select
               options={[
                 { label: 'No', value: false },
@@ -1086,10 +1103,10 @@ export function ClientPaymentPage() {
                   name="whatsapp_number"
                   label="WhatsApp Number"
                   rules={[
-                    { required: true, message: 'WhatsApp Number is required' },
                     {
                       validator(_, value) {
                         const s = String(value || '').trim()
+                        if (!s) return Promise.resolve()
                         if (!/^\d{10}$/.test(s)) return Promise.reject(new Error('Must be exactly 10 digits'))
                         return Promise.resolve()
                       },

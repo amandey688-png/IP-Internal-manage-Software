@@ -5888,13 +5888,13 @@ def save_client_payment_sent(client_payment_id: str, payload: dict, auth: dict =
     whatsapp_number = (data.get("whatsapp_number") or "").strip() or None
     invoice_number = (data.get("invoice_number") or "").strip() or None
 
-    # Basic validations
-    if email_sent and not email:
-        raise HTTPException(400, "Email is required when Email Sent is Yes")
-    if courier_sent and not tracking:
-        raise HTTPException(400, "Tracking details are required when Courier Sent is Yes")
-    if whatsapp_sent and (not whatsapp_number or not whatsapp_number.isdigit() or len(whatsapp_number) != 10):
-        raise HTTPException(400, "WhatsApp Number must be 10 digits when WhatsApp Sent is Yes")
+    # Basic validations (detail fields optional even when Sent = Yes)
+    if email and not re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email):
+        raise HTTPException(400, "Enter a valid email")
+    if tracking and not re.match(r"^[0-9A-Za-z-]+$", tracking):
+        raise HTTPException(400, "Tracking details: use only numbers, letters, and hyphen")
+    if whatsapp_number and (not whatsapp_number.isdigit() or len(whatsapp_number) != 10):
+        raise HTTPException(400, "WhatsApp Number must be exactly 10 digits when provided")
     if invoice_number and len(invoice_number) > 50:
         raise HTTPException(400, "Invoice Number max 50 characters")
 
