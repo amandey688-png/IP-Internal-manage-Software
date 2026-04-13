@@ -165,6 +165,35 @@ export interface KpiDailyLogApiRow {
   process_improved?: number | null
 }
 
+export interface AdrijaSocialKpiPayload {
+  weekStart: string
+  weekEnd: string
+  weekLabel: string
+  postWeek: number
+  reelWeek: number
+  linkedinWeek: number
+  /** 0–100: share of day-slots filled in the selected calendar month (3 flags × each day). */
+  monthlyPercent?: number
+  postCompletionDates?: string[]
+  reelCompletionDates?: string[]
+  linkedinCompletionDates?: string[]
+  postCompletionDetails?: Array<{ date: string; taskName: string }>
+  reelCompletionDetails?: Array<{ date: string; taskName: string }>
+  linkedinCompletionDetails?: Array<{ date: string; taskName: string }>
+  editor: boolean
+}
+
+export interface AdrijaSocialKpiDailyRow {
+  work_date: string
+  dayName: string
+  post: number
+  reel: number
+  linkedin: number
+  post_task_name?: string
+  reel_task_name?: string
+  linkedin_task_name?: string
+}
+
 export interface SuccessKpiResponse {
   pocCollected: SuccessKpiSection
   weeklyTrainingTarget: SuccessKpiSection
@@ -203,6 +232,7 @@ export interface DashboardKpiResponse {
   }
   successKpi?: SuccessKpiResponse
   akashKpi?: AkashKpiResponse | null
+  adrijaSocialKpi?: AdrijaSocialKpiPayload | null
   monthlyPercentages?: {
     checklist: number
     delegation: number
@@ -239,4 +269,21 @@ export const dashboardKpiApi = {
 
   putKpiDailyLog: (body: KpiDailyLogApiRow) =>
     apiClient.put<{ ok: boolean; work_date: string }>('/dashboard/kpi-daily-log', body).then((r) => r.data),
+
+  getAdrijaSocialKpiDaily: (year: number, month: number) =>
+    apiClient
+      .get<{ rows: AdrijaSocialKpiDailyRow[] }>('/dashboard/adrija-social-kpi-daily', {
+        params: { year, month },
+      })
+      .then((r) => r.data),
+
+  putAdrijaSocialKpiDaily: (
+    rows: Pick<
+      AdrijaSocialKpiDailyRow,
+      'work_date' | 'post' | 'reel' | 'linkedin' | 'post_task_name' | 'reel_task_name' | 'linkedin_task_name'
+    >[],
+  ) =>
+    apiClient
+      .put<{ ok: boolean; saved: number }>('/dashboard/adrija-social-kpi-daily', { rows })
+      .then((r) => r.data),
 }

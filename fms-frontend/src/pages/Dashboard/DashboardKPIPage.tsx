@@ -18,6 +18,7 @@ import {
   Input,
   InputNumber,
   DatePicker,
+  Checkbox,
 } from 'antd'
 import {
   DashboardOutlined,
@@ -42,7 +43,9 @@ import {
   type SupportFmsDelayItem,
   type AkashCustomerSupportBlock,
   type KpiDailyLogApiRow,
+  type AdrijaSocialKpiDailyRow,
 } from '../../api/dashboardKpi'
+import { useAuth } from '../../hooks/useAuth'
 import { DashboardBlockSkeleton } from '../../components/common/skeletons'
 import { getDefaultPreviousWeekFilter, maxWeekOfMonth, weekOfMonth } from './kpiWeekUtils'
 
@@ -77,8 +80,16 @@ const DASHBOARD_OPTIONS: { key: DashboardKpiPerson; label: string }[] = [
   { key: 'Adrija', label: 'Adrija Dashboard' },
 ]
 
-/** Same Success KPI module as Rimpa (Performance Monitoring aggregates). */
-const usesSuccessKpiSection = (person: DashboardKpiPerson | null) => person === 'Rimpa' || person === 'Adrija'
+/** Success KPI (Performance Monitoring aggregates) — Rimpa only. */
+const usesSuccessKpiSection = (person: DashboardKpiPerson | null) => person === 'Rimpa'
+
+const ADRIJA_SOCIAL_KPI_EDITOR_EMAILS = new Set(['adrija@industryprime.com', 'aman@industryprime.com'])
+
+const ADRIJA_KPI_TASK_LABEL: Record<'post' | 'reel' | 'linkedin', string> = {
+  post: '1 Post Every Week',
+  reel: '1 Reel Every Week',
+  linkedin: '1 LinkedIn Post Every Week',
+}
 
 /** Pastel inner cards for Akash KPI pillars — same classes as Rimpa Success KPI */
 const AKASH_KPI_PILLAR_CARD_CLASS: Record<string, string> = {
@@ -175,6 +186,7 @@ const getPerformanceLevel = (value?: number) => {
 }
 
 export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi' }: DashboardKPIPageProps) => {
+  const { user } = useAuth()
   const previousWeekDefaults = getDefaultPreviousWeekFilter()
   const [selectedPerson, setSelectedPerson] = useState<DashboardKpiPerson | null>(forceOpen ? defaultPerson : null)
   const [month, setMonth] = useState<string>(MONTHS[previousWeekDefaults.monthIndex] ?? MONTHS[dayjs().month()])
@@ -194,6 +206,18 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
   const [graphModal, setGraphModal] = useState<
     'checklist' | 'delegation' | 'supportFMS' | 'successKpi' | 'akashMonthly' | null
   >(null)
+  const [adrijaSocialModalOpen, setAdrijaSocialModalOpen] = useState(false)
+  const [adrijaSocialLogMonth, setAdrijaSocialLogMonth] = useState<Dayjs | null>(null)
+  const [adrijaSocialDailyRows, setAdrijaSocialDailyRows] = useState<AdrijaSocialKpiDailyRow[]>([])
+  const [adrijaSocialDailyLoading, setAdrijaSocialDailyLoading] = useState(false)
+  const [adrijaSocialSaving, setAdrijaSocialSaving] = useState(false)
+  const adrijaSocialDailyDirtyRef = useRef<Set<string>>(new Set())
+  const adrijaSocialDailyRowsRef = useRef<AdrijaSocialKpiDailyRow[]>([])
+  adrijaSocialDailyRowsRef.current = adrijaSocialDailyRows
+
+  const [adrijaPillarDetail, setAdrijaPillarDetail] = useState<'post' | 'reel' | 'linkedin' | null>(null)
+  const [adrijaMonthlySummaryOpen, setAdrijaMonthlySummaryOpen] = useState(false)
+
   const [kpiDailyLogOpen, setKpiDailyLogOpen] = useState(false)
   const [kpiDailyLogMonth, setKpiDailyLogMonth] = useState<Dayjs | null>(null)
   /** When false, completed (past) months stay hidden until the user changes the month filter. */
@@ -328,10 +352,104 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
       .finally(() => setLoading(false))
   }, [selectedPerson, month, year, week])
 
+  const loadAdrijaSocialMonth = useCallback(async () => {
+    if (!adrijaSocialLogMonth) return
+    setAdrijaSocialDailyLoading(true)
+    try {
+      const y = adrijaSocialLogMonth.year()
+      const m = adrijaSocialLogMonth.month() + 1
+      const res = await dashboardKpiApi.getAdrijaSocialKpiDaily(y, m)
+      setAdrijaSocialDailyRows(res.rows ?? [])
+      adrijaSocialDailyDirtyRef.current = new Set()
+    } catch (e) {
+      message.error(kpiDailyLogErrorDetail(e, 'Failed to load Adrija KPI log'))
+    } finally {
+      setAdrijaSocialDailyLoading(false)
+    }
+  }, [adrijaSocialLogMonth])
+
+  const openAdrijaSocialModal = useCallback(() => {
+    const y = Number(year)
+    const mi = MONTHS.indexOf(month as (typeof MONTHS)[number])
+    if (!Number.isFinite(y) || mi < 0) {
+      message.error('Pick month and year on the dashboard first')
+      return
+    }
+    setAdrijaSocialLogMonth(dayjs().year(y).month(mi).date(1))
+    setAdrijaSocialModalOpen(true)
+  }, [month, year])
+
+  useEffect(() => {
+    if (!adrijaSocialModalOpen || !adrijaSocialLogMonth) return
+    void loadAdrijaSocialMonth()
+  }, [adrijaSocialModalOpen, adrijaSocialLogMonth, loadAdrijaSocialMonth])
+
+  const patchAdrijaSocialDailyRow = (workDate: string, patch: Partial<AdrijaSocialKpiDailyRow>) => {
+    adrijaSocialDailyDirtyRef.current.add(workDate)
+    setAdrijaSocialDailyRows((rows) => rows.map((r) => (r.work_date === workDate ? { ...r, ...patch } : r)))
+  }
+
+  const saveAdrijaSocialDaily = useCallback(async () => {
+    const dirty = [...adrijaSocialDailyDirtyRef.current]
+    if (dirty.length === 0) {
+      message.info('No changes to save')
+      return
+    }
+    setAdrijaSocialSaving(true)
+    try {
+      const rows = dirty
+        .map((wd) => adrijaSocialDailyRowsRef.current.find((x) => x.work_date === wd))
+        .filter((r): r is AdrijaSocialKpiDailyRow => !!r)
+        .map((r) => ({
+          work_date: r.work_date,
+          post: r.post ? 1 : 0,
+          reel: r.reel ? 1 : 0,
+          linkedin: r.linkedin ? 1 : 0,
+          post_task_name: (r.post_task_name || '').trim() || undefined,
+          reel_task_name: (r.reel_task_name || '').trim() || undefined,
+          linkedin_task_name: (r.linkedin_task_name || '').trim() || undefined,
+        }))
+      for (const r of rows) {
+        if (r.post === 1 && !r.post_task_name) {
+          message.error(`Post task name required on ${dayjs(r.work_date).format('DD-MMM-YY')}`)
+          setAdrijaSocialSaving(false)
+          return
+        }
+        if (r.reel === 1 && !r.reel_task_name) {
+          message.error(`Reel task name required on ${dayjs(r.work_date).format('DD-MMM-YY')}`)
+          setAdrijaSocialSaving(false)
+          return
+        }
+        if (r.linkedin === 1 && !r.linkedin_task_name) {
+          message.error(`LinkedIn task name required on ${dayjs(r.work_date).format('DD-MMM-YY')}`)
+          setAdrijaSocialSaving(false)
+          return
+        }
+      }
+      await dashboardKpiApi.putAdrijaSocialKpiDaily(rows)
+      adrijaSocialDailyDirtyRef.current.clear()
+      message.success('Adrija KPI log saved')
+      setAdrijaSocialModalOpen(false)
+      loadData()
+    } catch (e) {
+      message.error(kpiDailyLogErrorDetail(e, 'Could not save Adrija KPI log'))
+    } finally {
+      setAdrijaSocialSaving(false)
+    }
+  }, [loadData])
+
   useEffect(() => {
     if (selectedPerson) loadData()
     else setData(null)
   }, [selectedPerson, loadData])
+
+  useEffect(() => {
+    if (selectedPerson !== 'Adrija') {
+      setAdrijaSocialModalOpen(false)
+      setAdrijaPillarDetail(null)
+      setAdrijaMonthlySummaryOpen(false)
+    }
+  }, [selectedPerson])
 
   // List view: dashboard chooser cards
   if (!forceOpen && selectedPerson === null) {
@@ -392,6 +510,10 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
   const successKpi = data?.successKpi
   const akashKpi = data?.akashKpi
   const isAkashLayout = selectedPerson === 'Akash' && akashKpi != null
+  const adrijaSocial = data?.adrijaSocialKpi
+  const canEditAdrijaSocial =
+    selectedPerson === 'Adrija' &&
+    ADRIJA_SOCIAL_KPI_EDITOR_EMAILS.has((user?.email || '').trim().toLowerCase())
 
   return (
     <div className="dashboard-kpi-page">
@@ -417,11 +539,18 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
           <Title level={4} style={{ marginBottom: 0 }}>
             {selectedPerson} Dashboard
           </Title>
-          {selectedPerson === 'Akash' && akashKpi?.kpiDailyLogEditor && (
-            <Button type="primary" icon={<PlusOutlined />} onClick={openKpiDailyLog}>
-              Add KPI
-            </Button>
-          )}
+          <Space wrap>
+            {selectedPerson === 'Akash' && akashKpi?.kpiDailyLogEditor && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openKpiDailyLog}>
+                Add KPI
+              </Button>
+            )}
+            {canEditAdrijaSocial && (
+              <Button type="primary" icon={<PlusOutlined />} onClick={openAdrijaSocialModal}>
+                Add
+              </Button>
+            )}
+          </Space>
         </div>
 
         <Space wrap size="middle">
@@ -501,6 +630,35 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                     </Space>
                   </Card>
                 </Col>
+                {selectedPerson === 'Adrija' && adrijaSocial != null && (
+                  <Col xs={24} sm={24} md={8}>
+                    <Card
+                      size="small"
+                      title="KPI (Monthly %)"
+                      className="kpi-summary-card kpi-summary-card--akash-overall kpi-summary-card--clickable"
+                      style={{ borderTop: '3px solid #7c3aed', cursor: 'pointer' }}
+                      onClick={() => setAdrijaMonthlySummaryOpen(true)}
+                    >
+                      <Space direction="vertical" align="center">
+                        <Progress
+                          type="circle"
+                          percent={adrijaSocial.monthlyPercent ?? 0}
+                          size={80}
+                          strokeColor="#7c3aed"
+                        />
+                        <div
+                          className="kpi-performance-pill"
+                          style={getPerformanceLevel(adrijaSocial.monthlyPercent ?? 0)}
+                        >
+                          {getPerformanceLevel(adrijaSocial.monthlyPercent ?? 0).label} Performance
+                        </div>
+                        <Text type="secondary" style={{ fontSize: 12 }}>
+                          Post, Reel and LinkedIn marked in {month} {year}
+                        </Text>
+                      </Space>
+                    </Card>
+                  </Col>
+                )}
                 {selectedPerson === 'Shreyasi' && (
                 <Col xs={24} sm={24} md={8}>
                   <Card
@@ -847,7 +1005,76 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
               </Card>
             )}
 
-            {/* Success KPI – Rimpa & Adrija (Performance Monitoring): monthly % + detail cards */}
+            {/* KPI – Adrija: weekly social (Post / Reel / LinkedIn) */}
+            {selectedPerson === 'Adrija' && adrijaSocial != null && (
+              <Card
+                className="kpi-section-card"
+                title={
+                  <Space>
+                    <PieChartOutlined />
+                    KPI
+                    {adrijaSocial.weekLabel ? (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        {adrijaSocial.weekLabel}
+                      </Text>
+                    ) : null}
+                  </Space>
+                }
+              >
+                <Row gutter={[16, 16]}>
+                  <Col xs={24} md={8}>
+                    <Card
+                      size="small"
+                      className="kpi-success-card kpi-success-card--poc"
+                      bordered={false}
+                      title="1 Post Every Week"
+                      hoverable
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setAdrijaPillarDetail('post')}
+                    >
+                      <Title level={4} style={{ marginBottom: 4 }}>
+                        {adrijaSocial.postWeek === 1 ? 'Done' : '—'}
+                      </Title>
+                      <Text type="secondary">Target: 1 post in the selected week · click for dates</Text>
+                    </Card>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Card
+                      size="small"
+                      className="kpi-success-card kpi-success-card--training"
+                      bordered={false}
+                      title="1 Reel Every Week"
+                      hoverable
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setAdrijaPillarDetail('reel')}
+                    >
+                      <Title level={4} style={{ marginBottom: 4 }}>
+                        {adrijaSocial.reelWeek === 1 ? 'Done' : '—'}
+                      </Title>
+                      <Text type="secondary">Target: 1 reel in the selected week · click for dates</Text>
+                    </Card>
+                  </Col>
+                  <Col xs={24} md={8}>
+                    <Card
+                      size="small"
+                      className="kpi-success-card kpi-success-card--followup"
+                      bordered={false}
+                      title="1 LinkedIn Post Every Week"
+                      hoverable
+                      style={{ cursor: 'pointer' }}
+                      onClick={() => setAdrijaPillarDetail('linkedin')}
+                    >
+                      <Title level={4} style={{ marginBottom: 4 }}>
+                        {adrijaSocial.linkedinWeek === 1 ? 'Done' : '—'}
+                      </Title>
+                      <Text type="secondary">Target: 1 LinkedIn post in the selected week · click for dates</Text>
+                    </Card>
+                  </Col>
+                </Row>
+              </Card>
+            )}
+
+            {/* Success KPI – Rimpa (Performance Monitoring): monthly % + detail cards */}
             {usesSuccessKpiSection(selectedPerson) && successKpi != null && (
               <Card
                 className="kpi-section-card"
@@ -1376,6 +1603,226 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                   ]}
                 />
               </Spin>
+            </Modal>
+
+            <Modal
+              title="Adrija KPI — daily log"
+              open={adrijaSocialModalOpen}
+              onCancel={() => setAdrijaSocialModalOpen(false)}
+              okText="Save changes"
+              cancelText="Close"
+              confirmLoading={adrijaSocialSaving}
+              onOk={() => void saveAdrijaSocialDaily()}
+              width="min(98vw, 900px)"
+              className="kpi-modal"
+              destroyOnClose
+            >
+              <Row gutter={[16, 12]} align="middle" style={{ marginBottom: 12 }}>
+                <Col xs={24} sm={12}>
+                  <Text strong>Log month</Text>
+                  <div>
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      Every row is one calendar day. Check Post, Reel, or LinkedIn when completed that day.
+                    </Text>
+                  </div>
+                </Col>
+                <Col xs={24} sm={12} style={{ textAlign: 'right' }}>
+                  <DatePicker
+                    picker="month"
+                    value={adrijaSocialLogMonth ?? undefined}
+                    format="MMM YYYY"
+                    allowClear={false}
+                    onChange={(d) => {
+                      if (!d) return
+                      setAdrijaSocialLogMonth(d.startOf('month'))
+                    }}
+                  />
+                </Col>
+              </Row>
+              <Spin spinning={adrijaSocialDailyLoading}>
+                <Table<AdrijaSocialKpiDailyRow>
+                  size="small"
+                  rowKey="work_date"
+                  pagination={false}
+                  scroll={{ x: 'max-content' }}
+                  dataSource={adrijaSocialDailyRows}
+                  columns={[
+                    {
+                      title: 'Date',
+                      dataIndex: 'work_date',
+                      key: 'work_date',
+                      width: 108,
+                      render: (iso: string) => dayjs(iso).format('DD-MMM-YY'),
+                    },
+                    { title: 'Day', dataIndex: 'dayName', key: 'dayName', width: 100 },
+                    {
+                      title: 'Post',
+                      key: 'post',
+                      width: 210,
+                      render: (_: unknown, row) => (
+                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                          <Checkbox
+                            checked={row.post === 1}
+                            disabled={!canEditAdrijaSocial}
+                            onChange={(e) =>
+                              patchAdrijaSocialDailyRow(row.work_date, {
+                                post: e.target.checked ? 1 : 0,
+                                post_task_name: e.target.checked ? row.post_task_name ?? '' : '',
+                              })
+                            }
+                          />
+                          {row.post === 1 && (
+                            <Input
+                              size="small"
+                              placeholder="Task name (required)"
+                              value={row.post_task_name ?? ''}
+                              disabled={!canEditAdrijaSocial}
+                              status={(row.post_task_name || '').trim() ? undefined : 'error'}
+                              onChange={(e) => patchAdrijaSocialDailyRow(row.work_date, { post_task_name: e.target.value })}
+                            />
+                          )}
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: 'Reel',
+                      key: 'reel',
+                      width: 210,
+                      render: (_: unknown, row) => (
+                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                          <Checkbox
+                            checked={row.reel === 1}
+                            disabled={!canEditAdrijaSocial}
+                            onChange={(e) =>
+                              patchAdrijaSocialDailyRow(row.work_date, {
+                                reel: e.target.checked ? 1 : 0,
+                                reel_task_name: e.target.checked ? row.reel_task_name ?? '' : '',
+                              })
+                            }
+                          />
+                          {row.reel === 1 && (
+                            <Input
+                              size="small"
+                              placeholder="Task name (required)"
+                              value={row.reel_task_name ?? ''}
+                              disabled={!canEditAdrijaSocial}
+                              status={(row.reel_task_name || '').trim() ? undefined : 'error'}
+                              onChange={(e) => patchAdrijaSocialDailyRow(row.work_date, { reel_task_name: e.target.value })}
+                            />
+                          )}
+                        </Space>
+                      ),
+                    },
+                    {
+                      title: 'LinkedIn',
+                      key: 'linkedin',
+                      width: 210,
+                      render: (_: unknown, row) => (
+                        <Space direction="vertical" size={6} style={{ width: '100%' }}>
+                          <Checkbox
+                            checked={row.linkedin === 1}
+                            disabled={!canEditAdrijaSocial}
+                            onChange={(e) =>
+                              patchAdrijaSocialDailyRow(row.work_date, {
+                                linkedin: e.target.checked ? 1 : 0,
+                                linkedin_task_name: e.target.checked ? row.linkedin_task_name ?? '' : '',
+                              })
+                            }
+                          />
+                          {row.linkedin === 1 && (
+                            <Input
+                              size="small"
+                              placeholder="Task name (required)"
+                              value={row.linkedin_task_name ?? ''}
+                              disabled={!canEditAdrijaSocial}
+                              status={(row.linkedin_task_name || '').trim() ? undefined : 'error'}
+                              onChange={(e) => patchAdrijaSocialDailyRow(row.work_date, { linkedin_task_name: e.target.value })}
+                            />
+                          )}
+                        </Space>
+                      ),
+                    },
+                  ]}
+                />
+              </Spin>
+            </Modal>
+
+            <Modal
+              title={
+                adrijaPillarDetail
+                  ? `${ADRIJA_KPI_TASK_LABEL[adrijaPillarDetail]} — selected week`
+                  : 'KPI detail'
+              }
+              open={adrijaPillarDetail != null}
+              onCancel={() => setAdrijaPillarDetail(null)}
+              footer={null}
+              width={520}
+            >
+              {adrijaPillarDetail && adrijaSocial && (() => {
+                const details =
+                  adrijaPillarDetail === 'post'
+                    ? (adrijaSocial.postCompletionDetails ?? []).map((x) => ({ completion_date: x.date, task: x.taskName || '—' }))
+                    : adrijaPillarDetail === 'reel'
+                      ? (adrijaSocial.reelCompletionDetails ?? []).map((x) => ({ completion_date: x.date, task: x.taskName || '—' }))
+                      : (adrijaSocial.linkedinCompletionDetails ?? []).map((x) => ({ completion_date: x.date, task: x.taskName || '—' }))
+                const rows = details
+                  .filter((x) => x.completion_date >= adrijaSocial.weekStart && x.completion_date <= adrijaSocial.weekEnd)
+                  .sort((a, b) => (a.completion_date < b.completion_date ? -1 : 1))
+                if (rows.length === 0) {
+                  return (
+                    <Text type="secondary">
+                      No completion marked for this task in the selected week. Use Add to log a day, or pick another
+                      week.
+                    </Text>
+                  )
+                }
+                return (
+                  <Table
+                    size="small"
+                    rowKey="completion_date"
+                    pagination={false}
+                    dataSource={rows}
+                    columns={[
+                      { title: 'Task', dataIndex: 'task', key: 'task', width: 220 },
+                      {
+                        title: 'Marked complete (date)',
+                        dataIndex: 'completion_date',
+                        key: 'completion_date',
+                        render: (iso: string) => dayjs(iso).format('dddd, DD MMM YYYY'),
+                      },
+                    ]}
+                  />
+                )
+              })()}
+            </Modal>
+
+            <Modal
+              title={`KPI monthly summary — ${month} ${year}`}
+              open={adrijaMonthlySummaryOpen}
+              onCancel={() => setAdrijaMonthlySummaryOpen(false)}
+              footer={null}
+              width={480}
+            >
+              {adrijaSocial && (
+                <Space direction="vertical" size="small" style={{ width: '100%' }}>
+                  <Text>
+                    Overall fill rate for {month} {year}:{' '}
+                    <Text strong>{adrijaSocial.monthlyPercent ?? 0}%</Text>
+                  </Text>
+                  <Text type="secondary">
+                    Percentage = (Post + Reel + LinkedIn checks across all days) ÷ (3 × number of days in the month).
+                  </Text>
+                  <div style={{ marginTop: 8 }}>
+                    <Text>Days with Post marked: {(adrijaSocial.postCompletionDates ?? []).length}</Text>
+                  </div>
+                  <div>
+                    <Text>Days with Reel marked: {(adrijaSocial.reelCompletionDates ?? []).length}</Text>
+                  </div>
+                  <div>
+                    <Text>Days with LinkedIn marked: {(adrijaSocial.linkedinCompletionDates ?? []).length}</Text>
+                  </div>
+                </Space>
+              )}
             </Modal>
 
             <Modal

@@ -1,5 +1,5 @@
 """
-Success KPI for Rimpa & Adrija dashboards: pulls from ALL Success / performance_monitoring data
+Success KPI for the Rimpa dashboard: pulls from ALL Success / performance_monitoring data
 (not filtered by dashboard user). Cards use selected week + fixed targets: 16 / 1 / 25 / 2.
 """
 from __future__ import annotations

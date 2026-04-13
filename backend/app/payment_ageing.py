@@ -23,6 +23,9 @@ def normalize_company_name(s: str | None) -> str:
     t = re.sub(r"\blimited\b", "ltd", t)
     # Common spelling drift between sheet vs companies master
     t = re.sub(r"\bsteels\b", "steel", t)
+    t = re.sub(r"\bingols\b", "ingots", t)
+    # Canonicalize known Hariom variant: "Ingots and Power" vs "Ingots & Power"
+    t = re.sub(r"\bingots and power\b", "ingots power", t)
     t = re.sub(r"\s+", " ", t).strip()
     return t
 
@@ -148,6 +151,7 @@ PAYMENT_AGEING_ALLOWED_COMPANY_NAMES: tuple[str, ...] = (
     "Salagram Power",
     "Kodarma Petrohemicals Pvt. Ltd.",
     "Hariom ingots and power private limited",
+    "Hariom ingols and power private limited",
     "Maa Mangla Ispat Pvt. Ltd. (Unit.2)",
     # Seed / spreadsheet spellings not identical to companies.name
     "Shri Varu Polytex Pvt. Ltd.",
@@ -279,27 +283,19 @@ def median_int(vals: list[int | None]) -> int:
     return (nums[mid - 1] + nums[mid]) // 2
 
 
+def average_int(vals: list[int | None]) -> int:
+    nums = [int(v) for v in vals if v is not None]
+    if not nums:
+        return 0
+    return int(round(sum(nums) / len(nums)))
+
+
 # Must match spreadsheet: Q3 FY 23-24 … Q4 FY 25-26 (10 fiscal quarters).
 PAYMENT_AGEING_QUARTER_COUNT = 10
 
-# Fixed columns (India FY Apr–Mar) — same order as bulk import / Google Sheet.
 def payment_ageing_sheet_quarters() -> list[tuple[int, int, str]]:
-    """
-    Return 10 quarters oldest→newest: Q3 FY23-24 … Q4 FY25-26.
-    Each item: (fy_start_year, quarter 1..4, label).
-    """
-    return [
-        (2023, 3, "Q3 FY 23-24"),
-        (2023, 4, "Q4 FY 23-24"),
-        (2024, 1, "Q1 FY 24-25"),
-        (2024, 2, "Q2 FY 24-25"),
-        (2024, 3, "Q3 FY 24-25"),
-        (2024, 4, "Q4 FY 24-25"),
-        (2025, 1, "Q1 FY 25-26"),
-        (2025, 2, "Q2 FY 25-26"),
-        (2025, 3, "Q3 FY 25-26"),
-        (2025, 4, "Q4 FY 25-26"),
-    ]
+    """Return rolling quarter columns (oldest→newest), always ending at the current ongoing FY quarter."""
+    return last_n_fiscal_quarters(PAYMENT_AGEING_QUARTER_COUNT, date.today())
 
 # Day buckets (inclusive) matching Excel SUMIFS: 0–7, 8–14, 15–21, 22–28, 29+
 DAY_BUCKETS: list[tuple[str, int, int]] = [
