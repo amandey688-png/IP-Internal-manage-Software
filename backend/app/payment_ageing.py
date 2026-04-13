@@ -16,12 +16,55 @@ def normalize_company_name(s: str | None) -> str:
     t = re.sub(r"[-–—]", " ", t)
     t = re.sub(r"[()\[\]{}]", " ", t)
     t = re.sub(r"[.,]", " ", t)
+    t = re.sub(r"[&+]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     t = re.sub(r"\bprivate limited\b", "pvt ltd", t)
     t = re.sub(r"\bprivate ltd\b", "pvt ltd", t)
     t = re.sub(r"\blimited\b", "ltd", t)
+    # Common spelling drift between sheet vs companies master
+    t = re.sub(r"\bsteels\b", "steel", t)
     t = re.sub(r"\s+", " ", t).strip()
     return t
+
+
+def name_token_jaccard(norm_a: str, norm_b: str) -> float:
+    """Token-set Jaccard on already-normalized names (0..1)."""
+    if not norm_a or not norm_b:
+        return 0.0
+    sa, sb = set(norm_a.split()), set(norm_b.split())
+    u = len(sa | sb)
+    if u == 0:
+        return 0.0
+    return len(sa & sb) / u
+
+
+def fuzzy_ageing_assignments(
+    company_norm_keys: list[str],
+    ageing_by_name: dict[str, dict],
+    *,
+    min_score: float = 0.68,
+) -> dict[str, str]:
+    """Map company normalized name -> ageing row key when exact match failed (one-to-one greedy)."""
+    ageing_keys = [k for k in ageing_by_name if k]
+    pairs: list[tuple[float, str, str]] = []
+    for nm in company_norm_keys:
+        if nm in ageing_by_name:
+            continue
+        for ak in ageing_keys:
+            s = name_token_jaccard(nm, ak)
+            if s >= min_score:
+                pairs.append((s, nm, ak))
+    pairs.sort(key=lambda x: -x[0])
+    out: dict[str, str] = {}
+    used_nm: set[str] = set()
+    used_ak: set[str] = set()
+    for s, nm, ak in pairs:
+        if nm in used_nm or ak in used_ak:
+            continue
+        out[nm] = ak
+        used_nm.add(nm)
+        used_ak.add(ak)
+    return out
 
 
 # Payment Ageing grid: only these clients (matched by normalize_company_name) appear in the report.
@@ -106,6 +149,16 @@ PAYMENT_AGEING_ALLOWED_COMPANY_NAMES: tuple[str, ...] = (
     "Kodarma Petrohemicals Pvt. Ltd.",
     "Hariom ingots and power private limited",
     "Maa Mangla Ispat Pvt. Ltd. (Unit.2)",
+    # Seed / spreadsheet spellings not identical to companies.name
+    "Shri Varu Polytex Pvt. Ltd.",
+    "Govinda Polytex India Pvt. Ltd.",
+    "Vraj Iron & Steels Ltd. (Siltara Div)",
+    "Shree Parashnath Re-Roolling Mills Ltd.",
+    "Maan Concast Pvt. Ltd.",
+    "Maan Steel & Power Ltd.",
+    "Dhanbad Fuels Ltd.",
+    "Hitech Plastochem Udyog Pvt. Ltd.",
+    "Rausheena Udyog Limited",
 )
 
 PAYMENT_AGEING_ALLOWED_COMPANY_KEYS: frozenset[str] = frozenset(
