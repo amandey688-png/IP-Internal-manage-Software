@@ -30,6 +30,11 @@ type PaymentAgeingKpis = {
   monthly_genre_m: KpiPair
   overall_in_quarter: KpiPair
   monthly_in_quarter: KpiPair
+  current_quarter_received_company_count?: number
+  current_quarter_received_companies?: Array<{
+    company_name: string
+    days_to_payment: number
+  }>
 }
 
 /** Must match backend PAYMENT_AGEING_QUARTER_COUNT (sheet: Q3 FY23-24 … Q4 FY25-26). */
@@ -133,6 +138,7 @@ export function PaymentAgeingReportPage() {
   const [editRow, setEditRow] = useState<AgeingRow | null>(null)
   const [editDays, setEditDays] = useState<(number | null)[]>(Array(QUARTER_COUNT).fill(null))
   const [saving, setSaving] = useState(false)
+  const [receivedCompanyModalOpen, setReceivedCompanyModalOpen] = useState(false)
 
   const load = useCallback(() => {
     setLoading(true)
@@ -328,6 +334,7 @@ export function PaymentAgeingReportPage() {
 
   const summaryTotals = data?.summary?.totals
   const kpis = data?.kpis
+  const receivedCompanies = kpis?.current_quarter_received_companies ?? []
 
   return (
     <div style={{ padding: 16 }}>
@@ -337,21 +344,21 @@ export function PaymentAgeingReportPage() {
         </Title>
 
         <Row gutter={[16, 16]}>
-          <Col xs={24} md={8}>
+          <Col xs={24} md={6}>
             <KpiSummaryCard
               heading="Quarterly amount"
               period={kpis ? `${kpis.quarter_period_label} · genre Q (quarterly raises)` : '—'}
               pair={kpis?.quarterly_genre_q ?? { received: 0, raised: 0 }}
             />
           </Col>
-          <Col xs={24} md={8}>
+          <Col xs={24} md={6}>
             <KpiSummaryCard
               heading="Monthly amount"
               period={kpis ? `${kpis.month_period_label} · genre M (monthly raises)` : '—'}
               pair={kpis?.monthly_genre_m ?? { received: 0, raised: 0 }}
             />
           </Col>
-          <Col xs={24} md={8}>
+          <Col xs={24} md={6}>
             <KpiSummaryCard
               heading="Overall"
               period={kpis ? `${kpis.quarter_period_label} · all genres in this FY quarter` : '—'}
@@ -365,6 +372,26 @@ export function PaymentAgeingReportPage() {
                 ) : null
               }
             />
+          </Col>
+          <Col xs={24} md={6}>
+            <Card
+              size="small"
+              style={{ height: '100%', cursor: 'pointer' }}
+              onClick={() => setReceivedCompanyModalOpen(true)}
+            >
+              <Text strong style={{ display: 'block', marginBottom: 4 }}>
+                Total Payment Received This Quarter Company
+              </Text>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                Current quarter company count
+              </Text>
+              <div style={{ fontSize: 24, fontWeight: 700 }}>
+                {fmt(kpis?.current_quarter_received_company_count ?? 0)}
+              </div>
+              <Text type="secondary" style={{ fontSize: 11 }}>
+                Click to view company-wise days (invoice date to payment received date)
+              </Text>
+            </Card>
           </Col>
         </Row>
 
@@ -494,6 +521,39 @@ export function PaymentAgeingReportPage() {
             ))}
           </div>
         </Space>
+      </Modal>
+
+      <Modal
+        title="Payment Received This Quarter - Company Days"
+        open={receivedCompanyModalOpen}
+        onCancel={() => setReceivedCompanyModalOpen(false)}
+        footer={null}
+        width={720}
+        destroyOnClose
+      >
+        <Table
+          size="small"
+          rowKey={(r) => `${r.company_name}::${r.days_to_payment}`}
+          pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] }}
+          dataSource={receivedCompanies}
+          columns={[
+            {
+              title: 'Company Name',
+              dataIndex: 'company_name',
+              key: 'company_name',
+            },
+            {
+              title: 'Days to Payment',
+              dataIndex: 'days_to_payment',
+              key: 'days_to_payment',
+              align: 'right',
+              render: (v: number) => fmt(v),
+            },
+          ]}
+        />
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          Days to Payment = Invoice Date to Payment Received Date (only for payments received in this quarter).
+        </Text>
       </Modal>
     </div>
   )
