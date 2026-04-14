@@ -102,6 +102,7 @@ PAYMENT_AGEING_ALLOWED_COMPANY_NAMES: tuple[str, ...] = (
     "Vraj Metaliks Pvt. Ltd.",
     "Maa Mangla Ispat Pvt. Ltd.",
     "B. R Sponge & Power Ltd.",
+    "B R Refinery LLP",
     "Amiya Steel Pvt. Ltd.",
     "Sky Alloys and Power Pvt Ltd",
     "Nutan Ispat & Power Ltd",

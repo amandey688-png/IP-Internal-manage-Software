@@ -1,238 +1,108 @@
-# FMS to Application - System Architecture
+# Industry Prime — IP Internal Management Software (FMS)
 
-Cloud-based Facility Management System (FMS) to Application platform with comprehensive ticket management, SLA tracking, feature approval workflows, and staging management.
+**Industry Prime** (search: **industryprime**, **Industry Prime FMS**, **IP Internal Management**) is a cloud internal-operations platform: client onboarding, raised invoices and payments, payment-ageing reporting, KPI dashboards, training workflows, support tickets, and role-based access. This repository powers the **IP Internal Management** web app used by Industry Prime teams.
 
-## Tech Stack
+| What searchers look for | What this repo is |
+|-------------------------|-------------------|
+| industryprime | Industry Prime’s internal management / FMS-style software (this codebase) |
+| Industry Prime software | React (Vite) frontend + FastAPI backend + Supabase (PostgreSQL, Auth, Storage) |
+| IP Internal Management | Same product — deployed frontend (e.g. Vercel) + API (e.g. Render) |
 
-- **Frontend**: React (Next.js 14+) with TypeScript
-- **Backend**: FastAPI (Python 3.11+)
-- **Database**: Supabase (PostgreSQL)
-- **Authentication**: Supabase Auth (Email Confirmation)
-- **Storage**: Supabase Storage
-- **Real-time**: Supabase Realtime
+**Live app (replace with your canonical URL if different):** production frontend is commonly deployed at `https://industryprime.vercel.app` with API at `https://ip-internal-manage-software.onrender.com` (see `fms-frontend/.env.production`). For **Google Search**: verify that domain in [Google Search Console](https://search.google.com/search-console), submit the homepage and `sitemap.xml` for indexing, and keep the deployed site **public** (login pages still allow Google to see titles/meta). Ranking position (e.g. page 1) depends on competition and time; strong titles, meta, README, and backlinks (Product Hunt, DEV.to, etc.) improve discoverability when people type **industryprime** or **Industry Prime**.
 
-## Documentation Structure
+---
 
-1. **[High-Level Architecture](./01_HIGH_LEVEL_ARCHITECTURE.md)**
-   - System overview and architecture diagram
-   - Technology stack details
-   - Component responsibilities
-   - Data flow patterns
-   - Deployment architecture
+## Crawler-friendly summary (copy for listings / articles)
 
-2. **[Module Breakdown](./02_MODULE_BREAKDOWN.md)**
-   - Core modules and their purposes
-   - Module components and features
-   - Module dependencies
-   - Communication patterns
-   - Data ownership
+**Name:** Industry Prime — IP Internal Management Software  
+**Also known as:** industryprime, IP Internal Management, FMS onboarding platform  
+**One line:** Internal web app for manufacturing / operations teams: onboarding, payments, ageing, KPIs, training, and support — **React + TypeScript (Vite)**, **FastAPI (Python)**, **Supabase**.  
+**Public code:** [GitHub repository](https://github.com/amandey688-png/IP-Internal-manage-Software) (this repo).  
+**Tech keywords:** FastAPI, Supabase, PostgreSQL, Row Level Security, React, Vite, Ant Design, REST API, multi-role RBAC.
 
-3. **[API Layer Overview](./03_API_LAYER_OVERVIEW.md)**
-   - Complete API endpoint documentation
-   - Request/response formats
-   - Authentication endpoints
-   - Business logic endpoints
-   - Error handling
+---
 
-4. **[Database Schema](./04_DATABASE_SCHEMA.md)**
-   - Complete database schema
-   - Table definitions and relationships
-   - Database functions and triggers
-   - Views and aggregations
-   - Module database responsibilities
+## Tech stack (actual)
 
-5. **[Security & RLS Strategy](./05_SECURITY_RLS_STRATEGY.md)**
-   - Multi-layer security approach
-   - Role-based access control (RBAC)
-   - Row Level Security (RLS) policies
-   - API-level authorization
-   - Security best practices
+- **Frontend:** React 18 + TypeScript + Vite + Ant Design (`fms-frontend/`)
+- **Backend:** FastAPI (`backend/app/main.py`, `uvicorn app.main:app`)
+- **Database / Auth / Storage:** Supabase
+- **SEO assets:** `fms-frontend/index.html` (meta + JSON-LD), `fms-frontend/public/robots.txt`, `fms-frontend/public/sitemap.xml` — update URLs if your production domain is not `industryprime.vercel.app`.
 
-## Key Features
+---
 
-### Role-Based Access Control
-- **User**: Create and manage own tickets
-- **Approver**: Approve/reject feature requests
-- **Admin**: Full ticket management and system configuration
-- **Master Admin**: Complete system control including user management
+## Documentation structure
 
-### Ticket Management
-- Support for Bug, Feature, and Chore ticket types
-- Ticket assignment and status tracking
-- Comments and file attachments
-- Complete audit history
+1. **[High-Level Architecture](./01_HIGH_LEVEL_ARCHITECTURE.md)** — Overview, stack, deployment patterns  
+2. **[Module Breakdown](./02_MODULE_BREAKDOWN.md)** — Modules and dependencies  
+3. **[API Layer Overview](./03_API_LAYER_OVERVIEW.md)** — Endpoints and formats  
+4. **[Database Schema](./04_DATABASE_SCHEMA.md)** — Tables, RLS, views  
+5. **[Security & RLS Strategy](./05_SECURITY_RLS_STRATEGY.md)** — RBAC and Supabase security  
 
-### SLA & Delay Calculation
-- Configurable SLA rules per ticket type
-- Automatic delay calculation
-- SLA breach tracking and notifications
-- Compliance metrics and reporting
+---
 
-### Feature Approval Workflow
-- Feature request submission
-- Approver assignment
-- Approval/rejection workflow
-- Integration with staging workflow
+## Key features (high level)
 
-### Staging Workflow
-- Staging environment management
-- Deployment tracking
-- Rollback capabilities
-- Environment status monitoring
+- **Role-based access:** user, approver, admin, master_admin (and feature-specific allowlists where configured)  
+- **Onboarding / client payment:** raised invoices, payment tracking, payment ageing report, invoice-sent details  
+- **Dashboards & KPIs:** operational KPIs (e.g. daily work log, social KPI views where enabled)  
+- **Training & support:** training stages, support forms, tickets / SLA patterns per module docs  
+- **Integrations:** Supabase Auth, email flows, file storage as documented in `docs/` and backend  
 
-### Dashboard & Analytics
-- Real-time ticket statistics
-- SLA compliance metrics
-- User performance tracking
-- Custom reports and exports
+---
 
-## Quick Start
+## Quick start
 
 ### Prerequisites
-- Node.js 18+
-- Python 3.11+
-- Supabase account
-- PostgreSQL client (optional)
 
-### Setup Steps
+- Node.js 18+  
+- Python 3.11+ (3.12+ works; match your environment)  
+- Supabase project (URL + keys in `backend/.env`)
 
-1. **Supabase Setup**
-   - Create new Supabase project
-   - Run database migrations (from `04_DATABASE_SCHEMA.md`)
-   - Configure email templates for authentication
-   - Set up storage buckets
+### Backend
 
-2. **Backend Setup**
-   ```bash
-   cd backend
-   python -m venv venv
-   source venv/bin/activate  # Windows: venv\Scripts\activate
-   pip install -r requirements.txt
-   # Configure environment variables
-   uvicorn main:app --reload
-   ```
-
-3. **Frontend Setup**
-   ```bash
-   cd frontend
-   npm install
-   # Configure environment variables
-   npm run dev
-   ```
-
-### Environment Variables
-
-**Backend (.env)**
-```
-SUPABASE_URL=your_supabase_url
-SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
-SUPABASE_ANON_KEY=your_anon_key
-DATABASE_URL=your_database_url
+```bash
+cd backend
+python -m venv venv
+# Windows: venv\Scripts\activate
+# macOS/Linux: source venv/bin/activate
+pip install -r requirements.txt
+# Copy backend/.env.example → backend/.env and fill Supabase + secrets
+uvicorn app.main:app --reload --host 127.0.0.1 --port 8020
 ```
 
-**Frontend (.env.local)**
+### Frontend
+
+```bash
+cd fms-frontend
+npm install
+# Copy fms-frontend/.env.example → fms-frontend/.env
+# Set VITE_API_BASE_URL=http://127.0.0.1:8020 for local API
+npm run dev
 ```
-NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
-NEXT_PUBLIC_SUPABASE_ANON_KEY=your_anon_key
-NEXT_PUBLIC_API_URL=http://localhost:8000
-```
 
-## System Architecture Highlights
+### Environment (minimal)
 
-### Authentication Flow
-- Email-based registration with confirmation
-- JWT token-based authentication
-- Role-based authorization
-- Secure session management
+**Backend (`backend/.env`):** `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_ANON_KEY`, SMTP or mail provider if used, `CORS_ORIGINS` including your Vercel frontend URL.
 
-### Data Flow
-1. User interacts with Next.js frontend
-2. Frontend calls FastAPI backend
-3. Backend validates and processes request
-4. Backend interacts with Supabase (Database/Auth/Storage)
-5. Real-time updates via Supabase subscriptions
-6. Response returned to frontend
+**Frontend (`fms-frontend/.env`):** `VITE_API_BASE_URL` pointing at the FastAPI origin (local or Render/production).
 
-### Security Layers
-1. Network: HTTPS/TLS encryption
-2. Authentication: Supabase Auth with email confirmation
-3. Authorization: Role-based access control
-4. Data: Row Level Security (RLS) policies
-5. Application: Input validation and sanitization
+---
 
-## Database Schema Overview
+## Architecture (short)
 
-### Core Tables
-- `users` - User profiles and roles
-- `tickets` - Ticket entities
-- `ticket_comments` - Comments on tickets
-- `ticket_history` - Audit log
-- `sla_rules` - SLA configuration
-- `sla_tracking` - SLA monitoring
-- `feature_approvals` - Approval workflow
-- `staging_environments` - Staging management
-- `deployments` - Deployment tracking
-- `notifications` - User notifications
-- `file_metadata` - File storage metadata
+1. Browser loads the Vite SPA (Industry Prime / IP Internal Management).  
+2. Authenticated calls go to FastAPI (direct or via dev proxy `/api`).  
+3. FastAPI uses Supabase (PostgREST patterns, service role where appropriate) and documented RLS for user-scoped data.  
+4. Real-time and storage features follow module-specific docs under `docs/`.
 
-## API Endpoints Overview
+---
 
-### Authentication
-- `POST /api/v1/auth/register` - User registration
-- `POST /api/v1/auth/login` - User login
-- `POST /api/v1/auth/logout` - User logout
-- `POST /api/v1/auth/refresh` - Refresh token
+## Contributing & license
 
-### Tickets
-- `GET /api/v1/tickets` - List tickets
-- `POST /api/v1/tickets` - Create ticket
-- `GET /api/v1/tickets/{id}` - Get ticket
-- `PUT /api/v1/tickets/{id}` - Update ticket
-
-### SLA
-- `GET /api/v1/sla/rules` - Get SLA rules
-- `GET /api/v1/sla/tickets/{id}` - Get ticket SLA status
-- `GET /api/v1/sla/metrics` - Get SLA metrics
-
-### Approvals
-- `POST /api/v1/approvals/requests` - Submit approval
-- `POST /api/v1/approvals/requests/{id}/approve` - Approve
-- `POST /api/v1/approvals/requests/{id}/reject` - Reject
-
-### Dashboard
-- `GET /api/v1/dashboard/overview` - Dashboard data
-- `GET /api/v1/dashboard/analytics/tickets` - Ticket analytics
-
-## Development Guidelines
-
-### Code Organization
-- **Frontend**: Feature-based folder structure
-- **Backend**: Module-based organization
-- **Database**: Schema-first approach
-
-### Testing Strategy
-- Unit tests for business logic
-- Integration tests for API endpoints
-- E2E tests for critical workflows
-- RLS policy testing
-
-### Deployment
-- Frontend: Vercel/Netlify
-- Backend: AWS Lambda/Cloud Run/Railway
-- Database: Supabase Cloud (managed)
-
-## Contributing
-
-1. Follow the architecture patterns defined in documentation
-2. Ensure RLS policies are properly implemented
-3. Add appropriate authorization checks
-4. Write tests for new features
-5. Update documentation as needed
-
-## License
-
-[Specify your license]
+Follow patterns in `01_`–`05_` docs; respect RLS and role checks on new endpoints.  
+License: specify in this file when you publish publicly.
 
 ## Support
 
-For questions or issues, please refer to the detailed documentation files or contact the development team.
+Use internal team channels or repository issues. For **SEO**: keep README and deployed `index.html` aligned with your final **canonical domain**, then use Search Console → URL Inspection → **Request indexing** for the homepage after each important release.

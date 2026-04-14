@@ -1,6 +1,6 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 # CodeRabbit – AI code review before production
-# https://docs.coderabbit.ai/configure-coderabbit
-# Schema: https://coderabbit.ai/integrations/schema.v2.json
+# https://docs.coderabbit.ai/getting-started/yaml-configuration
 
 language: "en-US"
 early_access: false
@@ -13,7 +13,8 @@ reviews:
   review_status: true
   review_details: true
   commit_status: true
-  fail_commit_status: true
+  # When true, rate limits / skips fail the required GitHub check. Keep false so merges are not blocked.
+  fail_commit_status: false
   collapse_walkthrough: true
   changed_files_summary: true
   poem: false
@@ -33,25 +34,22 @@ reviews:
       instructions: "React + TypeScript + Vite + Ant Design. Check hooks order, types, and accessibility."
     - path: "database/*.sql"
       instructions: "Supabase/PostgreSQL. Check migrations, RLS policies, and indexes."
-
-auto_review:
-  enabled: true
-  drafts: false
-  auto_incremental_review: true
-
-pre_merge_checks:
-  description:
-    mode: "warning"
-  title:
-    mode: "warning"
-
-tools:
-  ruff:
+  auto_review:
     enabled: true
-  eslint:
-    enabled: true
-  gitleaks:
-    enabled: true
+    drafts: false
+    auto_incremental_review: true
+  pre_merge_checks:
+    description:
+      mode: "warning"
+    title:
+      mode: "warning"
+  tools:
+    ruff:
+      enabled: true
+    eslint:
+      enabled: true
+    gitleaks:
+      enabled: true
 
 chat:
   auto_reply: true
