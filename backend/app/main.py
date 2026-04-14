@@ -5326,6 +5326,7 @@ def _payment_ageing_report_payload():
     by_name: dict[str, dict] = {}
     current_fy, current_q = _pa.fy_quarter_key(date.today())
     current_quarter_days_by_name: dict[str, list[int]] = {}
+    current_quarter_received_companies_meta: dict[str, dict] = {}
     for row in pay_rows:
         nm = _norm_name_company(row.get("company_name"))
         if not nm:
@@ -5352,7 +5353,14 @@ def _payment_ageing_report_payload():
         if inv_d and pay_d and pay_d >= inv_d:
             fy0, q0 = _pa.fy_quarter_key(pay_d)
             if fy0 == current_fy and q0 == current_q:
-                current_quarter_days_by_name.setdefault(nm, []).append((pay_d - inv_d).days)
+                days_taken = (pay_d - inv_d).days
+                current_quarter_days_by_name.setdefault(nm, []).append(days_taken)
+                if nm not in current_quarter_received_companies_meta:
+                    current_quarter_received_companies_meta[nm] = {
+                        "company_name": (row.get("company_name") or "").strip() or nm,
+                        "days": [],
+                    }
+                current_quarter_received_companies_meta[nm]["days"].append(days_taken)
 
     ageing_by_name: dict[str, dict] = {}
     ageing_rows_raw: list[dict] = []
@@ -5437,16 +5445,17 @@ def _payment_ageing_report_payload():
             if ak:
                 age = ageing_by_name.get(ak)
         raw_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
-        # Always show stored sheet values in the grid; bucket math uses pre–first-invoice mask only.
+        # Show stored values for historical quarters. For the latest (ongoing) quarter,
+        # only show days when payment is actually received in that quarter.
         display_days = list(raw_days)
         computed_days = current_quarter_days_by_name.get(nm) or []
-        if current_quarter_idx >= 0 and computed_days:
-            auto_day = _pa.median_int(computed_days)
+        if current_quarter_idx >= 0:
+            auto_day = _pa.median_int(computed_days) if computed_days else None
             if current_quarter_idx < len(display_days):
                 display_days[current_quarter_idx] = auto_day
             if current_quarter_idx < len(raw_days):
                 raw_days[current_quarter_idx] = auto_day
-            # Keep DB row synced so current quarter value is persisted.
+            # Keep DB row synced so stale current-quarter values are removed when unpaid.
             prev_val = None
             if age and isinstance(age, dict):
                 prev_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
@@ -5594,6 +5603,20 @@ def _payment_ageing_report_payload():
     }
 
     kpis = _compute_payment_ageing_kpis(pay_rows, allowed if allowed else None)
+    current_quarter_received_companies = []
+    for nm, meta in current_quarter_received_companies_meta.items():
+        if allowed and nm not in allowed:
+            continue
+        dvals = meta.get("days") or []
+        current_quarter_received_companies.append(
+            {
+                "company_name": meta.get("company_name") or nm,
+                "days_to_payment": _pa.median_int(dvals) if dvals else 0,
+            }
+        )
+    current_quarter_received_companies.sort(key=lambda x: (x.get("company_name") or "").lower())
+    kpis["current_quarter_received_company_count"] = len(current_quarter_received_companies)
+    kpis["current_quarter_received_companies"] = current_quarter_received_companies
 
     return {
         "quarter_labels": quarter_labels,
