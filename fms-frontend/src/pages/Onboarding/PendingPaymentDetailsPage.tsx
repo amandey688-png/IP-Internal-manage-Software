@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Alert, DatePicker, Select, Table, Typography, message } from 'antd'
+import { Alert, Button, Checkbox, DatePicker, Modal, Select, Space, Table, Typography, message } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
 import type { ColumnsType } from 'antd/es/table'
 import { apiClient } from '../../api/axios'
@@ -7,6 +7,7 @@ import { API_ENDPOINTS } from '../../utils/constants'
 import { normalizeCompanyDedupeKey } from '../../utils/companiesDedupe'
 import './PendingPaymentDetailsPage.css'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { exportRowsToCsv, type ExportColumn } from '../../utils/exportCsv'
 
 const { Title } = Typography
 const { RangePicker } = DatePicker
@@ -60,6 +61,8 @@ export function PendingPaymentDetailsPage() {
   // Default: current quarter date range.
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>(getCurrentQuarterRange())
   const [companyFilter, setCompanyFilter] = useState<string>('')
+  const [exportOpen, setExportOpen] = useState(false)
+  const [selectedExportColumns, setSelectedExportColumns] = useState<string[]>([])
 
   const fetchRows = useCallback(async () => {
     if (inFlightRef.current) return
@@ -208,6 +211,36 @@ export function PendingPaymentDetailsPage() {
   ]
 
   const tableData = filteredRows
+  const exportColumns: ExportColumn<PendingPaymentRow>[] = [
+    { key: 'reference_no', label: 'Reference No', getValue: (r) => r.reference_no || '-' },
+    { key: 'company_name', label: 'Company Name', getValue: (r) => r.company_name || '-' },
+    { key: 'invoice_date', label: 'Invoice Date', getValue: (r) => (r.invoice_date ? (dayjs(r.invoice_date).isValid() ? dayjs(r.invoice_date).format('MMM D, YYYY') : '-') : '-') },
+    { key: 'invoice_amount', label: 'Invoice Amount', getValue: (r) => parseNum(r.invoice_amount) },
+    { key: 'genre', label: 'Genre', getValue: (r) => String(r.genre || '-') },
+    { key: 'status', label: 'Status', getValue: (r) => String(r.status || '-') },
+    { key: 'aging_days', label: 'Overdue', getValue: (r) => (r.aging_days != null ? r.aging_days : 0) },
+  ]
+  const exportOptions = exportColumns.map((c) => ({ label: c.label, value: c.key }))
+
+  const openExport = () => {
+    setSelectedExportColumns(exportColumns.map((c) => c.key))
+    setExportOpen(true)
+  }
+
+  const handleExport = () => {
+    const cols = exportColumns.filter((c) => selectedExportColumns.includes(c.key))
+    if (!cols.length) {
+      message.warning('Select at least one column to export')
+      return
+    }
+    exportRowsToCsv({
+      filename: `pending-payment-details-${dayjs().format('YYYYMMDD-HHmm')}.csv`,
+      columns: cols,
+      rows: tableData,
+    })
+    setExportOpen(false)
+    message.success('Export started')
+  }
 
   return (
     <div className="ppd-page">
@@ -243,6 +276,7 @@ export function PendingPaymentDetailsPage() {
         </div>
 
         <div className="ppd-top-right">
+          <Button onClick={openExport} style={{ marginBottom: 8 }}>Export</Button>
           <div className="ppd-kpi">
             <div className="ppd-kpi-label">Total Due</div>
             <div className="ppd-kpi-value">₹{fmtINR(totalDue)}</div>
@@ -265,6 +299,24 @@ export function PendingPaymentDetailsPage() {
           />
         </TableWithSkeletonLoading>
       </div>
+
+      <Modal
+        title="Export Pending Payment Details"
+        open={exportOpen}
+        onCancel={() => setExportOpen(false)}
+        onOk={handleExport}
+        okText="Export"
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Typography.Text type="secondary">Select columns to include in export.</Typography.Text>
+          <Checkbox.Group
+            style={{ width: '100%' }}
+            value={selectedExportColumns}
+            options={exportOptions}
+            onChange={(vals) => setSelectedExportColumns(vals as string[])}
+          />
+        </Space>
+      </Modal>
     </div>
   )
 }

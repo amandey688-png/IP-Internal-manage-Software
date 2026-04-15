@@ -5127,6 +5127,12 @@ def _dedupe_ageing_display_rows(rows: list[dict], nq: int) -> list[dict]:
             cid = best.get("company_id")
         med = _pa.average_int(qd)
         last_q = qd[-1] if len(qd) == nq else None
+        fd_merged: list[date] = []
+        for x in grp:
+            fd0 = _pa._parse_date(x.get("first_invoice_date"))
+            if fd0:
+                fd_merged.append(fd0)
+        fd_min = min(fd_merged) if fd_merged else None
         out.append(
             {
                 "company_id": cid,
@@ -5134,8 +5140,9 @@ def _dedupe_ageing_display_rows(rows: list[dict], nq: int) -> list[dict]:
                 "amount_incl_gst": amt,
                 "quarter_days": qd,
                 "median_value": med,
-                "last_quarter_days": int(last_q) if last_q is not None else 0,
+                "last_quarter_days": int(last_q) if last_q is not None else None,
                 "received_amount": rec,
+                "first_invoice_date": fd_min.isoformat() if fd_min else None,
             }
         )
     return out
@@ -5241,8 +5248,12 @@ def _enrich_client_payment_list_items(items: list[dict]) -> None:
                 row["stage"] = "Invoice Sent details"
 
 
-def _compute_payment_ageing_kpis(pay_rows: list, allowed: frozenset[str] | None) -> dict:
-    """Raised vs received from Payment Management (genre Q = quarterly, M = monthly). Same company filter as report."""
+def _compute_payment_ageing_kpis(
+    pay_rows: list,
+    allowed: frozenset[str] | None,
+    receive_by_cp_id: dict[str, dict] | None = None,
+) -> dict:
+    """Raised vs received from Payment Management. Overall includes Q, M, HY (and Y) for invoices raised in the current FY quarter."""
     import calendar
     from datetime import date as date_cls
 
@@ -5256,31 +5267,45 @@ def _compute_payment_ageing_kpis(pay_rows: list, allowed: frozenset[str] | None)
     m_month_raised = m_month_received = 0
     o_raised = o_received = 0
     m_in_q_raised = m_in_q_received = 0
+    hy_in_q_raised = hy_in_q_received = 0
 
     for row in pay_rows or []:
         nm = _norm_name_company(row.get("company_name"))
         if allowed and nm not in allowed:
             continue
         inv_d = _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
-        if not inv_d:
-            continue
+        cp_id = str(row.get("id") or "").strip()
+        rec_row = (receive_by_cp_id or {}).get(cp_id) if cp_id else None
+        pay_d = _pa._parse_date((rec_row or {}).get("payment_date")) or _pa._parse_date(row.get("payment_received_date"))
         amt = _parse_invoice_amount(row.get("invoice_amount"))
-        rec = amt if row.get("payment_received_date") else 0
+        rec_amt = _parse_invoice_amount((rec_row or {}).get("amount")) if rec_row else (amt if pay_d else 0)
         g = _normalize_client_payment_genre(row.get("genre"))
 
-        if q_start <= inv_d <= q_end:
+        # Raised is attributed by invoice date.
+        if inv_d and q_start <= inv_d <= q_end:
             o_raised += amt
-            o_received += rec
             if g == "Q":
                 q_raised += amt
-                q_received += rec
             elif g == "M":
                 m_in_q_raised += amt
-                m_in_q_received += rec
+            elif g == "HY":
+                hy_in_q_raised += amt
 
-        if m_start <= inv_d <= m_end and g == "M":
+        if inv_d and m_start <= inv_d <= m_end and g == "M":
             m_month_raised += amt
-            m_month_received += rec
+
+        # Received is attributed by payment received date.
+        if pay_d and q_start <= pay_d <= q_end:
+            o_received += rec_amt
+            if g == "Q":
+                q_received += rec_amt
+            elif g == "M":
+                m_in_q_received += rec_amt
+            elif g == "HY":
+                hy_in_q_received += rec_amt
+
+        if pay_d and m_start <= pay_d <= m_end and g == "M":
+            m_month_received += rec_amt
 
     def pair(recv: int, raised: int) -> dict:
         return {"received": int(recv), "raised": int(raised)}
@@ -5293,6 +5318,7 @@ def _compute_payment_ageing_kpis(pay_rows: list, allowed: frozenset[str] | None)
         "monthly_genre_m": pair(m_month_received, m_month_raised),
         "overall_in_quarter": pair(o_received, o_raised),
         "monthly_in_quarter": pair(m_in_q_received, m_in_q_raised),
+        "half_yearly_in_quarter": pair(hy_in_q_received, hy_in_q_raised),
     }
 
 
@@ -5314,7 +5340,7 @@ def _payment_ageing_report_payload():
     try:
         pr = (
             supabase.table("onboarding_client_payment")
-            .select("company_name,invoice_amount,invoice_date,timestamp,payment_received_date,genre")
+            .select("id,company_name,invoice_amount,invoice_date,timestamp,payment_received_date,genre")
             .limit(5000)
             .execute()
         )
@@ -5322,11 +5348,40 @@ def _payment_ageing_report_payload():
     except Exception as e:
         _log(f"payment ageing invoices: {e}")
 
-    # Aggregate by normalized company name
+    receive_rows: list[dict] = []
+    try:
+        rr = (
+            supabase.table("onboarding_client_payment_receive")
+            .select("client_payment_id,amount,payment_date")
+            .limit(5000)
+            .execute()
+        )
+        receive_rows = rr.data or []
+    except Exception as e:
+        _log(f"payment ageing receive rows: {e}")
+    receive_by_cp_id: dict[str, dict] = {}
+    for rr in receive_rows:
+        cid = str(rr.get("client_payment_id") or "").strip()
+        if not cid:
+            continue
+        receive_by_cp_id[cid] = rr
+    # Extra companies to include in Ageing when Paym-Rec was submitted (targeted override).
+    auto_include_keys: set[str] = set()
+    for row in pay_rows:
+        cp_id = str(row.get("id") or "").strip()
+        if not cp_id or cp_id not in receive_by_cp_id:
+            continue
+        nm = _norm_name_company(row.get("company_name"))
+        if nm:
+            auto_include_keys.add(nm)
+
+    # Aggregate by normalized company name + bucket payment→invoice days per fiscal quarter column
     by_name: dict[str, dict] = {}
-    current_fy, current_q = _pa.fy_quarter_key(date.today())
-    current_quarter_days_by_name: dict[str, list[int]] = {}
-    current_quarter_received_companies_meta: dict[str, dict] = {}
+    quarter_payment_buckets: dict[tuple[str, int], list[int]] = {}
+    fyq_to_quarter_idx: dict[tuple[int, int], int] = {}
+    for i, k in enumerate(quarter_keys):
+        fyq_to_quarter_idx[(int(k["fy"]), int(k["q"]))] = i
+    current_quarter_idx = len(qroll) - 1 if qroll else -1
     for row in pay_rows:
         nm = _norm_name_company(row.get("company_name"))
         if not nm:
@@ -5338,29 +5393,27 @@ def _payment_ageing_report_payload():
                 "first_date": None,
                 "display_name": (row.get("company_name") or "").strip(),
             }
+        cp_id = str(row.get("id") or "").strip()
+        rec_row = receive_by_cp_id.get(cp_id) if cp_id else None
         amt = _parse_invoice_amount(row.get("invoice_amount"))
+        rec_amt = _parse_invoice_amount((rec_row or {}).get("amount")) if rec_row else (amt if row.get("payment_received_date") else 0)
         by_name[nm]["invoice_total"] += amt
-        if row.get("payment_received_date"):
-            by_name[nm]["received_total"] += amt
+        if rec_amt > 0:
+            by_name[nm]["received_total"] += rec_amt
         inv_d = _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
         fd = by_name[nm]["first_date"]
         if inv_d:
             if fd is None or inv_d < fd:
                 by_name[nm]["first_date"] = inv_d
                 by_name[nm]["display_name"] = (row.get("company_name") or "").strip()
-        # Auto-compute latest ongoing quarter days: payment_received_date - invoice_date (per company).
-        pay_d = _pa._parse_date(row.get("payment_received_date"))
+        pay_d = _pa._parse_date((rec_row or {}).get("payment_date")) or _pa._parse_date(row.get("payment_received_date"))
         if inv_d and pay_d and pay_d >= inv_d:
             fy0, q0 = _pa.fy_quarter_key(pay_d)
-            if fy0 == current_fy and q0 == current_q:
-                days_taken = (pay_d - inv_d).days
-                current_quarter_days_by_name.setdefault(nm, []).append(days_taken)
-                if nm not in current_quarter_received_companies_meta:
-                    current_quarter_received_companies_meta[nm] = {
-                        "company_name": (row.get("company_name") or "").strip() or nm,
-                        "days": [],
-                    }
-                current_quarter_received_companies_meta[nm]["days"].append(days_taken)
+            qi = fyq_to_quarter_idx.get((fy0, q0))
+            if qi is None:
+                continue
+            days_taken = (pay_d - inv_d).days
+            quarter_payment_buckets.setdefault((nm, qi), []).append(days_taken)
 
     ageing_by_name: dict[str, dict] = {}
     ageing_rows_raw: list[dict] = []
@@ -5427,7 +5480,6 @@ def _payment_ageing_report_payload():
     seen: set[str] = set()
     out_rows: list[dict] = []
     auto_updates: list[dict] = []
-    current_quarter_idx = len(qroll) - 1 if qroll else -1
 
     def build_row(company_id: str | None, name: str, nm: str):
         agg = by_name.get(nm, {})
@@ -5435,7 +5487,10 @@ def _payment_ageing_report_payload():
         received_amt = int(agg.get("received_total", 0))
         display_name = agg.get("display_name") or name
         first_d = agg.get("first_date")
-        start_idx = _pa.first_invoiced_quarter_index(qroll, first_d) if first_d else 0
+        # For newly auto-included Paym-Rec companies with empty invoice amount,
+        # show submitted payment amount in Amount (Incl GST).
+        if nm in auto_include_keys and amount_incl_gst <= 0 and received_amt > 0:
+            amount_incl_gst = received_amt
 
         age = ageing_by_name.get(nm)
         if age is None and company_id:
@@ -5444,42 +5499,25 @@ def _payment_ageing_report_payload():
             ak = fuzzy_nm_to_ageing_key.get(nm)
             if ak:
                 age = ageing_by_name.get(ak)
-        raw_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
-        # Show stored values for historical quarters. For the latest (ongoing) quarter,
-        # only show days when payment is actually received in that quarter.
-        display_days = list(raw_days)
-        computed_days = current_quarter_days_by_name.get(nm) or []
-        if current_quarter_idx >= 0:
-            auto_day = _pa.median_int(computed_days) if computed_days else None
-            if current_quarter_idx < len(display_days):
-                display_days[current_quarter_idx] = auto_day
-            if current_quarter_idx < len(raw_days):
-                raw_days[current_quarter_idx] = auto_day
-            # Keep DB row synced so stale current-quarter values are removed when unpaid.
-            prev_val = None
-            if age and isinstance(age, dict):
-                prev_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
-                if current_quarter_idx < len(prev_days):
-                    prev_val = prev_days[current_quarter_idx]
-            if prev_val != auto_day:
-                auto_updates.append(
-                    {
-                        "company_id": company_id,
-                        "company_name": name or display_name,
-                        "quarter_days": raw_days,
-                        "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                    }
-                )
-        bucket_days: list[int | None] = []
-        for i in range(_nq):
-            if i < start_idx:
-                bucket_days.append(None)
-            else:
-                bucket_days.append(raw_days[i])
+        stored_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
+        # Median payment lag per column: only payments *received* in that FY quarter (rolling window).
+        display_days: list[int | None] = [
+            _pa.median_int_or_none(quarter_payment_buckets.get((nm, i), [])) for i in range(_nq)
+        ]
+        persist_days = list(display_days)
+        if persist_days != stored_days:
+            auto_updates.append(
+                {
+                    "company_id": company_id,
+                    "company_name": (name or display_name or "").strip() or nm,
+                    "quarter_days": persist_days,
+                    "updated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                }
+            )
 
         med = _pa.average_int(display_days)
         last_q = display_days[-1] if len(display_days) == _nq else None
-        last_quarter_days = int(last_q) if last_q is not None else 0
+        last_quarter_days = int(last_q) if last_q is not None else None
 
         out_rows.append(
             {
@@ -5526,15 +5564,37 @@ def _payment_ageing_report_payload():
     out_rows.sort(key=lambda r: (r.get("company_name") or "").lower())
 
     if auto_updates:
+        _uniq_updates: dict[str, dict] = {}
+        for u in auto_updates:
+            key = (u.get("company_name") or "").strip()
+            if key:
+                _uniq_updates[key] = u
+        auto_updates = list(_uniq_updates.values())
         try:
             supabase.table("onboarding_client_payment_ageing").upsert(auto_updates, on_conflict="company_name").execute()
         except Exception as e:
-            _log(f"payment ageing auto current-quarter sync: {e}")
+            _log(f"payment ageing auto quarter sync: {e}")
 
-    # Only companies in the quarter's allowed client list (matched after normalize_company_name)
+    # Keep existing visibility unchanged (static allow-list) + include Paym-Rec submitted companies.
+    # Explicit exclude: hide this standalone alias from Ageing row list.
+    manual_exclude_keys = {
+        "salagram power",
+        "odissa concrete allied industries ltd",
+        "orissa concrete allied industries ltd",
+    }
     allowed = _pa.PAYMENT_AGEING_ALLOWED_COMPANY_KEYS
     if allowed:
-        out_rows = [r for r in out_rows if _norm_name_company(r.get("company_name")) in allowed]
+        out_rows = [
+            r
+            for r in out_rows
+            if (
+                (
+                    (_norm_name_company(r.get("company_name")) in allowed)
+                    or (_norm_name_company(r.get("company_name")) in auto_include_keys)
+                )
+                and (_norm_name_company(r.get("company_name")) not in manual_exclude_keys)
+            )
+        ]
 
     # Bucket summary (SUMIFS-style: sum amount where median falls in day range)
     nb = len(_pa.DAY_BUCKETS)
@@ -5602,19 +5662,44 @@ def _payment_ageing_report_payload():
         "fy_24_25_q3": sum(bucket_fy_q3),
     }
 
-    kpis = _compute_payment_ageing_kpis(pay_rows, allowed if allowed else None)
-    current_quarter_received_companies = []
-    for nm, meta in current_quarter_received_companies_meta.items():
-        if allowed and nm not in allowed:
-            continue
-        dvals = meta.get("days") or []
-        current_quarter_received_companies.append(
-            {
-                "company_name": meta.get("company_name") or nm,
-                "days_to_payment": _pa.median_int(dvals) if dvals else 0,
-            }
-        )
-    current_quarter_received_companies.sort(key=lambda x: (x.get("company_name") or "").lower())
+    # KPI cards should reflect all submitted Payment Receive Details, not allowed-list filtered ageing rows.
+    kpis = _compute_payment_ageing_kpis(pay_rows, None, receive_by_cp_id)
+    current_quarter_received_companies: list[dict] = []
+    if current_quarter_idx >= 0:
+        # Keep count/list aligned with real payment rows received in current FY quarter.
+        cq_by_name: dict[str, dict] = {}
+        for row in pay_rows or []:
+            nm = _norm_name_company(row.get("company_name"))
+            if not nm:
+                continue
+            inv_d = _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
+            cp_id = str(row.get("id") or "").strip()
+            rec_row = receive_by_cp_id.get(cp_id) if cp_id else None
+            pay_d = _pa._parse_date((rec_row or {}).get("payment_date")) or _pa._parse_date(row.get("payment_received_date"))
+            if not inv_d or not pay_d or pay_d < inv_d:
+                continue
+            fy0, q0 = _pa.fy_quarter_key(pay_d)
+            if fy0 != qroll[current_quarter_idx][0] or q0 != qroll[current_quarter_idx][1]:
+                continue
+            days_taken = (pay_d - inv_d).days
+            if nm not in cq_by_name:
+                cq_by_name[nm] = {
+                    "company_name": (row.get("company_name") or "").strip() or nm,
+                    "days": [],
+                }
+            cq_by_name[nm]["days"].append(days_taken)
+
+        for _nm, meta in cq_by_name.items():
+            dvals = meta.get("days") or []
+            if not dvals:
+                continue
+            current_quarter_received_companies.append(
+                {
+                    "company_name": meta.get("company_name") or _nm,
+                    "days_to_payment": int(_pa.median_int(dvals)),
+                }
+            )
+        current_quarter_received_companies.sort(key=lambda x: (x.get("company_name") or "").lower())
     kpis["current_quarter_received_company_count"] = len(current_quarter_received_companies)
     kpis["current_quarter_received_companies"] = current_quarter_received_companies
 

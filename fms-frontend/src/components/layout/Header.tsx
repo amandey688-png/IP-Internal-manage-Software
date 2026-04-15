@@ -72,6 +72,8 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
             ? 'Task / Checklist'
             : location.pathname === ROUTES.DELEGATION
               ? 'Task / Delegation'
+              : (location.pathname === ROUTES.CLIENT_PAYMENT || location.pathname === `${ROUTES.CLIENT_PAYMENT}/`)
+                ? 'Client Payment / Payment Management'
               : location.pathname
 
   return (

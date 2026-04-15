@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { Button, Card, DatePicker, Descriptions, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tooltip, Typography, message } from 'antd'
+import { Button, Card, Checkbox, DatePicker, Descriptions, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tooltip, Typography, message } from 'antd'
 import { CheckCircleOutlined, EditOutlined, FormOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { API_ENDPOINTS } from '../../utils/constants'
 import { apiClient } from '../../api/axios'
 import { useAuth } from '../../hooks/useAuth'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { exportRowsToCsv, type ExportColumn } from '../../utils/exportCsv'
 
 const { Title, Text } = Typography
 
@@ -118,6 +119,8 @@ export function ClientPaymentPage() {
   const [paymRecForm] = Form.useForm()
   const [currentFollowupNo, setCurrentFollowupNo] = useState(1)
   const [companyNameFilter, setCompanyNameFilter] = useState('')
+  const [exportOpen, setExportOpen] = useState(false)
+  const [selectedExportColumns, setSelectedExportColumns] = useState<string[]>([])
 
   const location = useLocation()
   const completedSection = location.pathname.includes('/completed/') ? location.pathname.split('/completed/')[1]?.split('/')[0] || null : null
@@ -626,6 +629,22 @@ export function ClientPaymentPage() {
     }).catch(() => {})
   }
 
+  const buildColumnFilters = (values: Array<string | number | null | undefined>) => {
+    const uniq = Array.from(
+      new Set(
+        values
+          .map((v) => (v === null || v === undefined || String(v).trim() === '' ? '—' : String(v)))
+          .filter(Boolean),
+      ),
+    )
+    return uniq.sort((a, b) => a.localeCompare(b)).map((v) => ({ text: v, value: v }))
+  }
+
+  const genreLabel = (v: string | null | undefined) => {
+    const map: Record<string, string> = { M: 'Monthly', Q: 'Quarterly', HY: 'Half yearly', Y: 'Yearly' }
+    return map[String(v || '')] || v || '—'
+  }
+
   const columns = [
     {
       title: 'Timestamp',
@@ -633,6 +652,11 @@ export function ClientPaymentPage() {
       key: 'timestamp',
       width: 170,
       render: (v: string) => (v ? dayjs(v).format('DD-MMM-YYYY HH:mm') : '—'),
+      filters: buildColumnFilters(records.map((r) => (r.timestamp ? dayjs(r.timestamp).format('DD-MMM-YYYY HH:mm') : '—'))),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) =>
+        (record.timestamp ? dayjs(record.timestamp).format('DD-MMM-YYYY HH:mm') : '—') === String(value),
     },
     {
       title: 'Reference',
@@ -640,12 +664,20 @@ export function ClientPaymentPage() {
       key: 'reference_no',
       width: 130,
       render: (v: string | null | undefined) => v || '—',
+      filters: buildColumnFilters(records.map((r) => r.reference_no || '—')),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) => (record.reference_no || '—') === String(value),
     },
     {
       title: 'Company Name',
       dataIndex: 'company_name',
       key: 'company_name',
       width: 200,
+      filters: buildColumnFilters(records.map((r) => r.company_name || '—')),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) => (record.company_name || '—') === String(value),
     },
     {
       title: 'Invoice Date',
@@ -653,18 +685,31 @@ export function ClientPaymentPage() {
       key: 'invoice_date',
       width: 130,
       render: (v: string | null) => (v ? dayjs(v).format('DD-MMM-YYYY') : '—'),
+      filters: buildColumnFilters(records.map((r) => (r.invoice_date ? dayjs(r.invoice_date).format('DD-MMM-YYYY') : '—'))),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) =>
+        (record.invoice_date ? dayjs(record.invoice_date).format('DD-MMM-YYYY') : '—') === String(value),
     },
     {
       title: 'Invoice Amount',
       dataIndex: 'invoice_amount',
       key: 'invoice_amount',
       width: 130,
+      filters: buildColumnFilters(records.map((r) => r.invoice_amount || '—')),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) => (record.invoice_amount || '—') === String(value),
     },
     {
       title: 'Invoice Number',
       dataIndex: 'invoice_number',
       key: 'invoice_number',
       width: 130,
+      filters: buildColumnFilters(records.map((r) => r.invoice_number || '—')),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) => (record.invoice_number || '—') === String(value),
     },
     {
       title: 'Stage',
@@ -672,6 +717,10 @@ export function ClientPaymentPage() {
       key: 'stage',
       width: 160,
       render: (v: string | null | undefined) => v || '—',
+      filters: buildColumnFilters(records.map((r) => r.stage || '—')),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) => (record.stage || '—') === String(value),
     },
     {
       title: 'Status',
@@ -679,6 +728,10 @@ export function ClientPaymentPage() {
       key: 'status',
       width: 110,
       render: (v: string | null | undefined) => v || 'Pending',
+      filters: buildColumnFilters(records.map((r) => r.status || 'Pending')),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) => (record.status || 'Pending') === String(value),
     },
     {
       title: 'Aging (days)',
@@ -686,18 +739,59 @@ export function ClientPaymentPage() {
       key: 'aging_days',
       width: 120,
       render: (v: number | null | undefined) => (typeof v === 'number' ? v : 0),
+      filters: buildColumnFilters(records.map((r) => (typeof r.aging_days === 'number' ? r.aging_days : 0))),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) =>
+        String(typeof record.aging_days === 'number' ? record.aging_days : 0) === String(value),
     },
     {
       title: 'Genre',
       dataIndex: 'genre',
       key: 'genre',
       width: 120,
-      render: (v: string) => {
-        const map: Record<string, string> = { M: 'Monthly', Q: 'Quarterly', HY: 'Half yearly', Y: 'Yearly' }
-        return map[v] || v || '—'
-      },
+      render: (v: string) => genreLabel(v),
+      filters: buildColumnFilters(records.map((r) => genreLabel(r.genre))),
+      filterSearch: true,
+      filterMultiple: true,
+      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) => genreLabel(record.genre) === String(value),
     },
   ]
+
+  const exportColumns: ExportColumn<ClientPaymentRecord>[] = [
+    { key: 'timestamp', label: 'Timestamp', getValue: (r) => (r.timestamp ? dayjs(r.timestamp).format('DD-MMM-YYYY HH:mm') : '—') },
+    { key: 'reference_no', label: 'Reference', getValue: (r) => r.reference_no || '—' },
+    { key: 'company_name', label: 'Company Name', getValue: (r) => r.company_name || '—' },
+    { key: 'invoice_date', label: 'Invoice Date', getValue: (r) => (r.invoice_date ? dayjs(r.invoice_date).format('DD-MMM-YYYY') : '—') },
+    { key: 'invoice_amount', label: 'Invoice Amount', getValue: (r) => r.invoice_amount || '—' },
+    { key: 'invoice_number', label: 'Invoice Number', getValue: (r) => r.invoice_number || '—' },
+    { key: 'stage', label: 'Stage', getValue: (r) => r.stage || '—' },
+    { key: 'status', label: 'Status', getValue: (r) => r.status || 'Pending' },
+    { key: 'aging_days', label: 'Aging (days)', getValue: (r) => (typeof r.aging_days === 'number' ? r.aging_days : 0) },
+    { key: 'genre', label: 'Genre', getValue: (r) => genreLabel(r.genre) },
+  ]
+  const exportOptions = exportColumns.map((c) => ({ label: c.label, value: c.key }))
+
+  const openExport = () => {
+    setSelectedExportColumns(exportColumns.map((c) => c.key))
+    setExportOpen(true)
+  }
+
+  const handleExport = () => {
+    const cols = exportColumns.filter((c) => selectedExportColumns.includes(c.key))
+    if (!cols.length) {
+      message.warning('Select at least one column to export')
+      return
+    }
+    const sectionLabel = completedSection ? completedSection : 'payment-management'
+    exportRowsToCsv({
+      filename: `client-payment-${sectionLabel}-${dayjs().format('YYYYMMDD-HHmm')}.csv`,
+      columns: cols,
+      rows: filteredRecords,
+    })
+    setExportOpen(false)
+    message.success('Export started')
+  }
 
   const pageTitle = completedSection ? `Client Payment – ${completedSection}` : 'Raised Invoices'
   const dayOfMonth = new Date().getDate()
@@ -762,6 +856,7 @@ export function ClientPaymentPage() {
               Add Invoice
             </Button>
           )}
+          <Button onClick={openExport}>Export</Button>
         </Space>
       </Space>
 
@@ -992,6 +1087,24 @@ export function ClientPaymentPage() {
           </>
         )}
       </Drawer>
+
+      <Modal
+        title="Export Client Payment"
+        open={exportOpen}
+        onCancel={() => setExportOpen(false)}
+        onOk={handleExport}
+        okText="Export"
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Text type="secondary">Select columns to include in export.</Text>
+          <Checkbox.Group
+            style={{ width: '100%' }}
+            value={selectedExportColumns}
+            options={exportOptions}
+            onChange={(vals) => setSelectedExportColumns(vals as string[])}
+          />
+        </Space>
+      </Modal>
 
       <Modal
         title="Invoice Sent details"
