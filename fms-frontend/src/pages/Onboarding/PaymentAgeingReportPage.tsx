@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import {
   Button,
   Card,
+  Checkbox,
   Collapse,
   Col,
   InputNumber,
@@ -17,6 +18,7 @@ import { ReloadOutlined, EditOutlined } from '@ant-design/icons'
 import { apiClient } from '../../api/axios'
 import { API_ENDPOINTS } from '../../utils/constants'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { exportRowsToCsv, type ExportColumn } from '../../utils/exportCsv'
 
 const { Title, Text, Link } = Typography
 
@@ -30,6 +32,8 @@ type PaymentAgeingKpis = {
   monthly_genre_m: KpiPair
   overall_in_quarter: KpiPair
   monthly_in_quarter: KpiPair
+  /** Half-yearly raises in the current FY quarter (from Payment Management). */
+  half_yearly_in_quarter?: KpiPair
   current_quarter_received_company_count?: number
   current_quarter_received_companies?: Array<{
     company_name: string
@@ -51,7 +55,7 @@ type AgeingRow = {
   amount_incl_gst: number
   quarter_days: (number | null)[]
   median_value: number
-  last_quarter_days: number
+  last_quarter_days: number | null
   received_amount: number
   /** ISO date; used server-side for bucket weighting (optional on older API). */
   first_invoice_date?: string | null
@@ -139,6 +143,8 @@ export function PaymentAgeingReportPage() {
   const [editDays, setEditDays] = useState<(number | null)[]>(Array(QUARTER_COUNT).fill(null))
   const [saving, setSaving] = useState(false)
   const [receivedCompanyModalOpen, setReceivedCompanyModalOpen] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [selectedExportColumns, setSelectedExportColumns] = useState<string[]>([])
 
   const load = useCallback(() => {
     setLoading(true)
@@ -165,6 +171,14 @@ export function PaymentAgeingReportPage() {
 
   useEffect(() => {
     load()
+  }, [load])
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
   }, [load])
 
   const columns: ColumnsType<AgeingRow> = useMemo(() => {
@@ -239,8 +253,16 @@ export function PaymentAgeingReportPage() {
         key: 'last_quarter_days',
         width: 100,
         align: 'center',
-        filters: buildFilters((data?.rows || []).map((r) => String(r.last_quarter_days))),
-        onFilter: (value, record) => String(record.last_quarter_days) === value,
+        render: (v: number | null | undefined) =>
+          v === null || v === undefined ? '—' : String(v),
+        filters: buildFilters(
+          (data?.rows || []).map((r) =>
+            r.last_quarter_days === null || r.last_quarter_days === undefined ? '—' : String(r.last_quarter_days),
+          ),
+        ),
+        onFilter: (value, record) =>
+          (record.last_quarter_days === null || record.last_quarter_days === undefined ? '—' : String(record.last_quarter_days)) ===
+          value,
       },
       {
         title: '',
@@ -254,9 +276,10 @@ export function PaymentAgeingReportPage() {
             icon={<EditOutlined />}
             onClick={() => {
               setEditRow(record)
+              const nq = data?.quarter_labels?.length || QUARTER_COUNT
               const d = [...(record.quarter_days || [])]
-              while (d.length < QUARTER_COUNT) d.push(null)
-              setEditDays(d.slice(0, QUARTER_COUNT))
+              while (d.length < nq) d.push(null)
+              setEditDays(d.slice(0, nq))
               setEditOpen(true)
             }}
           >
@@ -271,11 +294,14 @@ export function PaymentAgeingReportPage() {
 
   const saveQuarters = () => {
     if (!editRow) return
+    const nq = data?.quarter_labels?.length || QUARTER_COUNT
+    const padded = [...editDays]
+    while (padded.length < nq) padded.push(null)
     const key = editRow.company_id || editRow.company_name
     const pathKey = encodeURIComponent(key)
     setSaving(true)
     apiClient
-      .put(`${API_ENDPOINTS.CLIENT_PAYMENT.PAYMENT_AGEING_REPORT}/${pathKey}`, { quarter_days: editDays })
+      .put(`${API_ENDPOINTS.CLIENT_PAYMENT.PAYMENT_AGEING_REPORT}/${pathKey}`, { quarter_days: padded.slice(0, nq) })
       .then(() => {
         message.success('Quarter days saved')
         setEditOpen(false)
@@ -335,6 +361,45 @@ export function PaymentAgeingReportPage() {
   const summaryTotals = data?.summary?.totals
   const kpis = data?.kpis
   const receivedCompanies = kpis?.current_quarter_received_companies ?? []
+  const exportColumns = useMemo<ExportColumn<AgeingRow>[]>(() => {
+    const cols: ExportColumn<AgeingRow>[] = [
+      { key: 'company_name', label: 'Company Name', getValue: (r) => r.company_name || '' },
+      { key: 'amount_incl_gst', label: 'Amount (Incl GST)', getValue: (r) => r.amount_incl_gst },
+    ]
+    ;(data?.quarter_labels || []).forEach((label, idx) => {
+      cols.push({
+        key: `q${idx}`,
+        label: `${label} (Days)`,
+        getValue: (r) => (r.quarter_days[idx] == null ? '' : r.quarter_days[idx]),
+      })
+    })
+    cols.push(
+      { key: 'median_value', label: 'Median value', getValue: (r) => r.median_value },
+      { key: 'last_quarter_days', label: 'Last quarter days', getValue: (r) => (r.last_quarter_days == null ? '' : r.last_quarter_days) },
+    )
+    return cols
+  }, [data?.quarter_labels])
+  const exportOptions = exportColumns.map((c) => ({ label: c.label, value: c.key }))
+
+  const openExport = () => {
+    setSelectedExportColumns(exportColumns.map((c) => c.key))
+    setExportOpen(true)
+  }
+
+  const handleExport = () => {
+    const cols = exportColumns.filter((c) => selectedExportColumns.includes(c.key))
+    if (!cols.length) {
+      message.warning('Select at least one column to export')
+      return
+    }
+    exportRowsToCsv({
+      filename: `payment-ageing-report-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.csv`,
+      columns: cols,
+      rows: data?.rows || [],
+    })
+    setExportOpen(false)
+    message.success('Export started')
+  }
 
   return (
     <div style={{ padding: 16 }}>
@@ -368,6 +433,13 @@ export function PaymentAgeingReportPage() {
                   <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
                     Monthly raises in this quarter: {fmt(kpis.monthly_in_quarter.received)} /{' '}
                     {fmt(kpis.monthly_in_quarter.raised)} (received / raised)
+                    {kpis.half_yearly_in_quarter ? (
+                      <>
+                        <br />
+                        Half-yearly raises in this quarter: {fmt(kpis.half_yearly_in_quarter.received)} /{' '}
+                        {fmt(kpis.half_yearly_in_quarter.raised)} (received / raised)
+                      </>
+                    ) : null}
                   </Text>
                 ) : null
               }
@@ -399,6 +471,7 @@ export function PaymentAgeingReportPage() {
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
             Refresh
           </Button>
+          <Button onClick={openExport}>Export</Button>
         </Space>
 
         <Card size="small">
@@ -499,7 +572,8 @@ export function PaymentAgeingReportPage() {
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           <Text type="secondary">
-            Enter payment days for each of the 10 fiscal quarters (Q3 FY 23-24 → Q4 FY 25-26), oldest → newest.
+            Enter payment days for each fiscal quarter column (oldest → newest). Values are overwritten on refresh when
+            Payment Management has a received date in that quarter (invoice date → payment date).
           </Text>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
             {data?.quarter_labels?.map((label, i) => (
@@ -554,6 +628,24 @@ export function PaymentAgeingReportPage() {
         <Text type="secondary" style={{ fontSize: 12 }}>
           Days to Payment = Invoice Date to Payment Received Date (only for payments received in this quarter).
         </Text>
+      </Modal>
+
+      <Modal
+        title="Export Payment Ageing"
+        open={exportOpen}
+        onCancel={() => setExportOpen(false)}
+        onOk={handleExport}
+        okText="Export"
+      >
+        <Space direction="vertical" style={{ width: '100%' }}>
+          <Text type="secondary">Select columns to include in export.</Text>
+          <Checkbox.Group
+            style={{ width: '100%' }}
+            value={selectedExportColumns}
+            options={exportOptions}
+            onChange={(vals) => setSelectedExportColumns(vals as string[])}
+          />
+        </Space>
       </Modal>
     </div>
   )

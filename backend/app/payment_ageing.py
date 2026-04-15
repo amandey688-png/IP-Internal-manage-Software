@@ -285,6 +285,18 @@ def median_int(vals: list[int | None]) -> int:
     return (nums[mid - 1] + nums[mid]) // 2
 
 
+def median_int_or_none(vals: list[int]) -> int | None:
+    """Median of ints; None when there are no values (use for quarter ageing cells)."""
+    nums = sorted(int(v) for v in vals if v is not None)
+    if not nums:
+        return None
+    n = len(nums)
+    mid = n // 2
+    if n % 2 == 1:
+        return nums[mid]
+    return (nums[mid - 1] + nums[mid]) // 2
+
+
 def average_int(vals: list[int | None]) -> int:
     nums = [int(v) for v in vals if v is not None]
     if not nums:
