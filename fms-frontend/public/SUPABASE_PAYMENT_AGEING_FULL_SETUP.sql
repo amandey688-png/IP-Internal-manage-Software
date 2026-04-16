@@ -98,6 +98,7 @@ VALUES
   ('Super Iron Foundry', '[null,null,null,27,null,null,31,null,10,null]'::jsonb, now()),
   ('Plascom Industries LLP', '[null,null,null,null,120,30,6,44,21,40]'::jsonb, now()),
   ('Odissa Concrete & Allied Industries Limited', '[null,null,null,null,6,26,10,11,10,13]'::jsonb, now()),
+  ('Odissa Concrete & Allied Industries Limited (new)', '[null,null,null,null,6,26,10,11,10,13]'::jsonb, now()),
   ('Anjanisuta Steels Private Limited', '[null,null,null,null,null,null,48,24,40,27]'::jsonb, now()),
   ('Niranjan Metalliks Ltd.', '[null,null,null,null,null,null,16,27,22,5]'::jsonb, now()),
   ('Mangal Sponge & Steel Pvt. Ltd.', '[null,null,null,null,null,null,16,11,51,27]'::jsonb, now()),

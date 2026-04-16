@@ -213,7 +213,8 @@ export function PaymentAgeingReportPage() {
       },
     ]
 
-    data.quarter_labels.forEach((label, idx) => {
+    const historicalQuarterLabels = data.quarter_labels.slice(0, -1)
+    historicalQuarterLabels.forEach((label, idx) => {
       base.push({
         title: (
           <span>
@@ -366,16 +367,22 @@ export function PaymentAgeingReportPage() {
       { key: 'company_name', label: 'Company Name', getValue: (r) => r.company_name || '' },
       { key: 'amount_incl_gst', label: 'Amount (Incl GST)', getValue: (r) => r.amount_incl_gst },
     ]
-    ;(data?.quarter_labels || []).forEach((label, idx) => {
+    const historicalQuarterLabels = (data?.quarter_labels || []).slice(0, -1)
+    historicalQuarterLabels.forEach((label, idx) => {
       cols.push({
         key: `q${idx}`,
         label: `${label} (Days)`,
         getValue: (r) => (r.quarter_days[idx] == null ? '' : r.quarter_days[idx]),
       })
     })
+    const latestQuarterLabel = data?.quarter_labels?.[data.quarter_labels.length - 1] || 'Current quarter'
     cols.push(
       { key: 'median_value', label: 'Median value', getValue: (r) => r.median_value },
-      { key: 'last_quarter_days', label: 'Last quarter days', getValue: (r) => (r.last_quarter_days == null ? '' : r.last_quarter_days) },
+      {
+        key: 'last_quarter_days',
+        label: `${latestQuarterLabel} (Days)`,
+        getValue: (r) => (r.last_quarter_days == null ? '' : r.last_quarter_days),
+      },
     )
     return cols
   }, [data?.quarter_labels])
