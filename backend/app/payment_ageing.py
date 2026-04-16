@@ -4,6 +4,9 @@ Fiscal quarter helpers (India FY: Apr–Mar) and payment-ageing bucket math.
 from __future__ import annotations
 
 import re
+import json
+from functools import lru_cache
+from pathlib import Path
 from datetime import date, datetime
 from typing import Any
 
@@ -382,3 +385,35 @@ def normalize_quarter_days(raw: Any, n: int | None = None) -> list[int | None]:
         except (TypeError, ValueError):
             out.append(None)
     return out
+
+
+@lru_cache(maxsize=1)
+def _seed_quarter_days_by_norm_name() -> dict[str, list[int | None]]:
+    """
+    Load seeded ageing values from docs/payment_ageing_bulk_import.json once.
+    Used as a recovery fallback when DB rows are accidentally nulled.
+    """
+    try:
+        root = Path(__file__).resolve().parents[2]
+        p = root / "docs" / "payment_ageing_bulk_import.json"
+        data = json.loads(p.read_text(encoding="utf-8"))
+        rows = data.get("rows", []) if isinstance(data, dict) else []
+    except Exception:
+        return {}
+    out: dict[str, list[int | None]] = {}
+    for r in rows:
+        cn = normalize_company_name((r or {}).get("company_name"))
+        if not cn:
+            continue
+        qd = normalize_quarter_days((r or {}).get("quarter_days"), PAYMENT_AGEING_QUARTER_COUNT)
+        if any(v is not None for v in qd):
+            out[cn] = qd
+    return out
+
+
+def seed_quarter_days_for_company(norm_name: str) -> list[int | None] | None:
+    if not norm_name:
+        return None
+    m = _seed_quarter_days_by_norm_name()
+    qd = m.get(norm_name)
+    return list(qd) if qd else None

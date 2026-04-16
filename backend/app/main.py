@@ -5500,12 +5500,27 @@ def _payment_ageing_report_payload():
             if ak:
                 age = ageing_by_name.get(ak)
         stored_days = _pa.normalize_quarter_days((age or {}).get("quarter_days"), _nq)
-        # Median payment lag per column: only payments *received* in that FY quarter (rolling window).
-        display_days: list[int | None] = [
-            _pa.median_int_or_none(quarter_payment_buckets.get((nm, i), [])) for i in range(_nq)
-        ]
+        has_stored_days = any(v is not None for v in stored_days)
+        seed_recover = False
+        if not has_stored_days:
+            seed_days = _pa.seed_quarter_days_for_company(nm)
+            if seed_days and any(v is not None for v in seed_days):
+                stored_days = seed_days
+                seed_recover = True
+        # Keep DB-stored ageing values visible; override a quarter only when live Paym-Rec data exists for it.
+        display_days: list[int | None] = list(stored_days)
+        for i in range(_nq):
+            live_vals = quarter_payment_buckets.get((nm, i), [])
+            live_med = _pa.median_int_or_none(live_vals)
+            if live_med is not None:
+                display_days[i] = live_med
+        # Latest ongoing quarter should appear only after a payment is received in that quarter.
+        if current_quarter_idx >= 0:
+            latest_live_vals = quarter_payment_buckets.get((nm, current_quarter_idx), [])
+            if not latest_live_vals:
+                display_days[current_quarter_idx] = None
         persist_days = list(display_days)
-        if persist_days != stored_days:
+        if persist_days != stored_days or seed_recover:
             auto_updates.append(
                 {
                     "company_id": company_id,
@@ -5579,8 +5594,6 @@ def _payment_ageing_report_payload():
     # Explicit exclude: hide this standalone alias from Ageing row list.
     manual_exclude_keys = {
         "salagram power",
-        "odissa concrete allied industries ltd",
-        "orissa concrete allied industries ltd",
     }
     allowed = _pa.PAYMENT_AGEING_ALLOWED_COMPANY_KEYS
     if allowed:
