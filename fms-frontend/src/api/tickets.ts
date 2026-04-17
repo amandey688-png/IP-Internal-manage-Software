@@ -118,6 +118,18 @@ export interface CreateTicketRequest {
 export interface UpdateTicketRequest {
   title?: string
   description?: string
+  company_id?: string
+  page_id?: string
+  division_id?: string
+  division_other?: string
+  user_name?: string
+  communicated_through?: string
+  submitted_by?: string
+  query_arrival_at?: string
+  quality_of_response?: string
+  customer_questions?: string
+  query_response_at?: string
+  attachment_url?: string
   status?: Ticket['status']
   priority?: Ticket['priority']
   assignee_id?: string
