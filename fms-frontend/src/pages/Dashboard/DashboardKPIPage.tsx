@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import {
   Typography,
   Card,
@@ -35,6 +36,7 @@ import type { AxiosError } from 'axios'
 import './dashboard-kpi.css'
 import {
   dashboardKpiApi,
+  DASHBOARD_KPI_NAMES,
   MONTHS,
   WEEKS,
   YEARS,
@@ -187,6 +189,7 @@ const getPerformanceLevel = (value?: number) => {
 
 export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi' }: DashboardKPIPageProps) => {
   const { user } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
   const previousWeekDefaults = getDefaultPreviousWeekFilter()
   const [selectedPerson, setSelectedPerson] = useState<DashboardKpiPerson | null>(forceOpen ? defaultPerson : null)
   const [month, setMonth] = useState<string>(MONTHS[previousWeekDefaults.monthIndex] ?? MONTHS[dayjs().month()])
@@ -443,6 +446,15 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
     else setData(null)
   }, [selectedPerson, loadData])
 
+  /** Deep-link from main Dashboard (e.g. ?person=Shreyasi). */
+  useEffect(() => {
+    if (forceOpen) return
+    const raw = searchParams.get('person')?.trim()
+    if (!raw) return
+    const match = DASHBOARD_KPI_NAMES.find((n) => n.toLowerCase() === raw.toLowerCase())
+    if (match) setSelectedPerson(match)
+  }, [forceOpen, searchParams])
+
   useEffect(() => {
     if (selectedPerson !== 'Adrija') {
       setAdrijaSocialModalOpen(false)
@@ -476,7 +488,10 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
             <Col key={opt.key} xs={24} sm={12} md={12} lg={6}>
               <Card
                 hoverable
-                onClick={() => setSelectedPerson(opt.key)}
+                onClick={() => {
+                  setSelectedPerson(opt.key)
+                  setSearchParams({ person: opt.key }, { replace: true })
+                }}
                 className={`kpi-card kpi-card--${String(opt.key).toLowerCase()}`}
                 style={{ cursor: 'pointer', textAlign: 'left', minHeight: 160 }}
               >
@@ -520,7 +535,14 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
         {!forceOpen && (
           <Space wrap>
-            <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => setSelectedPerson(null)}>
+            <Button
+              type="text"
+              icon={<ArrowLeftOutlined />}
+              onClick={() => {
+                setSelectedPerson(null)
+                setSearchParams({}, { replace: true })
+              }}
+            >
               Back to dashboards
             </Button>
           </Space>

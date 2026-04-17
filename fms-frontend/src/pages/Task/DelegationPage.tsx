@@ -25,6 +25,7 @@ import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 
 const { Title, Text } = Typography
 const { Dragger } = Upload
+const { RangePicker } = DatePicker
 
 const STATUS_COLORS: Record<string, string> = {
   pending: 'orange',
@@ -45,6 +46,7 @@ export const DelegationPage = () => {
   const [modalOpen, setModalOpen] = useState(false)
   const [statusFilter, setStatusFilter] = useState<string>('pending')
   const [userFilter, setUserFilter] = useState<string | undefined>(undefined)
+  const [delegationOnRangeFilter, setDelegationOnRangeFilter] = useState<[dayjs.Dayjs | null, dayjs.Dayjs | null] | null>(null)
   const initialUserFilterSet = useRef(false)
   const [referenceNoFilter, setReferenceNoFilter] = useState<string>('__all__')
   const [completeModalTask, setCompleteModalTask] = useState<DelegationTask | null>(null)
@@ -86,9 +88,27 @@ export const DelegationPage = () => {
     if (!canManage || userFilter !== undefined) loadTasks()
   }, [loadTasks, canManage, userFilter])
 
-  const displayTasks = referenceNoFilter && referenceNoFilter !== '__all__'
-    ? tasks.filter((t) => t.reference_no === referenceNoFilter)
-    : tasks
+  const displayTasks = useMemo(() => {
+    let rows = [...tasks]
+    if (referenceNoFilter && referenceNoFilter !== '__all__') {
+      rows = rows.filter((t) => t.reference_no === referenceNoFilter)
+    }
+    if (delegationOnRangeFilter?.[0] && delegationOnRangeFilter?.[1]) {
+      const start = delegationOnRangeFilter[0].startOf('day')
+      const end = delegationOnRangeFilter[1].endOf('day')
+      rows = rows.filter((t) => {
+        const d = t.delegation_on ? dayjs(t.delegation_on) : null
+        return !!d?.isValid() && (d.isAfter(start) || d.isSame(start)) && (d.isBefore(end) || d.isSame(end))
+      })
+    }
+    // Recently added first based on Delegation On date.
+    rows.sort((a, b) => {
+      const ta = a.delegation_on ? dayjs(a.delegation_on).valueOf() : 0
+      const tb = b.delegation_on ? dayjs(b.delegation_on).valueOf() : 0
+      return tb - ta
+    })
+    return rows
+  }, [tasks, referenceNoFilter, delegationOnRangeFilter])
 
   const delegationExportData = useMemo(() => {
     const fmt = (d: string | undefined) => (d ? dayjs(d).format('DD/MM/YYYY') : '')
@@ -364,6 +384,13 @@ export const DelegationPage = () => {
               value={referenceNoFilter}
               onChange={setReferenceNoFilter}
               options={referenceNoOptions}
+            />
+            <RangePicker
+              style={{ width: 240 }}
+              value={delegationOnRangeFilter as [dayjs.Dayjs, dayjs.Dayjs] | null}
+              onChange={(v) => setDelegationOnRangeFilter((v as [dayjs.Dayjs | null, dayjs.Dayjs | null]) ?? null)}
+              allowClear
+              format="DD/MM/YYYY"
             />
             {canManage && (
               <Select

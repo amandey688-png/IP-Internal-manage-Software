@@ -1,4 +1,4 @@
-import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Tag, Form, Input, message, Space } from 'antd'
+import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Tag, Form, Input, message, Space, Spin } from 'antd'
 import {
   LineChart,
   Line,
@@ -15,7 +15,7 @@ import {
   CheckCircleOutlined,
   RocketOutlined,
 } from '@ant-design/icons'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import { dashboardApi, type DashboardDetailTicket, type TrendPoint } from '../api/dashboard'
@@ -31,6 +31,14 @@ import {
 } from '../utils/helpers'
 import { ROUTES } from '../utils/constants'
 import { useAuth } from '../hooks/useAuth'
+import {
+  dashboardKpiApi,
+  DASHBOARD_KPI_NAMES,
+  MONTHS,
+  type DashboardKpiPerson,
+  type DashboardKpiResponse,
+} from '../api/dashboardKpi'
+import { weekOfMonth } from './Dashboard/kpiWeekUtils'
 import type { Ticket } from '../api/tickets'
 import type { DashboardMetrics } from '../api/dashboard'
 
@@ -51,6 +59,34 @@ const ACTIVE_LEAD_STAGE_COLORS: Record<string, string> = {
 }
 
 const { Title, Text } = Typography
+
+const KPI_DASHBOARD_LINK_LABELS: Record<DashboardKpiPerson, string> = {
+  Shreyasi: 'Shreyasi Dashboard',
+  Rimpa: 'Rimpa Dashboard',
+  Akash: 'Akash Dashboard',
+  Adrija: 'Adrija Dashboard',
+}
+
+function formatDateTime(v?: string | null): string {
+  if (!v) return '—'
+  const d = dayjs(v)
+  return d.isValid() ? d.format('DD-MM-YY hh:mm:ss A') : '—'
+}
+
+function formatKpiWeeklySnapshot(data: DashboardKpiResponse | undefined): string {
+  if (!data) return ''
+  const parts: string[] = []
+  const c = data.checklist?.weeklyPercentage
+  if (c != null && Number.isFinite(Number(c))) parts.push(`Checklist ${c}%`)
+  const del = data.delegation?.weeklyPercentage
+  if (del != null && Number.isFinite(Number(del))) parts.push(`Delegation ${del}%`)
+  const sup = data.supportFMS?.weeklyPercentage
+  if (sup != null && Number.isFinite(Number(sup))) parts.push(`Support FMS ${sup}%`)
+  if (data.successKpi != null) parts.push(`Success KPI ${data.successKpi.overallPercentage ?? 0}%`)
+  const ad = data.adrijaSocialKpi?.weeklyPercent
+  if (ad != null && Number.isFinite(Number(ad))) parts.push(`Adrija social (week) ${ad}%`)
+  return parts.join(' · ') || 'No weekly snapshot'
+}
 
 function formatINR(n: number): string {
   try {
@@ -106,6 +142,7 @@ export const Dashboard = () => {
   const [detailMetric, setDetailMetric] = useState<string | null>(null)
   const [detailTitle, setDetailTitle] = useState('')
   const [detailData, setDetailData] = useState<DashboardDetailTicket[]>([])
+  const [delegationDateFilter, setDelegationDateFilter] = useState<dayjs.Dayjs | null>(null)
   const [detailLoading, setDetailLoading] = useState(false)
   const hideCompanyColumnInDelegation = detailMetric === 'custom_pending_delegation'
   const isPaymentKpiDetail =
@@ -136,10 +173,61 @@ export const Dashboard = () => {
   const [paymentActionSubmitting, setPaymentActionSubmitting] = useState(false)
   const [paymentActionForm] = Form.useForm<{ person: string; remarks: string }>()
   const [trendPoints, setTrendPoints] = useState<TrendPoint[]>([])
+  const [kpiSnapshotByPerson, setKpiSnapshotByPerson] = useState<Partial<Record<DashboardKpiPerson, DashboardKpiResponse>>>({})
+  const [kpiSnapshotLoading, setKpiSnapshotLoading] = useState(false)
+  const [kpiSnapshotFilterLabel, setKpiSnapshotFilterLabel] = useState('')
+  const [successKpiTillDate, setSuccessKpiTillDate] = useState<DashboardKpiResponse['successKpi'] | null>(null)
+  const [successPerformanceLoading, setSuccessPerformanceLoading] = useState(false)
+  const [successDetailModal, setSuccessDetailModal] = useState<{
+    key: 'poc' | 'training' | 'followup' | 'increase'
+    title: string
+    rows: Array<Record<string, unknown>>
+  } | null>(null)
 
   useEffect(() => {
     fetchData()
   }, [])
+
+  useEffect(() => {
+    if (!isCustomDashboardFullUser) {
+      setKpiSnapshotByPerson({})
+      setKpiSnapshotFilterLabel('')
+      return
+    }
+    const now = dayjs()
+    const month = MONTHS[now.month()] ?? MONTHS[dayjs().month()]
+    const year = String(now.year())
+    const week = `week ${weekOfMonth(now)}`
+    setKpiSnapshotFilterLabel(`${month} ${year} · ${week} (running month, till date)`)
+    setKpiSnapshotLoading(true)
+    void Promise.all(
+      [...DASHBOARD_KPI_NAMES].map((name) =>
+        dashboardKpiApi.getData({ name, month, year, week }).then((res) => ({ name, res }))
+      )
+    )
+      .then((results) => {
+        const next: Partial<Record<DashboardKpiPerson, DashboardKpiResponse>> = {}
+        for (const { name, res } of results) {
+          if (res && res.success !== false) next[name] = res
+        }
+        setKpiSnapshotByPerson(next)
+      })
+      .catch(() => setKpiSnapshotByPerson({}))
+      .finally(() => setKpiSnapshotLoading(false))
+  }, [isCustomDashboardFullUser])
+
+  useEffect(() => {
+    if (!isCustomDashboardFullUser) {
+      setSuccessKpiTillDate(null)
+      return
+    }
+    setSuccessPerformanceLoading(true)
+    void dashboardApi
+      .getSuccessKpiTillDate()
+      .then((res) => setSuccessKpiTillDate(res?.successKpi ?? null))
+      .catch(() => setSuccessKpiTillDate(null))
+      .finally(() => setSuccessPerformanceLoading(false))
+  }, [isCustomDashboardFullUser])
 
   useEffect(() => {
     setPaymentActionsLoading(true)
@@ -269,10 +357,6 @@ export const Dashboard = () => {
     }
   }
 
-  if (loading) {
-    return <LoadingSpinner fullPage />
-  }
-
   const safeMetrics: DashboardMetrics = metrics ?? {
     all_tickets: 0,
     pending_till_date: 0,
@@ -320,9 +404,10 @@ export const Dashboard = () => {
       icon: <FileTextOutlined />,
     },
     {
-      title: 'Total Due',
+      title: 'Total DUE',
       metricKey: 'custom_total_due',
-      value: Number(safeMetrics.custom_total_due) || 0,
+      value: Number(safeMetrics.custom_total_due_quarter) || 0,
+      raisedQuarter: Number(safeMetrics.custom_raised_quarter) || 0,
       icon: <WarningOutlined />,
     },
   ]
@@ -340,14 +425,34 @@ export const Dashboard = () => {
 
   const metricCards = [...baseMetricCards, ...customMetricCards]
 
-  const stagingCards = [
-    { title: 'Feature Pending', metricKey: 'staging_feature', value: Number(safeMetrics.staging_pending_feature) || 0, icon: <RocketOutlined />, color: '#3b82f6' },
-    { title: 'Chores & Bug Pending', metricKey: 'staging_chores_bugs', value: Number(safeMetrics.staging_pending_chores_bugs) || 0, icon: <FileTextOutlined />, color: '#22c55e' },
-  ]
+  const stagingCardsData = useMemo(
+    () => [
+      {
+        title: isCustomDashboardFullUser ? 'Feature Pending in Staging' : 'Feature Pending',
+        metricKey: 'staging_feature',
+        value: Number(safeMetrics.staging_pending_feature) || 0,
+        icon: <RocketOutlined />,
+        color: '#3b82f6',
+      },
+      {
+        title: isCustomDashboardFullUser ? 'Chores & Bug Pending in Staging' : 'Chores & Bug Pending',
+        metricKey: 'staging_chores_bugs',
+        value: Number(safeMetrics.staging_pending_chores_bugs) || 0,
+        icon: <FileTextOutlined />,
+        color: '#22c55e',
+      },
+    ],
+    [
+      isCustomDashboardFullUser,
+      safeMetrics.staging_pending_feature,
+      safeMetrics.staging_pending_chores_bugs,
+    ],
+  )
 
   const loadDetail = async (metricKey: string, title: string) => {
     setDetailMetric(metricKey)
     setDetailTitle(title)
+    if (metricKey === 'custom_pending_delegation') setDelegationDateFilter(null)
     setDetailModalOpen(true)
     setDetailLoading(true)
     setDetailData([])
@@ -381,6 +486,294 @@ export const Dashboard = () => {
       }
     : undefined
 
+  type MetricCardDef = {
+    title: string
+    metricKey: string
+    value: number
+    icon: ReactNode
+    clickable?: boolean
+    raisedQuarter?: number
+  }
+
+  const filteredDetailData = useMemo(() => {
+    if (detailMetric !== 'custom_pending_delegation' || !delegationDateFilter) return detailData
+    const wanted = delegationDateFilter.format('YYYY-MM-DD')
+    return detailData.filter((r) => {
+      const raw = (r.delegationOn || '').toString().trim()
+      if (!raw) return false
+      const d = dayjs(raw)
+      return d.isValid() && d.format('YYYY-MM-DD') === wanted
+    })
+  }, [detailData, detailMetric, delegationDateFilter])
+  /** When `includeCol` is false, returns only the Card (caller supplies the Col) — avoids nested Col layout collapse. */
+  const renderMetricStatCard = (card: MetricCardDef, i: number, keyPrefix: string, includeCol = true) => {
+    const cardStyle = metricCardColors[i % metricCardColors.length] || metricCardColors[0]
+    const clickable = card.clickable !== false
+    const paymentRupeeCard =
+      card.metricKey === 'custom_total_due' || card.metricKey === 'custom_total_rec_amount'
+    const cardEl = (
+      <Card
+        key={includeCol ? undefined : `${keyPrefix}-${card.metricKey}-${i}`}
+        onClick={clickable ? () => loadDetail(card.metricKey, card.title) : undefined}
+        style={{
+          width: '100%',
+          borderRadius: 8,
+          border: cardStyle.border,
+          borderLeft: cardStyle.borderLeft,
+          background: cardStyle.background,
+          boxShadow: cardStyle.boxShadow,
+          cursor: clickable ? 'pointer' : 'default',
+        }}
+        bodyStyle={{ padding: 22 }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minWidth: 0 }}>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <Text
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                textTransform: 'uppercase',
+                letterSpacing: 1,
+                whiteSpace: 'normal',
+                wordBreak: 'break-word',
+                display: 'block',
+                color: '#64748b',
+              }}
+            >
+              {card.title}
+            </Text>
+            {card.metricKey === 'custom_total_due' && typeof card.raisedQuarter === 'number' ? (
+              <div style={{ marginTop: 4 }}>
+                <span style={{ fontSize: 24, fontWeight: 700, color: '#1e293b' }}>
+                  ₹{formatINR(Number(card.value))}
+                </span>
+                <span style={{ fontSize: 18, fontWeight: 600, color: '#475569', margin: '0 6px' }}>/</span>
+                <span style={{ fontSize: 20, fontWeight: 700, color: '#334155' }}>
+                  ₹{formatINR(Number(card.raisedQuarter))}
+                </span>
+              </div>
+            ) : (
+              <Statistic
+                value={card.value}
+                formatter={
+                  paymentRupeeCard ? (val) => <span style={{ fontSize: 28, fontWeight: 700, color: '#1e293b' }}>₹{formatINR(Number(val))}</span> : undefined
+                }
+                valueStyle={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginTop: 4 }}
+              />
+            )}
+          </div>
+          <div style={{ fontSize: 28, color: cardStyle.iconColor, opacity: 0.9, flexShrink: 0 }}>{card.icon}</div>
+        </div>
+      </Card>
+    )
+    if (!includeCol) return cardEl
+    return (
+      <Col xs={24} sm={12} md={8} lg={6} key={`${keyPrefix}-${card.metricKey}-${i}`}>
+        {cardEl}
+      </Col>
+    )
+  }
+
+  const paymentActionBlock = user ? (
+    <>
+      <Title level={4} style={{ marginBottom: 8, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>
+        Payment Action
+      </Title>
+      {!isFullPaymentViewer && (
+        <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+          Rows where you are tagged for T1 or T2 (pending). Master Admin / Admin sees all intercepts.
+        </Text>
+      )}
+      {!isFullPaymentViewer && !paymentActionsLoading && paymentActions.length === 0 && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="No payment actions for your login. If you should be tagged, check that Client Payment has your user id or email saved on the intercept."
+        />
+      )}
+      {isFullPaymentViewer && (
+        <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+          Pending steps only: when T1 (and T2 if tagged) are submitted, the row leaves this list — details stay under Client Payment on the invoice.
+        </Text>
+      )}
+      <Title level={5} style={{ marginBottom: 12, color: '#1e293b', fontWeight: 600 }}>
+        Tag (T1) — Client Payment actions
+      </Title>
+      <Card
+        style={{
+          borderRadius: 8,
+          border: '1px solid rgba(0, 0, 0, 0.06)',
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)',
+          background: '#ffffff',
+          marginBottom: 28,
+        }}
+        bodyStyle={{ padding: 16 }}
+      >
+        <TableWithSkeletonLoading loading={paymentActionsLoading} columns={7} rows={8}>
+          <Table
+            size="small"
+            loading={false}
+            dataSource={paymentActions}
+            rowKey={(r) => `${r.client_payment_id}-${r.pending_payment_tag || 't1'}`}
+            pagination={false}
+            columns={paymentActionColumns}
+            locale={{
+              emptyText: isFullPaymentViewer
+                ? 'No payment actions. Add intercept + Tag (T1) on Client Payment, run docs/CLIENT_PAYMENT_INTERCEPT_TAG2.sql in Supabase if T2 columns are missing.'
+                : 'No rows for your account. You must be tagged for T1 or T2 on an intercept with pending payment action.',
+            }}
+          />
+        </TableWithSkeletonLoading>
+      </Card>
+    </>
+  ) : null
+
+  const successPoc = successKpiTillDate?.pocCollected
+  const successTraining = successKpiTillDate?.weeklyTrainingTarget
+  const successFollowup = successKpiTillDate?.trainingFollowUp
+  const successIncrease = successKpiTillDate?.successIncrease
+  const successCards = [
+    { key: 'poc', title: 'POC Collected', current: Number(successPoc?.currentValue ?? 0) },
+    { key: 'training', title: 'Training Target', current: Number(successTraining?.currentValue ?? 0) },
+    { key: 'followup', title: 'Training Follow-up', current: Number(successFollowup?.currentValue ?? 0) },
+    { key: 'increase', title: 'Success Increase', current: Number(successIncrease?.currentValue ?? 0) },
+  ] as const
+
+  const openSuccessDetail = (cardKey: 'poc' | 'training' | 'followup' | 'increase', title: string) => {
+    const details =
+      cardKey === 'poc'
+        ? successPoc?.details
+        : cardKey === 'training'
+          ? successTraining?.details
+          : cardKey === 'followup'
+            ? successFollowup?.details
+            : successIncrease?.details
+    const companies = details?.companies ?? []
+    const refs = details?.referenceNumbers ?? []
+    const owners = details?.messageOwner ?? []
+    const pocDates = details?.dates ?? []
+    const responses = details?.responses ?? []
+    const contacts = details?.contacts ?? []
+    const callPocs = details?.callPOC ?? []
+    const messagePocs = details?.messagePOC ?? []
+    const trainingDates = details?.trainingDates ?? []
+    const trainingStatus = details?.trainingStatus ?? []
+    const remarks = details?.remarks ?? []
+    const followupDates = details?.followupDates ?? []
+    const beforePct = details?.beforePercentages ?? []
+    const afterPct = details?.afterPercentages ?? []
+    const features = details?.features ?? []
+
+    const maxLen = Math.max(
+      companies.length,
+      refs.length,
+      owners.length,
+      pocDates.length,
+      responses.length,
+      contacts.length,
+      callPocs.length,
+      messagePocs.length,
+      trainingDates.length,
+      trainingStatus.length,
+      remarks.length,
+      followupDates.length,
+      beforePct.length,
+      afterPct.length,
+      features.length,
+    )
+
+    const rows = Array.from({ length: maxLen }).map((_, i) => {
+      if (cardKey === 'poc') {
+        return {
+          company: companies[i] || '—',
+          reference_no: refs[i] || '—',
+          message_owner: owners[i] || '—',
+          date: pocDates[i] || '',
+          response: responses[i] || '—',
+          contact: contacts[i] || '—',
+        }
+      }
+      if (cardKey === 'training') {
+        return {
+          company: companies[i] || '—',
+          call_poc: callPocs[i] || '—',
+          message_poc: messagePocs[i] || '—',
+          training_date: trainingDates[i] || '',
+          status: trainingStatus[i] || '—',
+          remarks: remarks[i] || '—',
+        }
+      }
+      const featRaw = features[i]
+      const feat =
+        Array.isArray(featRaw) ? featRaw.filter(Boolean).join(', ') : String(featRaw || '').trim()
+      return {
+        company: companies[i] || '—',
+        feature: feat || '—',
+        call_date: followupDates[i] || '',
+        before_pct: beforePct[i] != null ? `${beforePct[i]}%` : '—',
+        after_pct: afterPct[i] != null ? `${afterPct[i]}%` : '—',
+      }
+    })
+
+    setSuccessDetailModal({
+      key: cardKey,
+      title,
+      rows: rows.filter((r) => Object.values(r).some((v) => String(v ?? '').trim() !== '' && String(v) !== '—')),
+    })
+  }
+
+  const successDetailColumns =
+    successDetailModal?.key === 'poc'
+      ? [
+          { title: 'Reference No', dataIndex: 'reference_no', key: 'reference_no', width: 130 },
+          { title: 'Company', dataIndex: 'company', key: 'company', width: 220 },
+          { title: 'Message Owner', dataIndex: 'message_owner', key: 'message_owner', width: 140 },
+          {
+            title: 'Date',
+            dataIndex: 'date',
+            key: 'date',
+            width: 180,
+            render: (v: string) => formatDateTime(v),
+          },
+          { title: 'Response', dataIndex: 'response', key: 'response', width: 150 },
+          { title: 'Contact', dataIndex: 'contact', key: 'contact', width: 140 },
+        ]
+      : successDetailModal?.key === 'training'
+        ? [
+            { title: 'Company', dataIndex: 'company', key: 'company', width: 220 },
+            { title: 'Call POC', dataIndex: 'call_poc', key: 'call_poc', width: 120 },
+            { title: 'Message POC', dataIndex: 'message_poc', key: 'message_poc', width: 140 },
+            {
+              title: 'Training Date',
+              dataIndex: 'training_date',
+              key: 'training_date',
+              width: 180,
+              render: (v: string) => formatDateTime(v),
+            },
+            { title: 'Status', dataIndex: 'status', key: 'status', width: 120 },
+            { title: 'Remarks', dataIndex: 'remarks', key: 'remarks', width: 220 },
+          ]
+        : successDetailModal?.key === 'followup' || successDetailModal?.key === 'increase'
+          ? [
+              { title: 'Company', dataIndex: 'company', key: 'company', width: 220 },
+              { title: 'Feature', dataIndex: 'feature', key: 'feature', width: 200 },
+              {
+                title: 'Call Date',
+                dataIndex: 'call_date',
+                key: 'call_date',
+                width: 180,
+                render: (v: string) => formatDateTime(v),
+              },
+              { title: 'Before %', dataIndex: 'before_pct', key: 'before_pct', width: 120 },
+              { title: 'After %', dataIndex: 'after_pct', key: 'after_pct', width: 120 },
+            ]
+          : []
+
+  if (loading) {
+    return <LoadingSpinner fullPage />
+  }
+
   return (
     <div
       style={{
@@ -408,127 +801,211 @@ export const Dashboard = () => {
         />
       )}
 
-      {/* Metric cards - clickable, open detail modal */}
-      <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
-        {metricCards.map((card, i) => {
-          const cardStyle = metricCardColors[i] || metricCardColors[0]
-          const clickable = card.clickable !== false
-          const paymentRupeeCard =
-            card.metricKey === 'custom_total_due' || card.metricKey === 'custom_total_rec_amount'
-          return (
-            <Col xs={24} sm={12} md={8} lg={6} key={i}>
-              <Card
-                onClick={clickable ? () => loadDetail(card.metricKey, card.title) : undefined}
-                style={{
-                  borderRadius: 8,
-                  border: cardStyle.border,
-                  borderLeft: cardStyle.borderLeft,
-                  background: cardStyle.background,
-                  boxShadow: cardStyle.boxShadow,
-                  cursor: clickable ? 'pointer' : 'default',
-                }}
-                bodyStyle={{ padding: 22 }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minWidth: 0 }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <Text style={{ fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 1, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block', color: '#64748b' }}>
-                      {card.title}
-                    </Text>
-                    <Statistic
-                      value={card.value}
-                      formatter={paymentRupeeCard ? (val) => <span style={{ fontSize: 28, fontWeight: 700, color: '#1e293b' }}>₹{formatINR(Number(val))}</span> : undefined}
-                      valueStyle={{ fontSize: 28, fontWeight: 700, color: '#1e293b', marginTop: 4 }}
-                    />
-                  </div>
-                  <div style={{ fontSize: 28, color: cardStyle.iconColor, opacity: 0.9, flexShrink: 0 }}>{card.icon}</div>
-                </div>
-              </Card>
-            </Col>
-          )
-        })}
-      </Row>
-
-      {/* In Staging */}
-      <Title level={4} style={{ marginBottom: 16, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>
-        In Staging
-      </Title>
-      <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
-        {stagingCards.map((card, i) => (
-          <Col xs={24} sm={12} key={`staging-${i}`}>
-            <Card
-              onClick={() => loadDetail(card.metricKey, card.title)}
-              style={{
-                borderRadius: 8,
-                border: '1px solid rgba(0, 0, 0, 0.06)',
-                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)',
-                background: '#ffffff',
-                borderTop: `3px solid ${card.color}`,
-                cursor: 'pointer',
-              }}
-              bodyStyle={{ padding: 22 }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minWidth: 0 }}>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <Text style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'normal', wordBreak: 'break-word', display: 'block', color: '#64748b' }}>
-                    {card.title}
-                  </Text>
-                  <Statistic value={card.value} valueStyle={{ fontSize: 28, fontWeight: 700, color: card.color }} style={{ marginTop: 4 }} />
-                </div>
-                <div style={{ fontSize: 26, color: card.color, flexShrink: 0 }}>{card.icon}</div>
-              </div>
-            </Card>
-          </Col>
-        ))}
-      </Row>
-
-      {user && (
+      {isCustomDashboardFullUser ? (
         <>
-          <Title level={4} style={{ marginBottom: 8, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>
-            Payment Action
+          <Title level={3} style={{ marginBottom: 8, color: '#1e293b', fontWeight: 600 }}>
+            Support
           </Title>
-          {!isFullPaymentViewer && (
-            <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-              Rows where you are tagged for T1 or T2 (pending). Master Admin / Admin sees all intercepts.
-            </Text>
-          )}
-          {!isFullPaymentViewer &&
-            !paymentActionsLoading &&
-            paymentActions.length === 0 && (
-              <Alert
-                type="info"
-                showIcon
-                style={{ marginBottom: 16 }}
-                message="No payment actions for your login. If you should be tagged, check that Client Payment has your user id or email saved on the intercept."
-              />
-            )}
-          {isFullPaymentViewer && (
-            <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
-              Pending steps only: when T1 (and T2 if tagged) are submitted, the row leaves this list — details stay under Client Payment on the invoice.
-            </Text>
-          )}
+          <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+            Support ticket KPIs and staging counts. Click a card to open the ticket list for that metric.
+          </Text>
+          <Row gutter={[20, 20]} style={{ marginBottom: 20 }}>
+            {baseMetricCards.map((card, i) => renderMetricStatCard(card, i, 'support'))}
+          </Row>
           <Title level={5} style={{ marginBottom: 12, color: '#1e293b', fontWeight: 600 }}>
-            Tag (T1) — Client Payment actions
+            In staging
           </Title>
-          <Card
-            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff', marginBottom: 28 }}
-            bodyStyle={{ padding: 16 }}
-          >
-            <TableWithSkeletonLoading loading={paymentActionsLoading} columns={7} rows={8}>
-              <Table
-                size="small"
-                loading={false}
-                dataSource={paymentActions}
-                rowKey={(r) => `${r.client_payment_id}-${r.pending_payment_tag || 't1'}`}
-                pagination={false}
-                columns={paymentActionColumns}
-                locale={{
-                  emptyText: isFullPaymentViewer
-                    ? 'No payment actions. Add intercept + Tag (T1) on Client Payment, run docs/CLIENT_PAYMENT_INTERCEPT_TAG2.sql in Supabase if T2 columns are missing.'
-                    : 'No rows for your account. You must be tagged for T1 or T2 on an intercept with pending payment action.',
-                }}
-              />
-            </TableWithSkeletonLoading>
-          </Card>
+          <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
+            {stagingCardsData.map((card, i) => (
+              <Col xs={24} sm={12} key={`staging-custom-${i}`}>
+                <Card
+                  onClick={() => loadDetail(card.metricKey, card.title)}
+                  style={{
+                    borderRadius: 8,
+                    border: '1px solid rgba(0, 0, 0, 0.06)',
+                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)',
+                    background: '#ffffff',
+                    borderTop: `3px solid ${card.color}`,
+                    cursor: 'pointer',
+                  }}
+                  bodyStyle={{ padding: 22 }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minWidth: 0 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          whiteSpace: 'normal',
+                          wordBreak: 'break-word',
+                          display: 'block',
+                          color: '#64748b',
+                        }}
+                      >
+                        {card.title}
+                      </Text>
+                      <Statistic
+                        value={card.value}
+                        valueStyle={{ fontSize: 28, fontWeight: 700, color: card.color }}
+                        style={{ marginTop: 4 }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 26, color: card.color, flexShrink: 0 }}>{card.icon}</div>
+                  </div>
+                </Card>
+              </Col>
+            ))}
+          </Row>
+
+          <Title level={3} style={{ marginBottom: 8, marginTop: 8, color: '#1e293b', fontWeight: 600 }}>
+            Success
+          </Title>
+          <Spin spinning={successPerformanceLoading}>
+            <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
+              {successCards.map((c) => (
+                <Col xs={24} sm={12} md={12} lg={6} key={c.key}>
+                  <Card
+                    hoverable
+                    onClick={() => openSuccessDetail(c.key as 'poc' | 'training' | 'followup' | 'increase', c.title)}
+                    style={{
+                      cursor: 'pointer',
+                      borderRadius: 8,
+                      border: '1px solid rgba(0, 0, 0, 0.06)',
+                      borderTop: '3px solid #f59e0b',
+                      background: '#ffffff',
+                      boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)',
+                    }}
+                    bodyStyle={{ padding: 22 }}
+                  >
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: 1,
+                        whiteSpace: 'normal',
+                        wordBreak: 'break-word',
+                        display: 'block',
+                        color: '#64748b',
+                      }}
+                    >
+                      {c.title}
+                    </Text>
+                    <Title level={4} style={{ margin: '8px 0 0 0' }}>
+                      {c.current}
+                    </Title>
+                    <Text type="secondary">Start to till date (Performance Monitoring)</Text>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          </Spin>
+
+          <Title level={3} style={{ marginBottom: 8, marginTop: 8, color: '#1e293b', fontWeight: 600 }}>
+            Payment
+          </Title>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+            Total received (by invoice genre), total due, and payment intercept actions.
+          </Text>
+          <Row gutter={[20, 20]} style={{ marginBottom: 8 }}>
+            {paymentOnlyCards.map((card, i) => renderMetricStatCard(card, i, 'payment'))}
+          </Row>
+          {paymentActionBlock}
+
+          <Title level={3} style={{ marginBottom: 8, marginTop: 8, color: '#1e293b', fontWeight: 600 }}>
+            Task
+          </Title>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+            {`Pending delegation and each person's Dashboard KPI (weekly % for checklist, delegation, support, and role-specific rows). Click a person to open that dashboard in Dashboard KPI.`}
+          </Text>
+          <Row gutter={[20, 20]} style={{ marginBottom: 20 }}>
+            <Col xs={24} sm={12} md={12} lg={8} key="task-delegation">
+              {renderMetricStatCard(delegationCard, 0, 'delegation', false)}
+            </Col>
+          </Row>
+          <Title level={5} style={{ marginBottom: 8, color: '#1e293b', fontWeight: 600 }}>
+            Team KPI dashboards
+          </Title>
+          <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+            {kpiSnapshotFilterLabel || 'Loading week filter…'}
+          </Text>
+          <Spin spinning={kpiSnapshotLoading}>
+            <Row gutter={[16, 16]} style={{ marginBottom: 28 }}>
+              {DASHBOARD_KPI_NAMES.map((person) => (
+                <Col xs={24} sm={12} md={6} key={person}>
+                  <Card
+                    hoverable
+                    style={{ cursor: 'pointer', minHeight: 148 }}
+                    onClick={() => navigate(`${ROUTES.DASHBOARD_KPI}?person=${encodeURIComponent(person)}`)}
+                  >
+                    <Title level={5} style={{ marginTop: 0 }}>
+                      {KPI_DASHBOARD_LINK_LABELS[person]}
+                    </Title>
+                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+                      Weekly snapshot
+                    </Text>
+                    <Text style={{ fontSize: 13, lineHeight: 1.55 }}>
+                      {formatKpiWeeklySnapshot(kpiSnapshotByPerson[person])}
+                    </Text>
+                  </Card>
+                </Col>
+              ))}
+            </Row>
+          </Spin>
+        </>
+      ) : (
+        <>
+          {/* Metric cards - clickable, open detail modal */}
+          <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
+            {metricCards.map((card, i) => renderMetricStatCard(card, i, 'm'))}
+          </Row>
+
+          <Title level={4} style={{ marginBottom: 16, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>
+            In Staging
+          </Title>
+          <Row gutter={[20, 20]} style={{ marginBottom: 28 }}>
+            {stagingCardsData.map((card, i) => (
+              <Col xs={24} sm={12} key={`staging-${i}`}>
+                <Card
+                  onClick={() => loadDetail(card.metricKey, card.title)}
+                  style={{
+                    borderRadius: 8,
+                    border: '1px solid rgba(0, 0, 0, 0.06)',
+                    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)',
+                    background: '#ffffff',
+                    borderTop: `3px solid ${card.color}`,
+                    cursor: 'pointer',
+                  }}
+                  bodyStyle={{ padding: 22 }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', minWidth: 0 }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <Text
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          whiteSpace: 'normal',
+                          wordBreak: 'break-word',
+                          display: 'block',
+                          color: '#64748b',
+                        }}
+                      >
+                        {card.title}
+                      </Text>
+                      <Statistic
+                        value={card.value}
+                        valueStyle={{ fontSize: 28, fontWeight: 700, color: card.color }}
+                        style={{ marginTop: 4 }}
+                      />
+                    </div>
+                    <div style={{ fontSize: 26, color: card.color, flexShrink: 0 }}>{card.icon}</div>
+                  </div>
+                </Card>
+              </Col>
+            ))}
+          </Row>
+
+          {paymentActionBlock}
         </>
       )}
 
@@ -541,7 +1018,7 @@ export const Dashboard = () => {
             bodyStyle={{ padding: '12px 16px 16px', minHeight: 280 }}
           >
             <Text style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 8 }}>
-              Monthly trend (Chores & Bug) — tickets without assignee
+              Weekly trend (Chores & Bug) — tickets without assignee
             </Text>
             {trendPoints.length > 0 ? (
               <div style={{ width: '100%', height: 220 }}>
@@ -581,7 +1058,7 @@ export const Dashboard = () => {
             bodyStyle={{ padding: '12px 16px 16px', minHeight: 280 }}
           >
             <Text style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 8 }}>
-              Monthly trend (Chores & Bug) — Stage 2 delay (TAT exceeded after Stage 2 completed)
+              Weekly trend (Chores & Bug) — Stage 2 delay (TAT exceeded after Stage 2 completed)
             </Text>
             {trendPoints.length > 0 ? (
               <div style={{ width: '100%', height: 220 }}>
@@ -684,6 +1161,27 @@ export const Dashboard = () => {
       </Card>
 
       <Modal
+        title={successDetailModal ? `${successDetailModal.title} — till date` : 'Success detail'}
+        open={!!successDetailModal}
+        onCancel={() => setSuccessDetailModal(null)}
+        footer={null}
+        width={840}
+      >
+        {successDetailModal?.rows?.length ? (
+          <Table
+            dataSource={successDetailModal.rows}
+            rowKey={(_, i) => String(i)}
+            size="small"
+            pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `Total ${t} rows` }}
+            scroll={{ x: 920 }}
+            columns={successDetailColumns as never}
+          />
+        ) : (
+          <Text type="secondary">No till-date rows found for this box.</Text>
+        )}
+      </Modal>
+
+      <Modal
         title={
           isPaymentKpiDetail ? (
             <Space direction="vertical" size={4} style={{ width: '100%' }}>
@@ -717,7 +1215,7 @@ export const Dashboard = () => {
             dataSource={detailData}
             rowKey="id"
             size="small"
-            pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `Total ${t} invoices` }}
+            pagination={{ pageSize: 100, showSizeChanger: true, showTotal: (t) => `Total ${t} invoices` }}
             scroll={{ x: 1000 }}
             columns={[
               {
@@ -792,8 +1290,20 @@ export const Dashboard = () => {
             ]}
           />
         ) : (
-          <Table
-            dataSource={detailData}
+          <>
+            {detailMetric === 'custom_pending_delegation' && (
+              <Space style={{ marginBottom: 12 }} wrap>
+                <Text type="secondary">Delegation On date filter:</Text>
+                <DatePicker
+                  value={delegationDateFilter}
+                  onChange={(d) => setDelegationDateFilter(d)}
+                  allowClear
+                  format="DD-MMM-YYYY"
+                />
+              </Space>
+            )}
+            <Table
+            dataSource={filteredDetailData}
             rowKey="id"
             size="small"
             pagination={{ pageSize: 10, showSizeChanger: true, showTotal: (t) => `Total ${t} tickets` }}
@@ -854,6 +1364,18 @@ export const Dashboard = () => {
                 width: 90,
                 onCell: () => ({ style: { whiteSpace: 'normal', wordBreak: 'break-word' } }),
               },
+              ...(detailMetric === 'custom_pending_delegation'
+                ? [
+                    {
+                      title: 'Delegation On',
+                      dataIndex: 'delegationOn',
+                      key: 'delegationOn',
+                      width: 140,
+                      render: (v: string) =>
+                        v && dayjs(v).isValid() ? dayjs(v).format('DD-MMM-YYYY') : '—',
+                    },
+                  ]
+                : []),
               {
                 title: 'Status',
                 dataIndex: 'status',
@@ -862,7 +1384,8 @@ export const Dashboard = () => {
                 onCell: () => ({ style: { whiteSpace: 'normal', wordBreak: 'break-word' } }),
               },
             ]}
-          />
+            />
+          </>
         )}
       </Modal>
 
