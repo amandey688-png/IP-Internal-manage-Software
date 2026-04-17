@@ -172,6 +172,8 @@ export interface AdrijaSocialKpiPayload {
   postWeek: number
   reelWeek: number
   linkedinWeek: number
+  /** 0–100: (post + reel + linkedin) met in selected week vs 3 targets. */
+  weeklyPercent?: number
   /** 0–100: share of day-slots filled in the selected calendar month (3 flags × each day). */
   monthlyPercent?: number
   postCompletionDates?: string[]
