@@ -11,6 +11,7 @@ import {
   message,
   Modal,
   Divider,
+  DatePicker,
 } from 'antd'
 import { RocketOutlined, EditOutlined, CheckOutlined, CloseOutlined } from '@ant-design/icons'
 import { ticketsApi, type Stage2Remark } from '../../api/tickets'
@@ -18,12 +19,17 @@ import { formatDateTable, formatReplySla, formatDelay, stagingDelaySeconds } fro
 import type { Ticket } from '../../api/tickets'
 import { useAuth } from '../../hooks/useAuth'
 import { useRole } from '../../hooks/useRole'
+import { supportApi, type Company, type Division, type Page } from '../../api/support'
+import dayjs from 'dayjs'
 
 const { TextArea } = Input
 const { Text } = Typography
 
 const SLA_2_HOUR = 2 * 3600
 const SLA_1_DAY = 24 * 3600
+
+/** Chores & Bugs ticket drawer “Edit” (100h window) — only these logins */
+const SUPPORT_TICKET_EDIT_ALLOWED_EMAILS = new Set(['aman@industryprime.com', 'rimpa@industryprime.com'])
 
 interface ChoresBugsDetailDrawerProps {
   ticketId: string | null
@@ -54,6 +60,40 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
   const [editingRemarkId, setEditingRemarkId] = useState<string | null>(null)
   const [editingRemarkText, setEditingRemarkText] = useState('')
   const [updatingRemark, setUpdatingRemark] = useState(false)
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editSubmitting, setEditSubmitting] = useState(false)
+  const [companies, setCompanies] = useState<Company[]>([])
+  const [pages, setPages] = useState<Page[]>([])
+  const [divisions, setDivisions] = useState<Division[]>([])
+  const [editForm, setEditForm] = useState<{
+    title: string
+    description: string
+    company_id: string
+    page_id: string
+    division_id: string
+    division_other: string
+    user_name: string
+    communicated_through: string
+    submitted_by: string
+    quality_of_response: string
+    customer_questions: string
+    query_arrival_at: string
+    query_response_at: string
+  }>({
+    title: '',
+    description: '',
+    company_id: '',
+    page_id: '',
+    division_id: '',
+    division_other: '',
+    user_name: '',
+    communicated_through: '',
+    submitted_by: '',
+    quality_of_response: '',
+    customer_questions: '',
+    query_arrival_at: '',
+    query_response_at: '',
+  })
 
   const isLevel3 = user?.role === 'user'
   const level3Restricted = isLevel3 && !isMasterAdmin && ticket?.level3_used_by_current_user === true
@@ -71,12 +111,21 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
         .catch(() => message.error('Failed to load ticket'))
         .finally(() => setLoading(false))
       ticketsApi.getStage2Remarks(ticketId).then((r) => setStage2Remarks((r?.data ?? []) as Stage2Remark[])).catch(() => setStage2Remarks([]))
+      const canLoadEditLookups = SUPPORT_TICKET_EDIT_ALLOWED_EMAILS.has((user?.email || '').trim().toLowerCase())
+      if (canLoadEditLookups) {
+        supportApi.getCompanies().then((rows) => setCompanies(rows || [])).catch(() => setCompanies([]))
+        supportApi.getPages().then((rows) => setPages(rows || [])).catch(() => setPages([]))
+      } else {
+        setCompanies([])
+        setPages([])
+      }
     } else {
       setTicket(null)
       setStage2Remarks([])
       setEditingRemarkId(null)
+      setDivisions([])
     }
-  }, [open, ticketId])
+  }, [open, ticketId, user?.email])
 
   const handleUpdate = async (updates: Partial<Ticket>) => {
     if (!ticketId) return
@@ -141,6 +190,114 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
   }
 
   const canEditRemark = (r: Stage2Remark) => isMasterAdmin || r.added_by === user?.id
+
+  const emailLower = (user?.email || '').trim().toLowerCase()
+  const canEditSupportTicketByEmail = SUPPORT_TICKET_EDIT_ALLOWED_EMAILS.has(emailLower)
+
+  const createdAtMs = ticket?.created_at ? new Date(ticket.created_at).getTime() : 0
+  const editWindowMs = 100 * 60 * 60 * 1000
+  const canEditWithinWindow = !!createdAtMs && (Date.now() - createdAtMs) <= editWindowMs
+  const canEditSupportTicket = !readOnly && canEditSupportTicketByEmail && canEditWithinWindow
+
+  const openEditModal = () => {
+    if (!ticket || !canEditSupportTicketByEmail) return
+    const nextCompanyId = ticket.company_id || ''
+    setEditForm({
+      title: ticket.title || '',
+      description: ticket.description || '',
+      company_id: nextCompanyId,
+      page_id: ticket.page_id || '',
+      division_id: ticket.division_id || '',
+      division_other: ticket.division_other || '',
+      user_name: ticket.user_name || '',
+      communicated_through: ticket.communicated_through || '',
+      submitted_by: ticket.submitted_by || '',
+      quality_of_response: ticket.quality_of_response || '',
+      customer_questions: ticket.customer_questions || '',
+      query_arrival_at: ticket.query_arrival_at || '',
+      query_response_at: ticket.query_response_at || '',
+    })
+    if (nextCompanyId) {
+      supportApi.getDivisions(nextCompanyId).then((rows) => setDivisions(rows || [])).catch(() => setDivisions([]))
+    } else {
+      setDivisions([])
+    }
+    setEditModalOpen(true)
+  }
+
+  const submitEditTicket = async () => {
+    if (!ticketId || !canEditSupportTicket) return
+    if (!editForm.title.trim()) {
+      message.error('Title is required')
+      return
+    }
+    if (!editForm.user_name.trim()) {
+      message.error('User Name is required')
+      return
+    }
+    if (!editForm.company_id) {
+      message.error('Company is required')
+      return
+    }
+    if (!editForm.page_id) {
+      message.error('Page is required')
+      return
+    }
+    if (!editForm.division_id) {
+      message.error('Division is required')
+      return
+    }
+    if (!editForm.quality_of_response.trim()) {
+      message.error('Quality of Response is required')
+      return
+    }
+    if (!editForm.customer_questions.trim()) {
+      message.error('Customer Questions is required')
+      return
+    }
+    if (!editForm.query_arrival_at) {
+      message.error('Query Arrival Date & Time is required')
+      return
+    }
+    if (!editForm.query_response_at) {
+      message.error('Query Response Date & Time is required')
+      return
+    }
+
+    setEditSubmitting(true)
+    try {
+      await ticketsApi.update(ticketId, {
+        title: editForm.title.trim(),
+        description: editForm.description.trim() || undefined,
+        company_id: editForm.company_id,
+        page_id: editForm.page_id,
+        division_id: editForm.division_id,
+        division_other: editForm.division_other.trim() || undefined,
+        user_name: editForm.user_name.trim(),
+        communicated_through: editForm.communicated_through || undefined,
+        submitted_by: editForm.submitted_by.trim() || undefined,
+        quality_of_response: editForm.quality_of_response.trim(),
+        customer_questions: editForm.customer_questions.trim(),
+        query_arrival_at: editForm.query_arrival_at,
+        query_response_at: editForm.query_response_at,
+      })
+      const res = await ticketsApi.get(ticketId)
+      const t = res && typeof res === 'object' && 'data' in res && res.data && typeof res.data === 'object' && 'id' in res.data
+        ? (res.data as Ticket)
+        : res && typeof res === 'object' && 'id' in res ? (res as Ticket) : null
+      setTicket(t)
+      setEditModalOpen(false)
+      onUpdate?.()
+      message.success('Ticket updated')
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { detail?: string | string[] } } }
+      const detail = err?.response?.data?.detail
+      const msg = Array.isArray(detail) ? detail[0] : typeof detail === 'string' ? detail : 'Failed to update ticket'
+      message.error(msg)
+    } finally {
+      setEditSubmitting(false)
+    }
+  }
 
   const handleSubmitSolution = async () => {
     if (!ticketId || !solutionText.trim()) {
@@ -296,6 +453,24 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
                 {formatDateTable(ticket.query_response_at)}
               </Descriptions.Item>
             </Descriptions>
+            {!readOnly && canEditSupportTicketByEmail && (
+              <div style={{ marginBottom: 16 }}>
+                <Space direction="vertical" size={4}>
+                  <Button
+                    icon={<EditOutlined />}
+                    onClick={openEditModal}
+                    disabled={!canEditSupportTicket}
+                  >
+                    Edit
+                  </Button>
+                  {!canEditWithinWindow && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>
+                      Edit is allowed only within 100 hours from ticket creation.
+                    </Text>
+                  )}
+                </Space>
+              </div>
+            )}
 
             {!readOnly && !ticket.staging_planned && status1 === 'no' && (
               <div style={{ marginBottom: 16 }}>
@@ -720,6 +895,167 @@ export const ChoresBugsDetailDrawer = ({ ticketId, open, onClose, onUpdate, read
           </>
         )}
       </Drawer>
+
+      <Modal
+        title="Edit Support Ticket"
+        open={editModalOpen}
+        onCancel={() => setEditModalOpen(false)}
+        onOk={submitEditTicket}
+        okText="Save"
+        confirmLoading={editSubmitting}
+        okButtonProps={{ disabled: !canEditSupportTicket }}
+        destroyOnClose
+      >
+        <Space direction="vertical" size={12} style={{ width: '100%' }}>
+          <div>
+            <Text strong>Title *</Text>
+            <Input
+              value={editForm.title}
+              onChange={(e) => setEditForm((p) => ({ ...p, title: e.target.value }))}
+              placeholder="Title"
+            />
+          </div>
+          <div>
+            <Text strong>Description</Text>
+            <TextArea
+              rows={3}
+              value={editForm.description}
+              onChange={(e) => setEditForm((p) => ({ ...p, description: e.target.value }))}
+              placeholder="Description"
+            />
+          </div>
+          <div>
+            <Text strong>Company *</Text>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              value={editForm.company_id || undefined}
+              placeholder="Select company"
+              options={companies.map((c) => ({ value: c.id, label: c.name }))}
+              onChange={(v) => {
+                const nextCompanyId = String(v || '')
+                setEditForm((p) => ({ ...p, company_id: nextCompanyId, division_id: '', division_other: '' }))
+                if (nextCompanyId) {
+                  supportApi.getDivisions(nextCompanyId).then((rows) => setDivisions(rows || [])).catch(() => setDivisions([]))
+                } else {
+                  setDivisions([])
+                }
+              }}
+            />
+          </div>
+          <div>
+            <Text strong>Page *</Text>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              value={editForm.page_id || undefined}
+              placeholder="Select page"
+              options={pages.map((p) => ({ value: p.id, label: p.name }))}
+              onChange={(v) => setEditForm((p) => ({ ...p, page_id: String(v || '') }))}
+            />
+          </div>
+          <div>
+            <Text strong>Division *</Text>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              value={editForm.division_id || undefined}
+              placeholder="Select division"
+              options={divisions.map((d) => ({ value: d.id, label: d.name }))}
+              onChange={(v) => {
+                const nextDivisionId = String(v || '')
+                const selected = divisions.find((d) => d.id === nextDivisionId)
+                setEditForm((p) => ({
+                  ...p,
+                  division_id: nextDivisionId,
+                  division_other: selected?.name === 'Other' ? p.division_other : '',
+                }))
+              }}
+              disabled={!editForm.company_id}
+            />
+          </div>
+          {divisions.find((d) => d.id === editForm.division_id)?.name === 'Other' && (
+            <div>
+              <Text strong>Other Division</Text>
+              <Input
+                value={editForm.division_other}
+                onChange={(e) => setEditForm((p) => ({ ...p, division_other: e.target.value }))}
+                placeholder="Specify division"
+              />
+            </div>
+          )}
+          <div>
+            <Text strong>User Name *</Text>
+            <Input
+              value={editForm.user_name}
+              onChange={(e) => setEditForm((p) => ({ ...p, user_name: e.target.value }))}
+              placeholder="User Name"
+            />
+          </div>
+          <div>
+            <Text strong>CT</Text>
+            <Select
+              value={editForm.communicated_through || undefined}
+              placeholder="Select communication type"
+              options={[
+                { value: 'phone', label: 'Phone' },
+                { value: 'mail', label: 'Mail' },
+                { value: 'whatsapp', label: 'WhatsApp' },
+                { value: 'mom', label: 'MOM' },
+              ]}
+              onChange={(v) => setEditForm((p) => ({ ...p, communicated_through: String(v || '') }))}
+              allowClear
+            />
+          </div>
+          <div>
+            <Text strong>Submitted By</Text>
+            <Input
+              value={editForm.submitted_by}
+              onChange={(e) => setEditForm((p) => ({ ...p, submitted_by: e.target.value }))}
+              placeholder="Submitted By"
+            />
+          </div>
+          <div>
+            <Text strong>Quality of Response *</Text>
+            <Input
+              value={editForm.quality_of_response}
+              onChange={(e) => setEditForm((p) => ({ ...p, quality_of_response: e.target.value }))}
+              placeholder="Quality of Response"
+            />
+          </div>
+          <div>
+            <Text strong>Customer Questions *</Text>
+            <TextArea
+              rows={2}
+              value={editForm.customer_questions}
+              onChange={(e) => setEditForm((p) => ({ ...p, customer_questions: e.target.value }))}
+              placeholder="Customer Questions"
+            />
+          </div>
+          <div>
+            <Text strong>Query Arrival Date & Time *</Text>
+            <DatePicker
+              showTime={{ format: 'hh:mm A', use12Hours: true }}
+              format="YYYY-MM-DD hh:mm A"
+              style={{ width: '100%' }}
+              value={editForm.query_arrival_at ? dayjs(editForm.query_arrival_at) : null}
+              onChange={(d) => setEditForm((p) => ({ ...p, query_arrival_at: d ? d.toISOString() : '' }))}
+              allowClear
+            />
+          </div>
+          <div>
+            <Text strong>Query Response Date & Time *</Text>
+            <DatePicker
+              showTime={{ format: 'hh:mm A', use12Hours: true }}
+              format="YYYY-MM-DD hh:mm A"
+              style={{ width: '100%' }}
+              value={editForm.query_response_at ? dayjs(editForm.query_response_at) : null}
+              onChange={(d) => setEditForm((p) => ({ ...p, query_response_at: d ? d.toISOString() : '' }))}
+              allowClear
+            />
+          </div>
+        </Space>
+      </Modal>
 
       <Modal
         title="Submit Quality of Solution"
