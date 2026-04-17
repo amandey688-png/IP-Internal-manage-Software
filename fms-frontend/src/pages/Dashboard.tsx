@@ -449,10 +449,6 @@ export const Dashboard = () => {
     ],
   )
 
-  if (loading) {
-    return <LoadingSpinner fullPage />
-  }
-
   const loadDetail = async (metricKey: string, title: string) => {
     setDetailMetric(metricKey)
     setDetailTitle(title)
@@ -773,6 +769,10 @@ export const Dashboard = () => {
               { title: 'After %', dataIndex: 'after_pct', key: 'after_pct', width: 120 },
             ]
           : []
+
+  if (loading) {
+    return <LoadingSpinner fullPage />
+  }
 
   return (
     <div
