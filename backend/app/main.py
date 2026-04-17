@@ -1556,6 +1556,10 @@ def update_ticket(ticket_id: str, payload: UpdateTicketRequest, auth: dict = Dep
     r = supabase.table("tickets").update(data).eq("id", ticket_id).execute()
     if not r.data:
         raise HTTPException(status_code=404, detail="Ticket not found")
+    # Enrichment uses a cached `reference_no -> company_name` mapping.
+    # Reset cache on writes so list/drawer never shows stale company/page/division values.
+    global _REF_NO_TO_COMPANY_LOADED
+    _REF_NO_TO_COMPANY_LOADED = False
     # Log approval/rejection for audit
     if "approval_status" in data:
         try:
@@ -3441,13 +3445,15 @@ def dashboard_kpi(
             hi = max(month_end, range_end)
             day_map = _fetch_adrija_social_kpi_day_map(lo, hi)
 
+            # Count completions in the selected week (one row per day per pillar max in DB).
+            # Do not use |= across days — that collapses "2 days done" into a single 1 for the card.
             post_w = reel_w = li_w = 0
             d = range_start
             while d <= range_end:
                 prl = day_map.get(d, {})
-                post_w |= int(prl.get("post", 0))
-                reel_w |= int(prl.get("reel", 0))
-                li_w |= int(prl.get("linkedin", 0))
+                post_w += int(prl.get("post", 0))
+                reel_w += int(prl.get("reel", 0))
+                li_w += int(prl.get("linkedin", 0))
                 d += timedelta(days=1)
 
             days_in_month = (month_end - month_start).days + 1
@@ -3476,6 +3482,9 @@ def dashboard_kpi(
                     linkedin_details.append({"date": d.isoformat(), "taskName": prl.get("linkedin_task_name") or "—"})
                 d += timedelta(days=1)
             monthly_pct = round(100 * month_num_total / (3 * days_in_month)) if days_in_month else 0
+            # Week % = share of pillars that have at least one completion in the week (targets stay 1 each).
+            weekly_tasks_done = int(post_w >= 1) + int(reel_w >= 1) + int(li_w >= 1)
+            weekly_pct = round(100 * weekly_tasks_done / 3)
 
             adrija_social_kpi = {
                 "weekStart": range_start.isoformat(),
@@ -3484,6 +3493,7 @@ def dashboard_kpi(
                 "postWeek": post_w,
                 "reelWeek": reel_w,
                 "linkedinWeek": li_w,
+                "weeklyPercent": weekly_pct,
                 "monthlyPercent": monthly_pct,
                 "postCompletionDates": post_dates,
                 "reelCompletionDates": reel_dates,

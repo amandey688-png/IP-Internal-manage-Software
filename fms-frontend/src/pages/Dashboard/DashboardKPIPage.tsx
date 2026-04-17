@@ -1010,7 +1010,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
               <Card
                 className="kpi-section-card"
                 title={
-                  <Space>
+                  <Space wrap>
                     <PieChartOutlined />
                     KPI
                     {adrijaSocial.weekLabel ? (
@@ -1018,6 +1018,9 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                         {adrijaSocial.weekLabel}
                       </Text>
                     ) : null}
+                    <Tag color="blue" style={{ marginLeft: 0 }}>
+                      Week {adrijaSocial.weeklyPercent ?? 0}% (3 tasks / 7 days)
+                    </Tag>
                   </Space>
                 }
               >
@@ -1033,9 +1036,9 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                       onClick={() => setAdrijaPillarDetail('post')}
                     >
                       <Title level={4} style={{ marginBottom: 4 }}>
-                        {adrijaSocial.postWeek === 1 ? 'Done' : '—'}
+                        {adrijaSocial.postWeek ?? 0} / 1
                       </Title>
-                      <Text type="secondary">Target: 1 post in the selected week · click for dates</Text>
+                      <Text type="secondary">Done tasks / target (week) · click to show details</Text>
                     </Card>
                   </Col>
                   <Col xs={24} md={8}>
@@ -1049,9 +1052,9 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                       onClick={() => setAdrijaPillarDetail('reel')}
                     >
                       <Title level={4} style={{ marginBottom: 4 }}>
-                        {adrijaSocial.reelWeek === 1 ? 'Done' : '—'}
+                        {adrijaSocial.reelWeek ?? 0} / 1
                       </Title>
-                      <Text type="secondary">Target: 1 reel in the selected week · click for dates</Text>
+                      <Text type="secondary">Done tasks / target (week) · click to show details</Text>
                     </Card>
                   </Col>
                   <Col xs={24} md={8}>
@@ -1065,9 +1068,9 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                       onClick={() => setAdrijaPillarDetail('linkedin')}
                     >
                       <Title level={4} style={{ marginBottom: 4 }}>
-                        {adrijaSocial.linkedinWeek === 1 ? 'Done' : '—'}
+                        {adrijaSocial.linkedinWeek ?? 0} / 1
                       </Title>
-                      <Text type="secondary">Target: 1 LinkedIn post in the selected week · click for dates</Text>
+                      <Text type="secondary">Done tasks / target (week) · click to show details</Text>
                     </Card>
                   </Col>
                 </Row>
