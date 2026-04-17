@@ -2043,6 +2043,8 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
     custom_received_half_yearly = 0
     custom_received_yearly = 0
     custom_total_due = 0
+    custom_total_due_quarter = 0
+    custom_raised_quarter = 0
     custom_pending_delegation = 0
 
     custom_full_emails = {"ad@ip.com", "ayush@industryprime.com"}
@@ -2054,6 +2056,8 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
             from datetime import timedelta
 
             today = date_cls.today()
+            fy, q = _pa.fy_quarter_key(today)
+            q_start, q_end = _pa.quarter_date_bounds(fy, q)
             # Received amounts: trailing 12 months by payment/anchor date (see M-Comp / completed lists).
             recv_window_start = today - timedelta(days=365)
 
@@ -2068,6 +2072,11 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
             for row in pay_rows:
                 amt = _parse_invoice_amount(row.get("invoice_amount"))
                 is_paid = not _client_payment_row_unpaid(row)
+                inv_d = _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
+                if inv_d and q_start <= inv_d <= q_end:
+                    custom_raised_quarter += amt
+                    if not is_paid:
+                        custom_total_due_quarter += amt
 
                 # Total Due: all unpaid raised invoices (same scope as Payment Management "open" list),
                 # not limited to the current fiscal quarter — invoice date can be any period.
@@ -2117,6 +2126,8 @@ def dashboard_metrics(auth: dict = Depends(get_current_user)):
         "custom_received_half_yearly": custom_received_half_yearly,
         "custom_received_yearly": custom_received_yearly,
         "custom_total_due": custom_total_due,
+        "custom_total_due_quarter": custom_total_due_quarter,
+        "custom_raised_quarter": custom_raised_quarter,
         "custom_pending_delegation": custom_pending_delegation,
         "response_delay": response_delay,
         "completion_delay": completion_delay,
@@ -2362,7 +2373,7 @@ def dashboard_detail(
                 supabase.table("delegation_tasks")
                 .select("id, reference_no, title, status, due_date, delegation_on")
                 .in_("status", ["pending", "in_progress"])
-                .order("due_date", desc=False)
+                .order("delegation_on", desc=True)
                 .limit(200)
                 .execute()
             )
@@ -2373,6 +2384,7 @@ def dashboard_detail(
         for t in rows:
             reference_no = (t.get("reference_no") or "").strip() or str(t.get("id") or "N/A")
             due = t.get("due_date") or t.get("delegation_on") or ""
+            delegation_on = t.get("delegation_on") or ""
             due_str = str(due).split("T")[0] if due else ""
             title = (t.get("title") or "").strip() or "Delegation Task"
             result.append(
@@ -2384,6 +2396,7 @@ def dashboard_detail(
                     "type": "delegation",
                     "company": "—",
                     "status": t.get("status") or "",
+                    "delegationOn": delegation_on,
                 }
             )
     return {"success": True, "metric": metric, "tickets": result, "total": len(result)}
@@ -3564,6 +3577,54 @@ def dashboard_kpi(
         return {"success": False, "error": str(e)}
 
 
+@api_router.get("/dashboard/success-kpi-till-date")
+def dashboard_success_kpi_till_date(
+    auth: dict = Depends(get_current_user),
+):
+    """Rimpa Success KPI source, computed from start (all-time) till date."""
+    try:
+        from app.dashboard_success_kpi import compute_success_kpi_for_dashboard
+
+        now_utc = datetime.now(timezone.utc).date()
+        # Remove monthly restriction: compute from historical start to today.
+        range_start = date(2000, 1, 1)
+        till_date_end = now_utc
+        y = now_utc.year
+        month_num = now_utc.month
+
+        success_kpi, _ = compute_success_kpi_for_dashboard(
+            range_start,
+            till_date_end,
+            y,
+            month_num,
+        )
+        if success_kpi is None:
+            empty_details = {
+                "companies": [],
+                "dates": [],
+                "remarks": [],
+                "features": [],
+            }
+            success_kpi = {
+                "pocCollected": {"currentValue": 0, "targetValue": 16, "percentage": "0/16", "details": empty_details},
+                "weeklyTrainingTarget": {"currentValue": 0, "targetValue": 1, "percentage": "0/1", "details": empty_details},
+                "trainingFollowUp": {"currentValue": 0, "targetValue": 25, "percentage": "0/25", "details": empty_details},
+                "successIncrease": {"currentValue": 0, "targetValue": 2, "percentage": "0/2", "details": empty_details},
+                "overallPercentage": 0,
+                "meta": {"weekLabel": f"{range_start.isoformat()} to {till_date_end.isoformat()}"},
+            }
+
+        return {
+            "success": True,
+            "rangeStart": range_start.isoformat(),
+            "tillDate": till_date_end.isoformat(),
+            "successKpi": success_kpi,
+        }
+    except Exception as e:
+        _log(f"dashboard/success-kpi-till-date: {e}")
+        return {"success": False, "error": str(e), "successKpi": None}
+
+
 # ---------- Support Dashboard Stats (FMS-style: weekly, pending grouped, top companies, features) ----------
 def _week_of_month(dt: datetime) -> int:
     """Week of month (1-5), KPI rule: week starts Monday and ends Sunday (full week)."""
@@ -4343,29 +4404,27 @@ def support_dashboard_feature_tickets(
 
 @api_router.get("/dashboard/trends")
 def dashboard_trends(auth: dict = Depends(get_current_user)):
-    """Monthly trend data for charts (Chores & Bug only).
+    """Weekly trend data for charts (Chores & Bug only).
 
     - response_delay: tickets with no assignee (same as dashboard cards).
     - completion_delay: Stage 2 TAT breach — ``_has_completion_delay`` (planned/actual vs SLA), not Stage 4.
     """
-    import calendar
-
     now = datetime.utcnow()
-    cur_y, cur_m = now.year, now.month
+    # Week windows are Monday 00:00:00 -> Sunday 23:59:59 (UTC), last 7 weeks including current week.
+    current_week_start = now - timedelta(days=now.weekday())
+    current_week_start = datetime(
+        current_week_start.year,
+        current_week_start.month,
+        current_week_start.day,
+        0,
+        0,
+        0,
+    )
     data = []
     for i in range(6, -1, -1):
-        ty, tm = cur_y, cur_m
-        tm -= i
-        while tm <= 0:
-            tm += 12
-            ty -= 1
-        while tm > 12:
-            tm -= 12
-            ty += 1
-        month_start = datetime(ty, tm, 1, 0, 0, 0)
-        last_d = calendar.monthrange(ty, tm)[1]
-        month_end = datetime(ty, tm, last_d, 23, 59, 59)
-        label = month_start.strftime("%b %Y")
+        week_start = current_week_start - timedelta(weeks=i)
+        week_end = week_start + timedelta(days=6, hours=23, minutes=59, seconds=59)
+        label = f"{week_start.strftime('%d %b')} - {week_end.strftime('%d %b')}"
         try:
             q = (
                 supabase.table("tickets")
@@ -4373,8 +4432,8 @@ def dashboard_trends(auth: dict = Depends(get_current_user)):
                     "id, assignee_id, created_at, type, resolved_at, planned_2, actual_2, actual_1, status_2"
                 )
                 .in_("type", ["chore", "bug"])
-                .gte("created_at", month_start.isoformat())
-                .lte("created_at", month_end.isoformat())
+                .gte("created_at", week_start.isoformat())
+                .lte("created_at", week_end.isoformat())
             )
             r = q.execute()
             tickets = r.data or []

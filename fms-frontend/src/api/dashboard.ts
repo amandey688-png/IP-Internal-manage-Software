@@ -1,4 +1,5 @@
 import { apiClient } from './axios'
+import type { SuccessKpiResponse } from './dashboardKpi'
 
 export interface DashboardMetrics {
   all_tickets: number
@@ -13,6 +14,8 @@ export interface DashboardMetrics {
   custom_received_half_yearly?: number
   custom_received_yearly?: number
   custom_total_due?: number
+  custom_total_due_quarter?: number
+  custom_raised_quarter?: number
   custom_pending_delegation?: number
   response_delay: number
   completion_delay: number
@@ -43,6 +46,20 @@ export interface DashboardDetailTicket {
   stage?: string
   genre?: string
   agingDays?: number | null
+  delegationOn?: string
+}
+
+export interface SuccessPerformanceListItem {
+  id: string
+  reference_no?: string
+  company_name?: string
+  completion_status?: string | null
+  created_at?: string
+  total_percentage?: number | null
+  current_stage?: string
+  training_schedule_date?: string | null
+  has_training?: boolean
+  feature_count?: number
 }
 
 export const dashboardApi = {
@@ -109,6 +126,31 @@ export const dashboardApi = {
     tag?: 't1' | 't2'
   }): Promise<{ success: boolean }> => {
     const r = await apiClient.post<{ success: boolean }>('/dashboard/payment-actions/submit', body)
+    return r.data
+  },
+  getSuccessPerformanceList: async (
+    completionStatus: 'in_progress' | 'completed',
+  ): Promise<{ items: SuccessPerformanceListItem[] }> => {
+    const r = await apiClient.get<{ items: SuccessPerformanceListItem[] }>(
+      '/success/performance/list',
+      { params: { completion_status: completionStatus } },
+    )
+    return r.data
+  },
+  getSuccessKpiTillDate: async (): Promise<{
+    success: boolean
+    rangeStart?: string
+    tillDate?: string
+    successKpi?: SuccessKpiResponse | null
+    error?: string
+  }> => {
+    const r = await apiClient.get<{
+      success: boolean
+      rangeStart?: string
+      tillDate?: string
+      successKpi?: SuccessKpiResponse | null
+      error?: string
+    }>('/dashboard/success-kpi-till-date')
     return r.data
   },
 }
