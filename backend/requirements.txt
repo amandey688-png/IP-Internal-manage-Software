@@ -7,4 +7,3 @@ supabase
 httpx
 psycopg2-binary
 aiosmtplib
-redis>=5.0.0
