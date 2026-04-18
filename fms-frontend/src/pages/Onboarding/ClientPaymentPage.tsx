@@ -58,6 +58,8 @@ export function ClientPaymentPage() {
   } | null>(null)
   const [sentSubmitted, setSentSubmitted] = useState(false)
   const [sentForm] = Form.useForm()
+  /** Follow up fields shown inside Invoice Sent modal (next slot only). */
+  const [sentInlineFollowupForm] = Form.useForm()
   const [form] = Form.useForm()
   const [editInvoiceModalOpen, setEditInvoiceModalOpen] = useState(false)
   const [editInvoiceSubmitLoading, setEditInvoiceSubmitLoading] = useState(false)
@@ -78,7 +80,18 @@ export function ClientPaymentPage() {
   const [followupForm] = Form.useForm()
   const [drawerStatusLoading, setDrawerStatusLoading] = useState(false)
   const [nextFollowupNo, setNextFollowupNo] = useState(1)
-  const [followupsItems, setFollowupsItems] = useState<{ followup_no: number; contact_person?: string | null; remarks?: string | null; mail_sent?: boolean; whatsapp_sent?: boolean; created_at?: string; editable_24h?: boolean }[]>([])
+  const [followupsItems, setFollowupsItems] = useState<
+    {
+      followup_no: number
+      contact_person?: string | null
+      remarks?: string | null
+      mail_sent?: boolean
+      whatsapp_sent?: boolean
+      followup_timestamp?: string | null
+      created_at?: string
+      editable_24h?: boolean
+    }[]
+  >([])
   const [interceptSubmitted, setInterceptSubmitted] = useState(false)
   const [interceptDetails, setInterceptDetails] = useState<{
     last_remark_user?: string | null
@@ -345,14 +358,16 @@ export function ClientPaymentPage() {
       .finally(() => setDrawerStatusLoading(false))
   }
 
-  const loadSentDetails = (openModal: boolean) => {
+  const loadSentDetails = (openModal: boolean, options?: { silent?: boolean }) => {
     if (!selectedRecord) return
-    setSentLoading(true)
-    apiClient
-      .get<{ data: any; created_at: string | null; editable_until: string | null; editable_24h: boolean; submitted?: boolean }>(
-        `/onboarding/client-payment/${selectedRecord.id}/sent`
-      )
-      .then((res) => {
+    if (!options?.silent) setSentLoading(true)
+    const sentUrl = `/onboarding/client-payment/${selectedRecord.id}/sent`
+    const fuUrl = `/onboarding/client-payment/${selectedRecord.id}/followups`
+    Promise.all([
+      apiClient.get<{ data: any; created_at: string | null; editable_until: string | null; editable_24h: boolean; submitted?: boolean }>(sentUrl),
+      apiClient.get<{ items?: any[]; next_followup_no?: number }>(fuUrl),
+    ])
+      .then(([res, fuRes]) => {
         const data = res.data?.data || {}
         sentForm.setFieldsValue({
           email_sent: data.email_sent ?? false,
@@ -375,10 +390,16 @@ export function ClientPaymentPage() {
         })
         setSentSubmitted(!!res.data?.submitted)
         setSentEditable(res.data?.editable_24h ?? true)
+        const items = fuRes.data?.items || []
+        setFollowupsItems(items)
+        setNextFollowupNo(Math.min(fuRes.data?.next_followup_no ?? 1, 11))
+        sentInlineFollowupForm.resetFields()
         if (openModal) setSentModalOpen(true)
       })
       .catch(() => message.error('Could not load Invoice Sent details'))
-      .finally(() => setSentLoading(false))
+      .finally(() => {
+        if (!options?.silent) setSentLoading(false)
+      })
   }
 
   const openSentDetails = () => {
@@ -438,6 +459,7 @@ export function ClientPaymentPage() {
           remarks: data.remarks ?? '',
           mail_sent: data.mail_sent ?? false,
           whatsapp_sent: data.whatsapp_sent ?? false,
+          followup_timestamp: data.followup_timestamp ? dayjs(data.followup_timestamp) : undefined,
         })
         setFollowupEditable(res.data?.submitted ? (res.data?.editable_24h ?? true) : true)
         setFollowupModalOpen(true)
@@ -446,11 +468,22 @@ export function ClientPaymentPage() {
       .finally(() => setFollowupLoading(false))
   }
 
+  const buildFollowupApiPayload = (values: Record<string, unknown>, followupNo: number) => ({
+    contact_person: values.contact_person,
+    remarks: values.remarks,
+    mail_sent: values.mail_sent,
+    whatsapp_sent: values.whatsapp_sent,
+    followup_timestamp: values.followup_timestamp
+      ? (values.followup_timestamp as Dayjs).toISOString()
+      : undefined,
+    followup_no: followupNo,
+  })
+
   const handleFollowupSubmit = () => {
     if (!selectedRecord) return
     followupForm.validateFields().then((values) => {
       setFollowupLoading(true)
-      const payload = { ...values, followup_no: currentFollowupNo }
+      const payload = buildFollowupApiPayload(values as Record<string, unknown>, currentFollowupNo)
       apiClient
         .post(`/onboarding/client-payment/${selectedRecord.id}/followups`, { data: payload })
         .then(() => {
@@ -458,6 +491,25 @@ export function ClientPaymentPage() {
           setFollowupModalOpen(false)
           loadDrawerData(selectedRecord)
           loadData()
+          if (sentModalOpen) loadSentDetails(false, { silent: true })
+        })
+        .catch((err) => message.error(err?.response?.data?.detail || 'Failed to save'))
+        .finally(() => setFollowupLoading(false))
+    }).catch(() => {})
+  }
+
+  const handleSentModalInlineFollowupSave = () => {
+    if (!selectedRecord || nextFollowupNo > 10) return
+    sentInlineFollowupForm.validateFields().then((values) => {
+      setFollowupLoading(true)
+      const payload = buildFollowupApiPayload(values as Record<string, unknown>, nextFollowupNo)
+      apiClient
+        .post(`/onboarding/client-payment/${selectedRecord.id}/followups`, { data: payload })
+        .then(() => {
+          message.success(`Follow up ${nextFollowupNo} saved`)
+          loadDrawerData(selectedRecord)
+          loadData()
+          loadSentDetails(false, { silent: true })
         })
         .catch((err) => message.error(err?.response?.data?.detail || 'Failed to save'))
         .finally(() => setFollowupLoading(false))
@@ -966,10 +1018,21 @@ export function ClientPaymentPage() {
                         <CheckCircleOutlined style={{ color: '#52c41a' }} />
                         <span>Follow up {fu.followup_no}</span>
                       </Space>
-                      <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openFollowup(fu.followup_no)}>Edit</Button>
+                      {fu.editable_24h ? (
+                        <Button type="link" size="small" icon={<EditOutlined />} onClick={() => openFollowup(fu.followup_no)}>
+                          Edit
+                        </Button>
+                      ) : (
+                        <Button type="link" size="small" onClick={() => openFollowup(fu.followup_no)}>
+                          View
+                        </Button>
+                      )}
                     </div>
                     <Descriptions column={1} size="small" bordered>
                       <Descriptions.Item label="Contact Person">{fu.contact_person || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Timestamp">
+                        {fu.followup_timestamp ? dayjs(fu.followup_timestamp).format('DD-MMM-YYYY hh:mm A') : '—'}
+                      </Descriptions.Item>
                       <Descriptions.Item label="Mail Sent">{fu.mail_sent ? 'Yes' : 'No'}</Descriptions.Item>
                       <Descriptions.Item label="WhatsApp Sent">{fu.whatsapp_sent ? 'Yes' : 'No'}</Descriptions.Item>
                       <Descriptions.Item label="Remarks">{fu.remarks || '—'}</Descriptions.Item>
@@ -1112,7 +1175,7 @@ export function ClientPaymentPage() {
         onCancel={() => setSentModalOpen(false)}
         footer={null}
         destroyOnClose
-        width={520}
+        width={640}
       >
         <Form
           form={sentForm}
@@ -1248,6 +1311,91 @@ export function ClientPaymentPage() {
             </Space>
           </Form.Item>
         </Form>
+
+        <Divider orientation="left">Follow up 1 to 10</Divider>
+        <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
+          Follow ups load from the same data as the drawer. After a follow up is saved, it is read-only here; within 24 hours you can still use <b>Edit</b> on the drawer for that follow up.
+        </Text>
+        {!sentSubmitted ? (
+          <Text type="warning" style={{ display: 'block', marginBottom: 12 }}>
+            Save Invoice Sent details above first — then Follow up 1 will unlock, then 2, and so on.
+          </Text>
+        ) : null}
+        <div style={{ maxHeight: 420, overflowY: 'auto', paddingRight: 4 }}>
+          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => {
+              const fu = followupsItems.find((x) => x.followup_no === n)
+              const isSaved = !!fu
+              const isNextEditable =
+                sentSubmitted && !isSaved && n === nextFollowupNo && nextFollowupNo <= 10
+              const isFuture = sentSubmitted && !isSaved && n > nextFollowupNo && nextFollowupNo <= 10
+              const beforeSent = !sentSubmitted
+
+              return (
+                <Card key={n} size="small" title={`Follow up ${n}`}>
+                  {isSaved ? (
+                    <Descriptions column={1} size="small" bordered>
+                      <Descriptions.Item label="Contact Person">{fu.contact_person || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Timestamp">
+                        {fu.followup_timestamp ? dayjs(fu.followup_timestamp).format('DD-MMM-YYYY hh:mm A') : '—'}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Remarks">{fu.remarks || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Mail Sent">{fu.mail_sent ? 'Yes' : 'No'}</Descriptions.Item>
+                      <Descriptions.Item label="WhatsApp Sent">{fu.whatsapp_sent ? 'Yes' : 'No'}</Descriptions.Item>
+                    </Descriptions>
+                  ) : null}
+                  {isNextEditable ? (
+                    <Form
+                      key={`sent-inline-fu-${nextFollowupNo}`}
+                      form={sentInlineFollowupForm}
+                      layout="vertical"
+                      style={{ marginTop: isSaved ? 12 : 0 }}
+                      onFinish={handleSentModalInlineFollowupSave}
+                    >
+                      <Form.Item name="contact_person" label="Contact Person">
+                        <Input placeholder="Enter contact person" />
+                      </Form.Item>
+                      <Form.Item
+                        name="followup_timestamp"
+                        label="Timestamp"
+                        rules={[{ required: true, message: 'Timestamp is required' }]}
+                      >
+                        <DatePicker
+                          showTime={{ format: 'hh:mm A', use12Hours: true }}
+                          format="DD-MMM-YYYY hh:mm A"
+                          style={{ width: '100%' }}
+                        />
+                      </Form.Item>
+                      <Form.Item name="remarks" label="Remarks">
+                        <Input.TextArea rows={3} placeholder="Enter remarks" />
+                      </Form.Item>
+                      <Form.Item name="mail_sent" label="Mail Sent" initialValue={false}>
+                        <Select options={[{ label: 'No', value: false }, { label: 'Yes', value: true }]} />
+                      </Form.Item>
+                      <Form.Item name="whatsapp_sent" label="WhatsApp Sent" initialValue={false}>
+                        <Select options={[{ label: 'No', value: false }, { label: 'Yes', value: true }]} />
+                      </Form.Item>
+                      <Form.Item style={{ marginBottom: 0 }}>
+                        <Button type="primary" htmlType="submit" loading={followupLoading}>
+                          Save follow up {n}
+                        </Button>
+                      </Form.Item>
+                    </Form>
+                  ) : null}
+                  {beforeSent && !isSaved ? (
+                    <Text type="secondary">Locked until Invoice Sent details are saved.</Text>
+                  ) : null}
+                  {!beforeSent && !isSaved && !isNextEditable && isFuture ? (
+                    <Text type="secondary">Complete follow up {nextFollowupNo} first.</Text>
+                  ) : null}
+                  {!beforeSent && !isSaved && !isNextEditable && !isFuture && n <= 10 ? (
+                    <Text type="secondary">—</Text>
+                  ) : null}
+                </Card>
+              )
+            })}
+          </Space>
+        </div>
       </Modal>
 
       <Modal
@@ -1260,6 +1408,17 @@ export function ClientPaymentPage() {
       >
         <Form form={followupForm} layout="vertical" style={{ marginTop: 16 }} disabled={!followupEditable} onFinish={handleFollowupSubmit}>
           <Form.Item name="contact_person" label="Contact Person"><Input placeholder="Enter contact person" /></Form.Item>
+          <Form.Item
+            name="followup_timestamp"
+            label="Timestamp"
+            rules={[{ required: true, message: 'Timestamp is required' }]}
+          >
+            <DatePicker
+              showTime={{ format: 'hh:mm A', use12Hours: true }}
+              format="DD-MMM-YYYY hh:mm A"
+              style={{ width: '100%' }}
+            />
+          </Form.Item>
           <Form.Item name="remarks" label="Remarks"><Input.TextArea rows={3} placeholder="Enter remarks" /></Form.Item>
           <Form.Item name="mail_sent" label="Mail Sent" initialValue={false}><Select options={[{ label: 'No', value: false }, { label: 'Yes', value: true }]} /></Form.Item>
           <Form.Item name="whatsapp_sent" label="WhatsApp Sent" initialValue={false}><Select options={[{ label: 'No', value: false }, { label: 'Yes', value: true }]} /></Form.Item>

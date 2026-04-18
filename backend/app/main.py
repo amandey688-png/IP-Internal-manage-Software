@@ -6183,6 +6183,7 @@ def get_client_payment_followup1(client_payment_id: str, auth: dict = Depends(ge
                     "remarks": None,
                     "mail_sent": False,
                     "whatsapp_sent": False,
+                    "followup_timestamp": None,
                 },
                 "created_at": now_iso,
                 "editable_until": editable_until_iso,
@@ -6203,6 +6204,7 @@ def get_client_payment_followup1(client_payment_id: str, auth: dict = Depends(ge
                 "remarks": row.get("remarks"),
                 "mail_sent": bool(row.get("mail_sent")),
                 "whatsapp_sent": bool(row.get("whatsapp_sent")),
+                "followup_timestamp": row.get("followup_timestamp"),
             },
             "created_at": row.get("created_at") or now_iso,
             "editable_until": editable_until,
@@ -6230,6 +6232,9 @@ def save_client_payment_followup1(client_payment_id: str, payload: dict, auth: d
     remarks = (data.get("remarks") or "").strip() or None
     mail_sent = bool(data.get("mail_sent"))
     whatsapp_sent = bool(data.get("whatsapp_sent"))
+    followup_timestamp_iso = _client_payment_followup_timestamp_to_db_iso(data.get("followup_timestamp"))
+    if followup_timestamp_iso is None:
+        raise HTTPException(400, "followup_timestamp is required")
 
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
@@ -6266,6 +6271,7 @@ def save_client_payment_followup1(client_payment_id: str, payload: dict, auth: d
                 "remarks": remarks,
                 "mail_sent": mail_sent,
                 "whatsapp_sent": whatsapp_sent,
+                "followup_timestamp": followup_timestamp_iso,
                 "updated_at": now_iso,
             }
             supabase.table("onboarding_client_payment_followup1").update(update_data).eq("client_payment_id", client_payment_id).execute()
@@ -6276,6 +6282,7 @@ def save_client_payment_followup1(client_payment_id: str, payload: dict, auth: d
                 "remarks": remarks,
                 "mail_sent": mail_sent,
                 "whatsapp_sent": whatsapp_sent,
+                "followup_timestamp": followup_timestamp_iso,
                 "created_by": auth.get("id"),
                 "created_at": now_iso,
                 "editable_until": editable_until_iso,
@@ -6288,6 +6295,7 @@ def save_client_payment_followup1(client_payment_id: str, payload: dict, auth: d
                 "remarks": remarks,
                 "mail_sent": mail_sent,
                 "whatsapp_sent": whatsapp_sent,
+                "followup_timestamp": followup_timestamp_iso,
             },
             "created_at": row.get("created_at") if row else now_iso,
             "editable_until": row.get("editable_until") if row else editable_until_iso,
@@ -6298,6 +6306,25 @@ def save_client_payment_followup1(client_payment_id: str, payload: dict, auth: d
     except Exception as e:
         _log(f"save client payment followup1: {e}")
         raise HTTPException(400, str(e)[:200])
+
+
+def _client_payment_followup_timestamp_to_db_iso(raw) -> str | None:
+    """Normalize user-supplied follow-up timestamp to UTC ISO Z for timestamptz. None if empty."""
+    if raw is None:
+        return None
+    if isinstance(raw, str) and not str(raw).strip():
+        return None
+    s = str(raw).strip()
+    try:
+        if s.endswith("Z"):
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        else:
+            dt = datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except Exception:
+        raise HTTPException(400, "Invalid followup_timestamp; use an ISO date-time string.")
 
 
 # ---------- Client Payment: Follow-ups 1-10, Intercept, Discontinuation, Payment Receive ----------
@@ -6329,12 +6356,19 @@ def list_client_payment_followups(client_payment_id: str, auth: dict = Depends(g
                 "remarks": row.get("remarks"),
                 "mail_sent": bool(row.get("mail_sent")),
                 "whatsapp_sent": bool(row.get("whatsapp_sent")),
+                "followup_timestamp": row.get("followup_timestamp"),
                 "created_at": row.get("created_at"),
                 "editable_24h": editable_24h,
             })
         # Legacy: if old followup1 table has a row, treat as followup 1
         try:
-            r1 = supabase.table("onboarding_client_payment_followup1").select("created_at, editable_until").eq("client_payment_id", client_payment_id).limit(1).execute()
+            r1 = (
+                supabase.table("onboarding_client_payment_followup1")
+                .select("created_at, editable_until, followup_timestamp, contact_person, remarks, mail_sent, whatsapp_sent")
+                .eq("client_payment_id", client_payment_id)
+                .limit(1)
+                .execute()
+            )
             if r1.data and len(r1.data) > 0 and not any(x.get("followup_no") == 1 for x in rows):
                 leg = r1.data[0]
                 editable_24h = False
@@ -6343,7 +6377,18 @@ def list_client_payment_followups(client_payment_id: str, auth: dict = Depends(g
                         editable_24h = datetime.fromisoformat(str(leg["editable_until"]).replace("Z", "+00:00")) >= now_dt
                     except Exception:
                         pass
-                items.append({"followup_no": 1, "contact_person": None, "remarks": None, "mail_sent": False, "whatsapp_sent": False, "created_at": leg.get("created_at"), "editable_24h": editable_24h})
+                items.append(
+                    {
+                        "followup_no": 1,
+                        "contact_person": leg.get("contact_person"),
+                        "remarks": leg.get("remarks"),
+                        "mail_sent": bool(leg.get("mail_sent")),
+                        "whatsapp_sent": bool(leg.get("whatsapp_sent")),
+                        "followup_timestamp": leg.get("followup_timestamp"),
+                        "created_at": leg.get("created_at"),
+                        "editable_24h": editable_24h,
+                    }
+                )
                 items.sort(key=lambda x: x["followup_no"])
         except Exception:
             pass
@@ -6377,7 +6422,17 @@ def get_client_payment_followup(client_payment_id: str, followup_no: int, auth: 
                 if row:
                     row["followup_no"] = 1
             if not row:
-                return {"data": {"contact_person": None, "remarks": None, "mail_sent": False, "whatsapp_sent": False}, "submitted": False, "editable_24h": True}
+                return {
+                    "data": {
+                        "contact_person": None,
+                        "remarks": None,
+                        "mail_sent": False,
+                        "whatsapp_sent": False,
+                        "followup_timestamp": None,
+                    },
+                    "submitted": False,
+                    "editable_24h": True,
+                }
         now_dt = datetime.now(timezone.utc)
         editable_24h = False
         if row and row.get("editable_until"):
@@ -6391,6 +6446,7 @@ def get_client_payment_followup(client_payment_id: str, followup_no: int, auth: 
                 "remarks": row.get("remarks") if row else None,
                 "mail_sent": bool(row.get("mail_sent")) if row else False,
                 "whatsapp_sent": bool(row.get("whatsapp_sent")) if row else False,
+                "followup_timestamp": row.get("followup_timestamp") if row else None,
             },
             "submitted": bool(row),
             "editable_24h": editable_24h,
@@ -6418,6 +6474,9 @@ def save_client_payment_followup(client_payment_id: str, payload: dict, auth: di
     remarks = (data.get("remarks") or "").strip() or None
     mail_sent = bool(data.get("mail_sent"))
     whatsapp_sent = bool(data.get("whatsapp_sent"))
+    followup_timestamp_iso = _client_payment_followup_timestamp_to_db_iso(data.get("followup_timestamp"))
+    if followup_timestamp_iso is None:
+        raise HTTPException(400, "followup_timestamp is required")
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
     editable_until_dt = now_dt + timedelta(hours=24)
@@ -6444,16 +6503,38 @@ def save_client_payment_followup(client_payment_id: str, payload: dict, auth: di
                 except Exception:
                     raise HTTPException(400, "No longer editable")
             supabase.table("onboarding_client_payment_followups").update({
-                "contact_person": contact_person, "remarks": remarks, "mail_sent": mail_sent, "whatsapp_sent": whatsapp_sent,
+                "contact_person": contact_person,
+                "remarks": remarks,
+                "mail_sent": mail_sent,
+                "whatsapp_sent": whatsapp_sent,
+                "followup_timestamp": followup_timestamp_iso,
                 "updated_at": now_iso,
             }).eq("id", row["id"]).execute()
         else:
             supabase.table("onboarding_client_payment_followups").insert({
-                "client_payment_id": client_payment_id, "followup_no": followup_no,
-                "contact_person": contact_person, "remarks": remarks, "mail_sent": mail_sent, "whatsapp_sent": whatsapp_sent,
-                "created_by": auth.get("id"), "created_at": now_iso, "editable_until": editable_until_iso,
+                "client_payment_id": client_payment_id,
+                "followup_no": followup_no,
+                "contact_person": contact_person,
+                "remarks": remarks,
+                "mail_sent": mail_sent,
+                "whatsapp_sent": whatsapp_sent,
+                "followup_timestamp": followup_timestamp_iso,
+                "created_by": auth.get("id"),
+                "created_at": now_iso,
+                "editable_until": editable_until_iso,
             }).execute()
-        return {"data": {"followup_no": followup_no, "contact_person": contact_person, "remarks": remarks, "mail_sent": mail_sent, "whatsapp_sent": whatsapp_sent}, "created_at": now_iso, "editable_24h": True}
+        return {
+            "data": {
+                "followup_no": followup_no,
+                "contact_person": contact_person,
+                "remarks": remarks,
+                "mail_sent": mail_sent,
+                "whatsapp_sent": whatsapp_sent,
+                "followup_timestamp": followup_timestamp_iso,
+            },
+            "created_at": now_iso,
+            "editable_24h": True,
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -6978,12 +7059,40 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
                     editable_24h = datetime.fromisoformat(str(row["editable_until"]).replace("Z", "+00:00")) >= now_dt
                 except Exception:
                     pass
-            items.append({"followup_no": row.get("followup_no"), "contact_person": row.get("contact_person"), "remarks": row.get("remarks"), "mail_sent": bool(row.get("mail_sent")), "whatsapp_sent": bool(row.get("whatsapp_sent")), "created_at": row.get("created_at"), "editable_24h": editable_24h})
-        r1 = supabase.table("onboarding_client_payment_followup1").select("created_at, editable_until").eq("client_payment_id", client_payment_id).limit(1).execute()
+            items.append(
+                {
+                    "followup_no": row.get("followup_no"),
+                    "contact_person": row.get("contact_person"),
+                    "remarks": row.get("remarks"),
+                    "mail_sent": bool(row.get("mail_sent")),
+                    "whatsapp_sent": bool(row.get("whatsapp_sent")),
+                    "followup_timestamp": row.get("followup_timestamp"),
+                    "created_at": row.get("created_at"),
+                    "editable_24h": editable_24h,
+                }
+            )
+        r1 = (
+            supabase.table("onboarding_client_payment_followup1")
+            .select("created_at, editable_until, followup_timestamp, contact_person, remarks, mail_sent, whatsapp_sent")
+            .eq("client_payment_id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
         if r1.data and len(r1.data) > 0 and not any(x.get("followup_no") == 1 for x in rows):
             leg = r1.data[0]
             editable_24h = bool(leg.get("editable_until") and datetime.fromisoformat(str(leg["editable_until"]).replace("Z", "+00:00")) >= now_dt)
-            items.append({"followup_no": 1, "contact_person": None, "remarks": None, "mail_sent": False, "whatsapp_sent": False, "created_at": leg.get("created_at"), "editable_24h": editable_24h})
+            items.append(
+                {
+                    "followup_no": 1,
+                    "contact_person": leg.get("contact_person"),
+                    "remarks": leg.get("remarks"),
+                    "mail_sent": bool(leg.get("mail_sent")),
+                    "whatsapp_sent": bool(leg.get("whatsapp_sent")),
+                    "followup_timestamp": leg.get("followup_timestamp"),
+                    "created_at": leg.get("created_at"),
+                    "editable_24h": editable_24h,
+                }
+            )
             items.sort(key=lambda x: x["followup_no"])
         max_no = max([x["followup_no"] for x in items], default=0)
         out["followups"] = {"items": items, "next_followup_no": min(max_no + 1, 11)}
