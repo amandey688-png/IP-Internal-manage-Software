@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, ReactNode } from 'react'
 import { AuthContext, AuthContextType } from './AuthContext'
 import { storage } from '../utils/storage'
+import { sessionApiCacheClearAll } from '../utils/sessionApiCache'
 import { authApi } from '../api/auth'
 import type { User } from '../types/auth'
 import { normalizeUserSectionPermissions } from '../utils/helpers'
@@ -72,6 +73,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         const response = await authApi.getCurrentUser()
         if (response.data) {
           if (response.data.is_active === false) {
+            sessionApiCacheClearAll()
             storage.clear()
             setToken(null)
             setUser(null)
@@ -105,6 +107,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         }
 
         if (code === '403') {
+          sessionApiCacheClearAll()
           storage.clear()
           setToken(null)
           setUser(null)
@@ -129,6 +132,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
               return
             }
           }
+          sessionApiCacheClearAll()
           storage.clear()
           setToken(null)
           setUser(null)
@@ -137,6 +141,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
         }
 
         if (code === '404') {
+          sessionApiCacheClearAll()
           storage.clear()
           setToken(null)
           setUser(null)
@@ -167,6 +172,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     } catch (error) {
       console.error('Logout error:', error)
     } finally {
+      sessionApiCacheClearAll()
       setToken(null)
       setUser(null)
       storage.clear()
