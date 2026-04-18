@@ -1,5 +1,13 @@
 import { apiClient } from './axios'
 import type { ApiResponse, PaginatedResponse } from './types'
+import {
+  API_CACHE_TTL_MS,
+  sessionApiCacheGet,
+  sessionApiCacheSet,
+  ticketsListLogicalKey,
+  ticketGetLogicalKey,
+  invalidateAfterTicketMutation,
+} from '../utils/sessionApiCache'
 
 export interface Ticket {
   id: string
@@ -181,6 +189,9 @@ export const ticketsApi = {
     sort_by?: string
     sort_order?: string
   }): Promise<ApiResponse<PaginatedResponse<Ticket>>> => {
+    const listKey = ticketsListLogicalKey(params as object | undefined)
+    const cached = sessionApiCacheGet<ApiResponse<PaginatedResponse<Ticket>>>(listKey)
+    if (cached) return cached
     // Serialize arrays as repeated keys (company_ids=id1&company_ids=id2) so FastAPI receives list[str]
     const paramsSerializer = (p: Record<string, unknown>) => {
       const search = new URLSearchParams()
@@ -198,26 +209,34 @@ export const ticketsApi = {
       '/tickets',
       { params, paramsSerializer }
     )
+    sessionApiCacheSet(listKey, response.data, API_CACHE_TTL_MS.ticketsList)
     return response.data
   },
 
   get: async (id: string): Promise<ApiResponse<Ticket>> => {
+    const gKey = ticketGetLogicalKey(id)
+    const cached = sessionApiCacheGet<ApiResponse<Ticket>>(gKey)
+    if (cached) return cached
     const response = await apiClient.get<ApiResponse<Ticket>>(`/tickets/${id}`)
+    sessionApiCacheSet(gKey, response.data, API_CACHE_TTL_MS.ticketGet)
     return response.data
   },
 
   create: async (data: CreateTicketRequest): Promise<ApiResponse<Ticket>> => {
     const response = await apiClient.post<ApiResponse<Ticket>>('/tickets', data)
+    invalidateAfterTicketMutation()
     return response.data
   },
 
   update: async (id: string, data: UpdateTicketRequest): Promise<ApiResponse<Ticket>> => {
     const response = await apiClient.put<ApiResponse<Ticket>>(`/tickets/${id}`, data)
+    invalidateAfterTicketMutation(id)
     return response.data
   },
 
   delete: async (id: string): Promise<void> => {
     await apiClient.delete(`/tickets/${id}`)
+    invalidateAfterTicketMutation(id)
   },
 
   getResponses: async (ticketId: string): Promise<ApiResponse<{ data: TicketResponse[] }>> => {
@@ -229,6 +248,7 @@ export const ticketsApi = {
     const response = await apiClient.post<ApiResponse<TicketResponse>>(`/tickets/${ticketId}/responses`, {
       response_text: responseText,
     })
+    invalidateAfterTicketMutation(ticketId)
     return response.data
   },
 
@@ -236,16 +256,19 @@ export const ticketsApi = {
     const response = await apiClient.post<ApiResponse<Ticket>>(`/tickets/${ticketId}/quality-solution`, {
       quality_solution: qualitySolution,
     })
+    invalidateAfterTicketMutation(ticketId)
     return response.data
   },
 
   markStaging: async (ticketId: string): Promise<ApiResponse<Ticket>> => {
     const response = await apiClient.post<ApiResponse<Ticket>>(`/tickets/${ticketId}/mark-staging`)
+    invalidateAfterTicketMutation(ticketId)
     return response.data
   },
 
   stagingBack: async (ticketId: string): Promise<ApiResponse<Ticket>> => {
     const response = await apiClient.post<ApiResponse<Ticket>>(`/tickets/${ticketId}/staging-back`)
+    invalidateAfterTicketMutation(ticketId)
     return response.data
   },
 
@@ -258,6 +281,7 @@ export const ticketsApi = {
     const response = await apiClient.post<ApiResponse<Stage2Remark>>(`/tickets/${ticketId}/stage2-remarks`, {
       remark_text: remarkText,
     })
+    invalidateAfterTicketMutation(ticketId)
     return response.data
   },
 
@@ -265,6 +289,7 @@ export const ticketsApi = {
     const response = await apiClient.put<ApiResponse<Stage2Remark>>(`/tickets/${ticketId}/stage2-remarks/${remarkId}`, {
       remark_text: remarkText,
     })
+    invalidateAfterTicketMutation(ticketId)
     return response.data
   },
 }
