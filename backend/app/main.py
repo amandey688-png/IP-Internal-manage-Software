@@ -217,10 +217,14 @@ async def log_requests(request: Request, call_next):
         return JSONResponse(
             status_code=429,
             content={"detail": "Too many requests. Please try again later."},
+            headers={"Cache-Control": "no-store"},
         )
     _log(f"--> {request.method} {request.url.path}")
     try:
         response = await call_next(request)
+        # Authenticated JSON API: never allow shared caches to treat responses as reusable.
+        if request.method != "OPTIONS":
+            response.headers["Cache-Control"] = "no-store"
         _log(f"<-- {request.method} {request.url.path} -> {response.status_code}")
         return response
     except Exception as ex:
