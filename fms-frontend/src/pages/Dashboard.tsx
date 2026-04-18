@@ -41,6 +41,10 @@ import {
 import { weekOfMonth } from './Dashboard/kpiWeekUtils'
 import type { Ticket } from '../api/tickets'
 import type { DashboardMetrics } from '../api/dashboard'
+import { sessionApiCacheGet, ticketsListLogicalKey } from '../utils/sessionApiCache'
+
+/** Export/print dataset only — not needed to paint KPI cards; loaded after metrics+trends */
+const DASHBOARD_EXPORT_TICKET_PARAMS = { limit: 100, types_in: 'chore,bug' } as const
 
 const ACTIVE_LEAD_STAGE_COLORS: Record<string, string> = {
   'Demo Completed': '#22c55e',
@@ -330,25 +334,51 @@ export const Dashboard = () => {
     []
   )
 
+  const applyTicketsListResponse = (ticketsResVal: unknown) => {
+    const raw =
+      ticketsResVal && typeof ticketsResVal === 'object' ? (ticketsResVal as { data?: unknown }).data : undefined
+    const tickets: Ticket[] = Array.isArray(raw) ? (raw as Ticket[]) : []
+    setAllFetchedTickets(tickets)
+  }
+
   const fetchData = async () => {
-    setLoading(true)
     setError(null)
+    const exportListKey = ticketsListLogicalKey(DASHBOARD_EXPORT_TICKET_PARAMS as object)
+    const cachedMetrics = sessionApiCacheGet<DashboardMetrics>('dashboard:metrics')
+    const cachedTrends = sessionApiCacheGet<{ data: TrendPoint[] }>('dashboard:trends')
+    const cachedTickets = sessionApiCacheGet<{ data?: Ticket[] }>(exportListKey)
+
+    if (cachedMetrics) {
+      setMetrics(cachedMetrics)
+      if (cachedTrends?.data != null) {
+        setTrendPoints(Array.isArray(cachedTrends.data) ? cachedTrends.data : [])
+      }
+      if (cachedTickets) applyTicketsListResponse(cachedTickets)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+
     try {
-      const [metricsRes, ticketsRes, trendsRes] = await Promise.allSettled([
+      void ticketsApi
+        .list(DASHBOARD_EXPORT_TICKET_PARAMS)
+        .then((ticketsResVal) => applyTicketsListResponse(ticketsResVal))
+        .catch(() => {
+          if (!cachedTickets) setAllFetchedTickets([])
+        })
+
+      const [metricsRes, trendsRes] = await Promise.allSettled([
         dashboardApi.getMetrics(),
-        ticketsApi.list({ limit: 100, types_in: 'chore,bug' }),
         dashboardApi.getTrends(),
       ])
       setMetrics(metricsRes.status === 'fulfilled' ? metricsRes.value : null)
       if (trendsRes.status === 'fulfilled' && trendsRes.value?.data?.length) {
         setTrendPoints(trendsRes.value.data)
-      } else {
+      } else if (trendsRes.status === 'fulfilled') {
+        setTrendPoints(trendsRes.value?.data ?? [])
+      } else if (!cachedTrends) {
         setTrendPoints([])
       }
-      const ticketsResVal = ticketsRes.status === 'fulfilled' ? ticketsRes.value : null
-      const raw = ticketsResVal && typeof ticketsResVal === 'object' ? (ticketsResVal as { data?: unknown }).data : undefined
-      const tickets: Ticket[] = Array.isArray(raw) ? raw as Ticket[] : []
-      setAllFetchedTickets(tickets)
     } catch (err) {
       console.error('Dashboard fetch error:', err)
       setError('Failed to load dashboard. Check backend connection.')

@@ -1,4 +1,4 @@
-import { useEffect } from "react"
+import { useEffect, lazy, Suspense } from "react"
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
 import { ConfigProvider } from "antd"
 import { AuthProvider } from "./contexts/AuthProvider"
@@ -11,33 +11,41 @@ import { ResetPassword } from "./pages/auth/ResetPassword"
 import { OTPVerification } from "./pages/auth/OTPVerification"
 import { ConfirmationSuccess } from "./pages/auth/ConfirmationSuccess"
 
-import { Dashboard } from "./pages/Dashboard"
-import { DashboardKPIPage } from "./pages/Dashboard/DashboardKPIPage"
 import { ErrorBoundary } from "./components/common/ErrorBoundary"
-import { TicketList } from "./pages/Tickets/TicketList"
-import { TicketDetail } from "./pages/Tickets/TicketDetail"
-import { SolutionList } from "./pages/Solutions/SolutionList"
-import { StagingList } from "./pages/Staging/StagingList"
-import { ChecklistPage } from "./pages/Task/ChecklistPage"
-import { DelegationPage } from "./pages/Task/DelegationPage"
-import { PerformanceMonitoringPage } from "./pages/Success/PerformanceMonitoringPage"
-import { CompPerformPage } from "./pages/Success/CompPerformPage"
-import { DashboardPage as SuccessDashboardPage } from "./pages/Success/DashboardPage"
-import { UserList } from "./pages/Users/UserList"
-import { SettingsPage } from "./pages/Settings/SettingsPage"
-import { ApprovalConfirmPage } from "./pages/Approval/ApprovalConfirmPage"
-import { SupportDashboard } from "./pages/Support/SupportDashboard"
-import { LeadListPage } from "./pages/Leads/LeadListPage"
-import { LeadDetailPage } from "./pages/Leads/LeadDetailPage"
-import { LeadImportPage } from "./pages/Leads/LeadImportPage"
-import { PaymentStatusPage } from "./pages/Onboarding/PaymentStatusPage"
-import { ClientPaymentPage } from "./pages/Onboarding/ClientPaymentPage"
-import { PaymentAgeingReportPage } from "./pages/Onboarding/PaymentAgeingReportPage"
-import { PendingPaymentDetailsPage } from "./pages/Onboarding/PendingPaymentDetailsPage"
-import { ClientTrainingPage } from "./pages/Training/ClientTrainingPage"
-import { ClientOnbPage } from "./pages/DbClient/ClientOnbPage"
-import { DbDashPage } from "./pages/DbClient/DbDashPage"
-import { AccessDeniedPage } from "./pages/AccessDeniedPage"
+import { LoadingSpinner } from "./components/common/LoadingSpinner"
+
+const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })))
+const DashboardKPIPage = lazy(() => import("./pages/Dashboard/DashboardKPIPage").then((m) => ({ default: m.DashboardKPIPage })))
+const TicketList = lazy(() => import("./pages/Tickets/TicketList").then((m) => ({ default: m.TicketList })))
+const TicketDetail = lazy(() => import("./pages/Tickets/TicketDetail").then((m) => ({ default: m.TicketDetail })))
+const SolutionList = lazy(() => import("./pages/Solutions/SolutionList").then((m) => ({ default: m.SolutionList })))
+const StagingList = lazy(() => import("./pages/Staging/StagingList").then((m) => ({ default: m.StagingList })))
+const ChecklistPage = lazy(() => import("./pages/Task/ChecklistPage").then((m) => ({ default: m.ChecklistPage })))
+const DelegationPage = lazy(() => import("./pages/Task/DelegationPage").then((m) => ({ default: m.DelegationPage })))
+const PerformanceMonitoringPage = lazy(() =>
+  import("./pages/Success/PerformanceMonitoringPage").then((m) => ({ default: m.PerformanceMonitoringPage })),
+)
+const CompPerformPage = lazy(() => import("./pages/Success/CompPerformPage").then((m) => ({ default: m.CompPerformPage })))
+const SuccessDashboardPage = lazy(() => import("./pages/Success/DashboardPage").then((m) => ({ default: m.DashboardPage })))
+const UserList = lazy(() => import("./pages/Users/UserList").then((m) => ({ default: m.UserList })))
+const SettingsPage = lazy(() => import("./pages/Settings/SettingsPage").then((m) => ({ default: m.SettingsPage })))
+const ApprovalConfirmPage = lazy(() => import("./pages/Approval/ApprovalConfirmPage").then((m) => ({ default: m.ApprovalConfirmPage })))
+const SupportDashboard = lazy(() => import("./pages/Support/SupportDashboard").then((m) => ({ default: m.SupportDashboard })))
+const LeadListPage = lazy(() => import("./pages/Leads/LeadListPage").then((m) => ({ default: m.LeadListPage })))
+const LeadDetailPage = lazy(() => import("./pages/Leads/LeadDetailPage").then((m) => ({ default: m.LeadDetailPage })))
+const LeadImportPage = lazy(() => import("./pages/Leads/LeadImportPage").then((m) => ({ default: m.LeadImportPage })))
+const PaymentStatusPage = lazy(() => import("./pages/Onboarding/PaymentStatusPage").then((m) => ({ default: m.PaymentStatusPage })))
+const ClientPaymentPage = lazy(() => import("./pages/Onboarding/ClientPaymentPage"))
+const PaymentAgeingReportPage = lazy(() =>
+  import("./pages/Onboarding/PaymentAgeingReportPage").then((m) => ({ default: m.PaymentAgeingReportPage })),
+)
+const PendingPaymentDetailsPage = lazy(() =>
+  import("./pages/Onboarding/PendingPaymentDetailsPage").then((m) => ({ default: m.PendingPaymentDetailsPage })),
+)
+const ClientTrainingPage = lazy(() => import("./pages/Training/ClientTrainingPage").then((m) => ({ default: m.ClientTrainingPage })))
+const ClientOnbPage = lazy(() => import("./pages/DbClient/ClientOnbPage").then((m) => ({ default: m.ClientOnbPage })))
+const DbDashPage = lazy(() => import("./pages/DbClient/DbDashPage").then((m) => ({ default: m.DbDashPage })))
+const AccessDeniedPage = lazy(() => import("./pages/AccessDeniedPage").then((m) => ({ default: m.AccessDeniedPage })))
 
 import {
   ROUTES,
@@ -112,6 +120,7 @@ function App() {
       <AuthProvider>
         <BrowserRouter>
           <AppTitle />
+          <Suspense fallback={<LoadingSpinner fullPage />}>
           <Routes>
             {/* ================= PUBLIC ROUTES ================= */}
             <Route path={ROUTES.REGISTER} element={<Register />} />
@@ -473,6 +482,7 @@ function App() {
             {/* Unknown routes */}
             <Route path="*" element={<Navigate to={ROUTES.LOGIN} replace />} />
           </Routes>
+          </Suspense>
         </BrowserRouter>
       </AuthProvider>
     </ConfigProvider>
