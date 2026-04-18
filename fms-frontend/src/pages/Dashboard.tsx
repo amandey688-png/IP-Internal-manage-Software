@@ -1,24 +1,19 @@
 import { Typography, Row, Col, Card, Statistic, Button, Alert, Modal, Table, Tag, Form, Input, message, Space, Spin } from 'antd'
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
-import {
   FileTextOutlined,
   ClockCircleOutlined,
   WarningOutlined,
   CheckCircleOutlined,
   RocketOutlined,
 } from '@ant-design/icons'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, lazy, Suspense, type ReactNode } from 'react'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
 import { dashboardApi, type DashboardDetailTicket, type TrendPoint } from '../api/dashboard'
+
+const DashboardTrendCharts = lazy(() =>
+  import('./Dashboard/DashboardTrendCharts').then((m) => ({ default: m.DashboardTrendCharts })),
+)
 import { ticketsApi } from '../api/tickets'
 import { leadsApi, type ActiveLeadRow } from '../api/leads'
 import { LoadingSpinner } from '../components/common/LoadingSpinner'
@@ -41,6 +36,10 @@ import {
 import { weekOfMonth } from './Dashboard/kpiWeekUtils'
 import type { Ticket } from '../api/tickets'
 import type { DashboardMetrics } from '../api/dashboard'
+import { sessionApiCacheGet, ticketsListLogicalKey } from '../utils/sessionApiCache'
+
+/** Export/print dataset only — not needed to paint KPI cards; loaded after metrics+trends */
+const DASHBOARD_EXPORT_TICKET_PARAMS = { limit: 100, types_in: 'chore,bug' } as const
 
 const ACTIVE_LEAD_STAGE_COLORS: Record<string, string> = {
   'Demo Completed': '#22c55e',
@@ -184,9 +183,8 @@ export const Dashboard = () => {
     rows: Array<Record<string, unknown>>
   } | null>(null)
 
-  useEffect(() => {
-    fetchData()
-  }, [])
+  /** Invalidates in-flight dashboard fetch when effect re-runs (e.g. React StrictMode) so stale responses are ignored. */
+  const dashboardFetchGen = useRef(0)
 
   useEffect(() => {
     if (!isCustomDashboardFullUser) {
@@ -330,32 +328,77 @@ export const Dashboard = () => {
     []
   )
 
-  const fetchData = async () => {
-    setLoading(true)
+  const applyTicketsListResponse = (ticketsResVal: unknown, gen: number) => {
+    if (gen !== dashboardFetchGen.current) return
+    const raw =
+      ticketsResVal && typeof ticketsResVal === 'object' ? (ticketsResVal as { data?: unknown }).data : undefined
+    const tickets: Ticket[] = Array.isArray(raw) ? (raw as Ticket[]) : []
+    setAllFetchedTickets(tickets)
+  }
+
+  const fetchData = async (gen: number) => {
+    if (gen !== dashboardFetchGen.current) return
     setError(null)
+    const exportListKey = ticketsListLogicalKey(DASHBOARD_EXPORT_TICKET_PARAMS as object)
+    const cachedMetrics = sessionApiCacheGet<DashboardMetrics>('dashboard:metrics')
+    const cachedTrends = sessionApiCacheGet<{ data: TrendPoint[] }>('dashboard:trends')
+    const cachedTickets = sessionApiCacheGet<{ data?: Ticket[] }>(exportListKey)
+
+    if (cachedMetrics) {
+      if (gen !== dashboardFetchGen.current) return
+      setMetrics(cachedMetrics)
+      if (cachedTrends?.data != null) {
+        setTrendPoints(Array.isArray(cachedTrends.data) ? cachedTrends.data : [])
+      }
+      if (cachedTickets) applyTicketsListResponse(cachedTickets, gen)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
+
     try {
-      const [metricsRes, ticketsRes, trendsRes] = await Promise.allSettled([
+      void ticketsApi
+        .list(DASHBOARD_EXPORT_TICKET_PARAMS)
+        .then((ticketsResVal) => applyTicketsListResponse(ticketsResVal, gen))
+        .catch(() => {
+          if (gen !== dashboardFetchGen.current) return
+          if (!cachedTickets) setAllFetchedTickets([])
+        })
+
+      const [metricsRes, trendsRes] = await Promise.allSettled([
         dashboardApi.getMetrics(),
-        ticketsApi.list({ limit: 100, types_in: 'chore,bug' }),
         dashboardApi.getTrends(),
       ])
+      if (gen !== dashboardFetchGen.current) return
       setMetrics(metricsRes.status === 'fulfilled' ? metricsRes.value : null)
       if (trendsRes.status === 'fulfilled' && trendsRes.value?.data?.length) {
         setTrendPoints(trendsRes.value.data)
-      } else {
+      } else if (trendsRes.status === 'fulfilled') {
+        setTrendPoints(trendsRes.value?.data ?? [])
+      } else if (!cachedTrends) {
         setTrendPoints([])
       }
-      const ticketsResVal = ticketsRes.status === 'fulfilled' ? ticketsRes.value : null
-      const raw = ticketsResVal && typeof ticketsResVal === 'object' ? (ticketsResVal as { data?: unknown }).data : undefined
-      const tickets: Ticket[] = Array.isArray(raw) ? raw as Ticket[] : []
-      setAllFetchedTickets(tickets)
     } catch (err) {
       console.error('Dashboard fetch error:', err)
-      setError('Failed to load dashboard. Check backend connection.')
+      if (gen === dashboardFetchGen.current) {
+        setError('Failed to load dashboard. Check backend connection.')
+      }
     } finally {
-      setLoading(false)
+      if (gen === dashboardFetchGen.current) {
+        setLoading(false)
+      }
     }
   }
+
+  useEffect(() => {
+    const gen = ++dashboardFetchGen.current
+    void fetchData(gen)
+    return () => {
+      dashboardFetchGen.current += 1
+    }
+    // Mount-only: fetchData closes over latest state setters; gen guards stale StrictMode/unmount races.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const safeMetrics: DashboardMetrics = metrics ?? {
     all_tickets: 0,
@@ -796,7 +839,17 @@ export const Dashboard = () => {
           type="error"
           message={error}
           showIcon
-          action={<Button size="small" onClick={fetchData}>Retry</Button>}
+          action={
+            <Button
+              size="small"
+              onClick={() => {
+                const g = ++dashboardFetchGen.current
+                void fetchData(g)
+              }}
+            >
+              Retry
+            </Button>
+          }
           style={{ marginBottom: 24, borderRadius: 8, background: 'rgba(239,68,68,0.1)', border: '1px solid rgba(239,68,68,0.4)' }}
         />
       )}
@@ -1009,89 +1062,25 @@ export const Dashboard = () => {
         </>
       )}
 
-      {/* Trends row — data from GET /dashboard/trends (monthly Chores & Bug counts) */}
-      <Row gutter={[20, 20]}>
-        <Col xs={24} lg={12}>
-          <Card
-            title={<span style={{ color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>Response Delay Trend</span>}
-            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
-            bodyStyle={{ padding: '12px 16px 16px', minHeight: 280 }}
-          >
-            <Text style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 8 }}>
-              Weekly trend (Chores & Bug) — tickets without assignee
-            </Text>
-            {trendPoints.length > 0 ? (
-              <div style={{ width: '100%', height: 220 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trendPoints} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                    <YAxis allowDecimals={false} width={36} tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                    <Tooltip
-                      formatter={(v: number) => [v, 'Count']}
-                      labelStyle={{ color: '#334155' }}
-                      contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0' }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="response_delay"
-                      name="Response delay"
-                      stroke="#3b82f6"
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: '#3b82f6' }}
-                      activeDot={{ r: 5 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div style={{ padding: 32, textAlign: 'center', background: '#f8fafc', borderRadius: 8 }}>
-                <Text type="secondary">No trend data yet (last 7 months).</Text>
-              </div>
-            )}
-          </Card>
-        </Col>
-        <Col xs={24} lg={12}>
-          <Card
-            title={<span style={{ color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>Completion Delay Trend</span>}
-            style={{ borderRadius: 8, border: '1px solid rgba(0, 0, 0, 0.06)', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04)', background: '#ffffff' }}
-            bodyStyle={{ padding: '12px 16px 16px', minHeight: 280 }}
-          >
-            <Text style={{ fontSize: 12, color: '#64748b', display: 'block', marginBottom: 8 }}>
-              Weekly trend (Chores & Bug) — Stage 2 delay (TAT exceeded after Stage 2 completed)
-            </Text>
-            {trendPoints.length > 0 ? (
-              <div style={{ width: '100%', height: 220 }}>
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={trendPoints} margin={{ top: 8, right: 12, left: 0, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="month" tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                    <YAxis allowDecimals={false} width={36} tick={{ fontSize: 11 }} stroke="#94a3b8" />
-                    <Tooltip
-                      formatter={(v: number) => [v, 'Count']}
-                      labelStyle={{ color: '#334155' }}
-                      contentStyle={{ borderRadius: 8, border: '1px solid #e2e8f0' }}
-                    />
-                    <Line
-                      type="monotone"
-                      dataKey="completion_delay"
-                      name="Completion delay"
-                      stroke="#d97706"
-                      strokeWidth={2}
-                      dot={{ r: 3, fill: '#d97706' }}
-                      activeDot={{ r: 5 }}
-                    />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            ) : (
-              <div style={{ padding: 32, textAlign: 'center', background: '#f8fafc', borderRadius: 8 }}>
-                <Text type="secondary">No trend data yet (last 7 months).</Text>
-              </div>
-            )}
-          </Card>
-        </Col>
-      </Row>
+      {/* Trends: Recharts in a separate lazy chunk so the dashboard shell loads first */}
+      <Suspense
+        fallback={
+          <Row gutter={[20, 20]}>
+            <Col xs={24} lg={12}>
+              <Card style={{ minHeight: 280 }} bodyStyle={{ padding: 24, textAlign: 'center' }}>
+                <Spin />
+              </Card>
+            </Col>
+            <Col xs={24} lg={12}>
+              <Card style={{ minHeight: 280 }} bodyStyle={{ padding: 24, textAlign: 'center' }}>
+                <Spin />
+              </Card>
+            </Col>
+          </Row>
+        }
+      >
+        <DashboardTrendCharts trendPoints={trendPoints} />
+      </Suspense>
 
       {/* Active Leads - from Client to Lead (last, after trends) */}
       <Title level={4} style={{ marginBottom: 16, marginTop: 28, color: '#1e293b', fontWeight: 600, letterSpacing: 0.5 }}>

@@ -1,5 +1,13 @@
 import { apiClient } from './axios'
 import { API_ENDPOINTS } from '../utils/constants'
+import {
+  API_CACHE_TTL_MS,
+  sessionApiCacheGet,
+  sessionApiCacheSet,
+  sessionApiCacheRemove,
+} from '../utils/sessionApiCache'
+
+const LEADS_ACTIVE_CACHE_KEY = 'leads:list-active'
 
 export interface Lead {
   id: string
@@ -37,8 +45,14 @@ export const leadsApi = {
       .then((r) => r.data),
 
   /** Active (Open) leads with person_name, city, state for dashboard */
-  listActive: () =>
-    apiClient.get<{ leads: ActiveLeadRow[] }>(API_ENDPOINTS.LEADS.ACTIVE).then((r) => r.data),
+  listActive: async (): Promise<{ leads: ActiveLeadRow[] }> => {
+    const cached = sessionApiCacheGet<{ leads: ActiveLeadRow[] }>(LEADS_ACTIVE_CACHE_KEY)
+    if (cached) return cached
+    const r = await apiClient.get<{ leads: ActiveLeadRow[] }>(API_ENDPOINTS.LEADS.ACTIVE)
+    const data = r.data
+    sessionApiCacheSet(LEADS_ACTIVE_CACHE_KEY, data, API_CACHE_TTL_MS.leadsListActive)
+    return data
+  },
 
   get: (id: string) => apiClient.get<Lead>(API_ENDPOINTS.LEADS.DETAIL(id)).then((r) => r.data),
 
@@ -46,16 +60,26 @@ export const leadsApi = {
   getByReference: (ref: string) =>
     apiClient.get<Lead>(API_ENDPOINTS.LEADS.BY_REFERENCE(ref)).then((r) => r.data),
 
-  create: (payload: { company_name: string; stage: string; assigned_poc_id?: string }) =>
-    apiClient.post<Lead>(API_ENDPOINTS.LEADS.LIST, payload).then((r) => r.data),
+  create: async (payload: { company_name: string; stage: string; assigned_poc_id?: string }) => {
+    const r = await apiClient.post<Lead>(API_ENDPOINTS.LEADS.LIST, payload)
+    sessionApiCacheRemove(LEADS_ACTIVE_CACHE_KEY)
+    return r.data
+  },
 
-  update: (id: string, payload: Partial<Pick<Lead, 'stage' | 'status' | 'assigned_poc_id' | 'company_name'>>) =>
-    apiClient.patch<Lead>(API_ENDPOINTS.LEADS.DETAIL(id), payload).then((r) => r.data),
+  update: async (id: string, payload: Partial<Pick<Lead, 'stage' | 'status' | 'assigned_poc_id' | 'company_name'>>) => {
+    const r = await apiClient.patch<Lead>(API_ENDPOINTS.LEADS.DETAIL(id), payload)
+    sessionApiCacheRemove(LEADS_ACTIVE_CACHE_KEY)
+    return r.data
+  },
 
-  upsertStage: (leadId: string, stageSlug: string, data: Record<string, unknown>) =>
-    apiClient
-      .put<{ success: boolean; stage_slug: string }>(API_ENDPOINTS.LEADS.STAGE(leadId, stageSlug), data)
-      .then((r) => r.data),
+  upsertStage: async (leadId: string, stageSlug: string, data: Record<string, unknown>) => {
+    const r = await apiClient.put<{ success: boolean; stage_slug: string }>(
+      API_ENDPOINTS.LEADS.STAGE(leadId, stageSlug),
+      data,
+    )
+    sessionApiCacheRemove(LEADS_ACTIVE_CACHE_KEY)
+    return r.data
+  },
 }
 
 export const LEAD_STAGE_ORDER = [
