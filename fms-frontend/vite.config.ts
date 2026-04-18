@@ -22,6 +22,28 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined
+            if (id.includes('recharts') || id.includes('d3-')) {
+              return 'vendor-recharts'
+            }
+            // Keep icons in the same chunk as antd (they reference each other; splitting causes circular chunks).
+            if (id.includes('@ant-design/icons') || id.includes('node_modules/antd')) {
+              return 'vendor-antd'
+            }
+            if (id.includes('node_modules/react-dom')) return 'vendor-react'
+            if (id.includes('react-router')) return 'vendor-router'
+            if (id.includes('node_modules/react/')) return 'vendor-react'
+            if (id.includes('scheduler')) return 'vendor-react'
+            if (id.includes('dayjs') || id.includes('axios')) return 'vendor-misc'
+            return undefined
+          },
+        },
+      },
+    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
