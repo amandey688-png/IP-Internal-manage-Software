@@ -12,6 +12,7 @@ create table if not exists onboarding_client_payment_followups (
   remarks text,
   mail_sent boolean not null default false,
   whatsapp_sent boolean not null default false,
+  followup_timestamp timestamptz,
   created_by uuid,
   created_at timestamptz not null default now(),
   updated_at timestamptz,
@@ -77,6 +78,10 @@ begin
     alter table onboarding_client_payment_receive add constraint fk_onb_client_payment_receive_client_payment foreign key (client_payment_id) references onboarding_client_payment (id) on delete cascade;
   end if;
 end $$;
+
+-- User-entered follow-up date/time (run on existing DBs; included in CREATE above for new installs)
+alter table onboarding_client_payment_followups
+  add column if not exists followup_timestamp timestamptz;
 
 -- Optional: ensure onboarding_client_payment has payment_received_date
 -- alter table onboarding_client_payment add column if not exists payment_received_date date;

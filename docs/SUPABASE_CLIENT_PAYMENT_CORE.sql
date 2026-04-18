@@ -52,12 +52,16 @@ create table if not exists public.onboarding_client_payment_followup1 (
   remarks text,
   mail_sent boolean not null default false,
   whatsapp_sent boolean not null default false,
+  followup_timestamp timestamptz,
   created_by uuid,
   created_at timestamptz,
   updated_at timestamptz,
   editable_until timestamptz,
   constraint uq_onboarding_client_payment_followup1_payment unique (client_payment_id)
 );
+
+alter table public.onboarding_client_payment_followup1
+  add column if not exists followup_timestamp timestamptz;
 
 -- =============================================================================
 -- RLS: your FastAPI backend uses SUPABASE_SERVICE_ROLE_KEY and bypasses RLS.
