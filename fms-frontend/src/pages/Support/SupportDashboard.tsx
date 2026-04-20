@@ -1,4 +1,5 @@
 import { Typography, Row, Col, Card, Button, Modal, Table, Alert } from 'antd'
+import { TextCellTooltip, tableCellEllipsisStyle } from '../../components/common/TextCellTooltip'
 import {
   CalendarOutlined,
   ReloadOutlined,
@@ -23,14 +24,20 @@ function renderModalTitleDescription(_: unknown, r: Record<string, unknown>) {
   const t = String(r.title ?? '').trim()
   const d = String(r.description ?? '').trim()
   if (!t && !d) return <span>-</span>
+  const tip = [t, d].filter(Boolean).join('\n\n')
   const tShow = t ? truncateTitleDescCell(t) : ''
   const dShow = d ? truncateTitleDescCell(d) : ''
   return (
-    <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', minWidth: 180 }}>
-      {tShow ? <strong>{tShow}</strong> : null}
-      {tShow && dShow ? '\n' : null}
-      {dShow ? <span style={{ fontWeight: 'normal' }}>{dShow}</span> : null}
-    </div>
+    <TextCellTooltip tooltip={tip}>
+      <div style={{ minWidth: 0, maxWidth: 360 }}>
+        {tShow ? (
+          <div style={tableCellEllipsisStyle}>
+            <strong>{tShow}</strong>
+          </div>
+        ) : null}
+        {dShow ? <div style={{ ...tableCellEllipsisStyle, fontWeight: 'normal' }}>{dShow}</div> : null}
+      </div>
+    </TextCellTooltip>
   )
 }
 

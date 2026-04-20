@@ -19,6 +19,7 @@ import { TicketDetailDrawer } from '../../components/tickets/TicketDetailDrawer'
 import { ChoresBugsDetailDrawer } from '../../components/tickets/ChoresBugsDetailDrawer'
 import { PrintExport } from '../../components/common/PrintExport'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { TextCellTooltip, tableCellEllipsisStyle } from '../../components/common/TextCellTooltip'
 import {
   formatDateTable,
   formatDuration,
@@ -556,7 +557,15 @@ export const TicketList = () => {
       key: 'title',
       width: 200,
       ellipsis: false,
-      render: (v: string) => <span style={wrapStyle}>{truncateTitleDescCell(v || undefined)}</span>,
+      render: (v: string) => {
+        const raw = (v && v.trim()) || ''
+        if (!raw) return <span style={wrapStyle}>-</span>
+        return (
+          <TextCellTooltip tooltip={raw}>
+            <span style={{ ...wrapStyle, ...tableCellEllipsisStyle }}>{raw}</span>
+          </TextCellTooltip>
+        )
+      },
     },
     {
       title: 'Description',
@@ -564,7 +573,15 @@ export const TicketList = () => {
       key: 'description',
       width: 220,
       ellipsis: false,
-      render: (v: string) => <span style={wrapStyle}>{truncateTitleDescCell(v || undefined)}</span>,
+      render: (v: string) => {
+        const raw = (v && v.trim()) || ''
+        if (!raw) return <span style={wrapStyle}>-</span>
+        return (
+          <TextCellTooltip tooltip={raw}>
+            <span style={{ ...wrapStyle, ...tableCellEllipsisStyle }}>{raw}</span>
+          </TextCellTooltip>
+        )
+      },
     },
     {
       title: 'Type of Request',

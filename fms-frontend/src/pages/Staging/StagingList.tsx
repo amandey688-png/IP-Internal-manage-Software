@@ -16,6 +16,7 @@ import type { Ticket } from '../../api/tickets'
 import { StagingDetailDrawer } from '../../components/tickets/StagingDetailDrawer'
 import { PrintExport } from '../../components/common/PrintExport'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { TextCellTooltip, tableCellEllipsisStyle } from '../../components/common/TextCellTooltip'
 import { useRole } from '../../hooks/useRole'
 
 const { Option } = Select
@@ -114,22 +115,38 @@ const stagingTicketColumns = [
       )
     },
   },
-  {
-    title: 'Title',
-    dataIndex: 'title',
-    key: 'title',
-    width: 200,
-    ellipsis: false,
-    render: (v: string) => <span style={wrapStyle}>{truncateTitleDescCell(v || undefined)}</span>,
-  },
-  {
-    title: 'Description',
-    dataIndex: 'description',
-    key: 'description',
-    width: 220,
-    ellipsis: false,
-    render: (v: string) => <span style={wrapStyle}>{truncateTitleDescCell(v || undefined)}</span>,
-  },
+    {
+      title: 'Title',
+      dataIndex: 'title',
+      key: 'title',
+      width: 200,
+      ellipsis: false,
+      render: (v: string) => {
+        const raw = (v && v.trim()) || ''
+        if (!raw) return <span style={wrapStyle}>-</span>
+        return (
+          <TextCellTooltip tooltip={raw}>
+            <span style={{ ...wrapStyle, ...tableCellEllipsisStyle }}>{raw}</span>
+          </TextCellTooltip>
+        )
+      },
+    },
+    {
+      title: 'Description',
+      dataIndex: 'description',
+      key: 'description',
+      width: 220,
+      ellipsis: false,
+      render: (v: string) => {
+        const raw = (v && v.trim()) || ''
+        if (!raw) return <span style={wrapStyle}>-</span>
+        return (
+          <TextCellTooltip tooltip={raw}>
+            <span style={{ ...wrapStyle, ...tableCellEllipsisStyle }}>{raw}</span>
+          </TextCellTooltip>
+        )
+      },
+    },
   {
     title: 'Type of Request',
     dataIndex: 'type',
