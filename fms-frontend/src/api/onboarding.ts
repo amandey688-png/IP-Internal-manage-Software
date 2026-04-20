@@ -1,5 +1,11 @@
 import { apiClient } from './axios'
 import { API_ENDPOINTS } from '../utils/constants'
+import {
+  API_CACHE_TTL_MS,
+  sessionApiCacheClearLogicalPrefix,
+  sessionApiCacheGet,
+  sessionApiCacheSet,
+} from '../utils/sessionApiCache'
 
 export interface PaymentStatusRecord {
   id: string
@@ -17,22 +23,27 @@ export interface PaymentStatusRecord {
 }
 
 export const onboardingApi = {
-  listPaymentStatus: () =>
-    apiClient
-      .get<{ items: PaymentStatusRecord[] }>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.LIST)
-      .then((r) => r.data),
+  listPaymentStatus: async () => {
+    const key = 'onboarding:payment-status:list'
+    const cached = sessionApiCacheGet<{ items: PaymentStatusRecord[] }>(key)
+    if (cached) return cached
+    const r = await apiClient.get<{ items: PaymentStatusRecord[] }>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.LIST)
+    sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.onboardingPaymentStatusList)
+    return r.data
+  },
 
-  createPaymentStatus: (payload: {
+  createPaymentStatus: async (payload: {
     company_name: string
     payment_status: 'Done' | 'Not Done'
     payment_received_date?: string | null
     poc_name?: string | null
     poc_contact?: string | null
     accounts_remarks?: string | null
-  }) =>
-    apiClient
-      .post<PaymentStatusRecord>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.CREATE, payload)
-      .then((r) => r.data),
+  }) => {
+    const r = await apiClient.post<PaymentStatusRecord>(API_ENDPOINTS.ONBOARDING_PAYMENT_STATUS.CREATE, payload)
+    sessionApiCacheClearLogicalPrefix('onboarding:payment-status:list')
+    return r.data
+  },
 
   getPreOnboarding: (paymentStatusId: string) =>
     apiClient

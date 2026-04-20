@@ -315,8 +315,7 @@ export const StagingList = () => {
     const gen = ++listFetchGeneration.current
     listPageRef.current = 0
     listExhaustedRef.current = false
-    setLoading(true)
-    setTickets([])
+    setLoading(ticketsRef.current.length === 0)
     try {
       const response = await ticketsApi.list({
         section: 'staging',
@@ -396,7 +395,7 @@ export const StagingList = () => {
 
   const fetchAllStagingTicketsForStageFilter = useCallback(async () => {
     const gen = ++listFetchGeneration.current
-    setLoading(true)
+    setLoading(ticketsRef.current.length === 0)
     try {
       const allTickets = await fetchAllStagingPages()
       if (gen !== listFetchGeneration.current) return

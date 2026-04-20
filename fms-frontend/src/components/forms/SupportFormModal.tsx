@@ -118,6 +118,8 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
   useEffect(() => {
     if (open) {
       setAttachmentUrl(null)
+      setDivisions([])
+      setDivisionOther(false)
       supportApi
         .getCompanies()
         .then((list) => setCompanies(dedupeCompaniesForSelect(list)))
@@ -159,6 +161,14 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
           setTimeout(() => {
             skipDraftSaveRef.current = false
             isLoadingDraftRef.current = false
+            // If user selected company during draft-load window, fetch divisions now.
+            const selectedCompanyId = form.getFieldValue('company_id') as string | undefined
+            if (selectedCompanyId) {
+              supportApi.getDivisions(selectedCompanyId).then((d) => {
+                setDivisions(d)
+                setDivisionOther(d.some((x) => x.name === 'Other'))
+              })
+            }
           }, 500)
         })
     }
@@ -166,10 +176,8 @@ export const SupportFormModal = ({ open, onClose, onSuccess }: SupportFormModalP
 
   const companyId = Form.useWatch('company_id', form)
   useEffect(() => {
-    if (isLoadingDraftRef.current) return
     if (companyId) {
       supportApi.getDivisions(companyId).then((d) => {
-        if (isLoadingDraftRef.current) return
         setDivisions(d)
         setDivisionOther(d.some((x) => x.name === 'Other'))
       })

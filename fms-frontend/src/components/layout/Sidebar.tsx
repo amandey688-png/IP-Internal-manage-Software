@@ -19,10 +19,12 @@ import {
 } from '@ant-design/icons'
 import type { MenuProps } from 'antd'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
+import type { To } from 'react-router-dom'
 import { useRole } from '../../hooks/useRole'
 import { useAuth } from '../../hooks/useAuth'
 import { ROUTES, canViewDbClientDbDash, canViewPendingPaymentDetails } from '../../utils/constants'
 import { useState, useEffect } from 'react'
+import { prefetchRouteData } from '../../utils/routePrefetch'
 
 
 const isSupportPage = (pathname: string) =>
@@ -95,16 +97,23 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   }, [location.pathname])
 
   const linkStyle = { color: 'inherit', display: 'block' }
+  const prefetchedLabel = (key: string, to: To, text: string) => (
+    <span onMouseEnter={() => prefetchRouteData(key)} onFocus={() => prefetchRouteData(key)}>
+      <Link to={to} style={linkStyle} onClick={() => prefetchRouteData(key)}>
+        {text}
+      </Link>
+    </span>
+  )
   const allSupportItems: MenuProps['items'] = [
-    { key: ROUTES.SUPPORT_DASHBOARD, icon: <DashboardOutlined />, label: <Link to={ROUTES.SUPPORT_DASHBOARD} style={linkStyle}>Support Dashboard</Link>, sectionKey: 'support_dashboard' },
-    { key: ROUTES.TICKETS, icon: <FileTextOutlined />, label: <Link to={ROUTES.TICKETS} style={linkStyle}>All Tickets</Link>, sectionKey: 'all_tickets' },
-    { key: `${ROUTES.TICKETS}?section=chores-bugs`, icon: <FileTextOutlined />, label: <Link to={{ pathname: ROUTES.TICKETS, search: 'section=chores-bugs' }} style={linkStyle}>Chores & Bugs</Link>, sectionKey: 'chores_bugs' },
-    { key: ROUTES.STAGING, icon: <RocketOutlined />, label: <Link to={ROUTES.STAGING} style={linkStyle}>Staging</Link>, sectionKey: 'staging' },
-    { key: `${ROUTES.TICKETS}?type=feature`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?type=feature`} style={linkStyle}>Feature</Link>, sectionKey: 'feature' },
-    { key: `${ROUTES.TICKETS}?type=feature&view=approval`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?type=feature&view=approval`} style={linkStyle}>Approval Status</Link>, sectionKey: 'approval_status' },
-    { key: `${ROUTES.TICKETS}?section=completed-chores-bugs`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=completed-chores-bugs`} style={linkStyle}>Completed Chores & Bugs</Link>, sectionKey: 'completed_chores_bugs' },
-    { key: `${ROUTES.TICKETS}?section=rejected-tickets`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=rejected-tickets`} style={linkStyle}>Rejected Tickets</Link>, sectionKey: 'rejected_tickets' },
-    { key: `${ROUTES.TICKETS}?section=completed-feature`, icon: <FileTextOutlined />, label: <Link to={`${ROUTES.TICKETS}?section=completed-feature`} style={linkStyle}>Completed Feature</Link>, sectionKey: 'completed_feature' },
+    { key: ROUTES.SUPPORT_DASHBOARD, icon: <DashboardOutlined />, label: prefetchedLabel(ROUTES.SUPPORT_DASHBOARD, ROUTES.SUPPORT_DASHBOARD, 'Support Dashboard'), sectionKey: 'support_dashboard' },
+    { key: ROUTES.TICKETS, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.TICKETS, ROUTES.TICKETS, 'All Tickets'), sectionKey: 'all_tickets' },
+    { key: `${ROUTES.TICKETS}?section=chores-bugs`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?section=chores-bugs`, { pathname: ROUTES.TICKETS, search: 'section=chores-bugs' }, 'Chores & Bugs'), sectionKey: 'chores_bugs' },
+    { key: ROUTES.STAGING, icon: <RocketOutlined />, label: prefetchedLabel(ROUTES.STAGING, ROUTES.STAGING, 'Staging'), sectionKey: 'staging' },
+    { key: `${ROUTES.TICKETS}?type=feature`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?type=feature`, `${ROUTES.TICKETS}?type=feature`, 'Feature'), sectionKey: 'feature' },
+    { key: `${ROUTES.TICKETS}?type=feature&view=approval`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?type=feature&view=approval`, `${ROUTES.TICKETS}?type=feature&view=approval`, 'Approval Status'), sectionKey: 'approval_status' },
+    { key: `${ROUTES.TICKETS}?section=completed-chores-bugs`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?section=completed-chores-bugs`, `${ROUTES.TICKETS}?section=completed-chores-bugs`, 'Completed Chores & Bugs'), sectionKey: 'completed_chores_bugs' },
+    { key: `${ROUTES.TICKETS}?section=rejected-tickets`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?section=rejected-tickets`, `${ROUTES.TICKETS}?section=rejected-tickets`, 'Rejected Tickets'), sectionKey: 'rejected_tickets' },
+    { key: `${ROUTES.TICKETS}?section=completed-feature`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?section=completed-feature`, `${ROUTES.TICKETS}?section=completed-feature`, 'Completed Feature'), sectionKey: 'completed_feature' },
   ]
   const supportItems: MenuProps['items'] = allSupportItems?.filter((item) => {
     const key = item?.key as string
@@ -115,14 +124,14 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   }) ?? []
 
   const taskItems: MenuProps['items'] = [
-    { key: ROUTES.CHECKLIST, icon: <CheckSquareOutlined />, label: <Link to={ROUTES.CHECKLIST} style={linkStyle}>Checklist</Link> },
-    { key: ROUTES.DELEGATION, icon: <SendOutlined />, label: <Link to={ROUTES.DELEGATION} style={linkStyle}>Delegation</Link> },
+    { key: ROUTES.CHECKLIST, icon: <CheckSquareOutlined />, label: prefetchedLabel(ROUTES.CHECKLIST, ROUTES.CHECKLIST, 'Checklist') },
+    { key: ROUTES.DELEGATION, icon: <SendOutlined />, label: prefetchedLabel(ROUTES.DELEGATION, ROUTES.DELEGATION, 'Delegation') },
   ]
 
   const successItems: MenuProps['items'] = [
-    { key: ROUTES.SU_DASH, icon: <DashboardOutlined />, label: <Link to={ROUTES.SU_DASH} style={linkStyle}>Su -Dash</Link>, sectionKey: 'success_performance' },
-    { key: ROUTES.SUCCESS_PERFORMANCE, icon: <LineChartOutlined />, label: <Link to={ROUTES.SUCCESS_PERFORMANCE} style={linkStyle}>Performance Monitoring</Link>, sectionKey: 'success_performance' },
-    { key: ROUTES.SUCCESS_COMP_PERFORM, icon: <LineChartOutlined />, label: <Link to={ROUTES.SUCCESS_COMP_PERFORM} style={linkStyle}>Comp- Perform</Link>, sectionKey: 'success_comp_perform' },
+    { key: ROUTES.SU_DASH, icon: <DashboardOutlined />, label: prefetchedLabel(ROUTES.SU_DASH, ROUTES.SU_DASH, 'Su -Dash'), sectionKey: 'success_performance' },
+    { key: ROUTES.SUCCESS_PERFORMANCE, icon: <LineChartOutlined />, label: prefetchedLabel(ROUTES.SUCCESS_PERFORMANCE, ROUTES.SUCCESS_PERFORMANCE, 'Performance Monitoring'), sectionKey: 'success_performance' },
+    { key: ROUTES.SUCCESS_COMP_PERFORM, icon: <LineChartOutlined />, label: prefetchedLabel(ROUTES.SUCCESS_COMP_PERFORM, ROUTES.SUCCESS_COMP_PERFORM, 'Comp- Perform'), sectionKey: 'success_comp_perform' },
   ]
   const filteredSuccessItems: MenuProps['items'] = successItems?.filter((item) => {
     const sectionKey = (item as { sectionKey?: string })?.sectionKey
@@ -131,11 +140,11 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   }) ?? []
 
   const onboardingItems: MenuProps['items'] = [
-    { key: ROUTES.ONBOARDING_PAYMENT_STATUS, icon: <FileTextOutlined />, label: <Link to={ROUTES.ONBOARDING_PAYMENT_STATUS} style={linkStyle}>Payment Status</Link> },
+    { key: ROUTES.ONBOARDING_PAYMENT_STATUS, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.ONBOARDING_PAYMENT_STATUS, ROUTES.ONBOARDING_PAYMENT_STATUS, 'Payment Status') },
   ]
 
   const trainingItems: MenuProps['items'] = [
-    { key: ROUTES.TRAINING_CLIENT, icon: <ReadOutlined />, label: <Link to={ROUTES.TRAINING_CLIENT} style={linkStyle}>Client Training</Link> },
+    { key: ROUTES.TRAINING_CLIENT, icon: <ReadOutlined />, label: prefetchedLabel(ROUTES.TRAINING_CLIENT, ROUTES.TRAINING_CLIENT, 'Client Training') },
   ]
 
   const dbClientItems: MenuProps['items'] = [
@@ -144,15 +153,15 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
           {
             key: ROUTES.DB_CLIENT_DB_DASH,
             icon: <DashboardOutlined />,
-            label: <Link to={ROUTES.DB_CLIENT_DB_DASH} style={linkStyle}>DB- Dash</Link>,
+            label: prefetchedLabel(ROUTES.DB_CLIENT_DB_DASH, ROUTES.DB_CLIENT_DB_DASH, 'DB- Dash'),
           },
         ]
       : []),
-    { key: ROUTES.DB_CLIENT_CLIENT_ONB, icon: <AuditOutlined />, label: <Link to={ROUTES.DB_CLIENT_CLIENT_ONB} style={linkStyle}>Client ONB</Link> },
+    { key: ROUTES.DB_CLIENT_CLIENT_ONB, icon: <AuditOutlined />, label: prefetchedLabel(ROUTES.DB_CLIENT_CLIENT_ONB, ROUTES.DB_CLIENT_CLIENT_ONB, 'Client ONB') },
     {
       key: ROUTES.DB_CLIENT_CLIENT_ONB_INACTIVE,
       icon: <StopOutlined />,
-      label: <Link to={ROUTES.DB_CLIENT_CLIENT_ONB_INACTIVE} style={linkStyle}>Inactive clients</Link>,
+      label: prefetchedLabel(ROUTES.DB_CLIENT_CLIENT_ONB_INACTIVE, ROUTES.DB_CLIENT_CLIENT_ONB_INACTIVE, 'Inactive clients'),
     },
   ]
 
@@ -165,25 +174,25 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
           {
             key: ROUTES.CLIENT_PAYMENT_PENDING_DETAILS,
             icon: <FileTextOutlined />,
-            label: <Link to={ROUTES.CLIENT_PAYMENT_PENDING_DETAILS} style={linkStyle}>PENDING PAYMENT DETAILS</Link>,
+            label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_PENDING_DETAILS, ROUTES.CLIENT_PAYMENT_PENDING_DETAILS, 'PENDING PAYMENT DETAILS'),
           },
         ]
       : []),
     ...(canViewClientPaymentSection
       ? [
-          { key: ROUTES.CLIENT_PAYMENT, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT} style={linkStyle}>Payment Management</Link> },
-          { key: ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING} style={linkStyle}>Payment Ageing Report</Link> },
-          { key: ROUTES.CLIENT_PAYMENT_Q_COMP, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_Q_COMP} style={linkStyle}>Q-Comp</Link> },
-          { key: ROUTES.CLIENT_PAYMENT_M_COMP, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_M_COMP} style={linkStyle}>M-Comp</Link> },
-          { key: ROUTES.CLIENT_PAYMENT_HF_COMP, icon: <FileTextOutlined />, label: <Link to={ROUTES.CLIENT_PAYMENT_HF_COMP} style={linkStyle}>HF-Comp</Link> },
+          { key: ROUTES.CLIENT_PAYMENT, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT, ROUTES.CLIENT_PAYMENT, 'Payment Management') },
+          { key: ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING, ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING, 'Payment Ageing Report') },
+          { key: ROUTES.CLIENT_PAYMENT_Q_COMP, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_Q_COMP, ROUTES.CLIENT_PAYMENT_Q_COMP, 'Q-Comp') },
+          { key: ROUTES.CLIENT_PAYMENT_M_COMP, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_M_COMP, ROUTES.CLIENT_PAYMENT_M_COMP, 'M-Comp') },
+          { key: ROUTES.CLIENT_PAYMENT_HF_COMP, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_HF_COMP, ROUTES.CLIENT_PAYMENT_HF_COMP, 'HF-Comp') },
         ]
       : []),
   ]
 
   const leadItems: MenuProps['items'] = [
-    { key: ROUTES.LEADS, icon: <UserAddOutlined />, label: <Link to={ROUTES.LEADS} style={linkStyle}>Lead</Link> },
-    { key: ROUTES.LEADS_CLOSED, icon: <UserAddOutlined />, label: <Link to={ROUTES.LEADS_CLOSED} style={linkStyle}>Closed Leads</Link> },
-    { key: ROUTES.LEADS_IMPORT, icon: <FileTextOutlined />, label: <Link to={ROUTES.LEADS_IMPORT} style={linkStyle}>Import from sheet (Generate SQL)</Link> },
+    { key: ROUTES.LEADS, icon: <UserAddOutlined />, label: prefetchedLabel(ROUTES.LEADS, ROUTES.LEADS, 'Lead') },
+    { key: ROUTES.LEADS_CLOSED, icon: <UserAddOutlined />, label: prefetchedLabel(ROUTES.LEADS_CLOSED, ROUTES.LEADS_CLOSED, 'Closed Leads') },
+    { key: ROUTES.LEADS_IMPORT, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.LEADS_IMPORT, ROUTES.LEADS_IMPORT, 'Import from sheet (Generate SQL)') },
   ]
 
   const showDashboard = canViewSectionByKey('dashboard')
@@ -195,7 +204,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   const showDbClient = canViewSectionByKey('db_client')
 
   const menuItems: MenuProps['items'] = [
-    ...(showDashboard ? [{ key: ROUTES.DASHBOARD, icon: <DashboardOutlined />, label: <Link to={ROUTES.DASHBOARD} style={linkStyle}>Dashboard</Link> }] : []),
+    ...(showDashboard ? [{ key: ROUTES.DASHBOARD, icon: <DashboardOutlined />, label: prefetchedLabel(ROUTES.DASHBOARD, ROUTES.DASHBOARD, 'Dashboard') }] : []),
     ...(hasAnySupportSection ? [{
       key: 'support',
       icon: <FileTextOutlined />,
@@ -276,8 +285,8 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
           },
         ]
       : []),
-    ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: <Link to={ROUTES.USERS} style={linkStyle}>Users</Link> }] : []),
-    ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: <Link to={ROUTES.SETTINGS} style={linkStyle}>Settings</Link> }] : []),
+    ...(canAccessUsers ? [{ key: ROUTES.USERS, icon: <UserOutlined />, label: prefetchedLabel(ROUTES.USERS, ROUTES.USERS, 'Users') }] : []),
+    ...(canAccessSettings ? [{ key: ROUTES.SETTINGS, icon: <SettingOutlined />, label: prefetchedLabel(ROUTES.SETTINGS, ROUTES.SETTINGS, 'Settings') }] : []),
     {
       key: 'help',
       icon: <QuestionCircleOutlined />,
@@ -287,6 +296,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
 
   const handleMenuClick = ({ key }: { key: string }) => {
     if (key === 'help') return
+    prefetchRouteData(key)
     const [path, query] = key.includes('?') ? key.split('?') : [key, '']
     navigate(query ? `${path}?${query}` : path)
     onClose?.()
