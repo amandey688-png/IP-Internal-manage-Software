@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Table, Card, Typography, Tag, Select, Space, Input } from 'antd'
 import { PhoneOutlined, MailOutlined, MessageOutlined, LinkOutlined } from '@ant-design/icons'
@@ -22,6 +22,7 @@ import { useRole } from '../../hooks/useRole'
 const { Option } = Select
 
 const { Title } = Typography
+const STAGING_CHUNK = 15
 
 const getTypeColor = (type: string) => (type === 'chore' ? 'green' : type === 'bug' ? 'red' : 'blue')
 const getCommIcon = (v: string) => {
@@ -280,10 +281,9 @@ export const StagingList = () => {
   const [searchParams, setSearchParams] = useSearchParams()
   const openId = searchParams.get('open')
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
   const [drawerTicketId, setDrawerTicketId] = useState<string | null>(openId || null)
   /** Stage filter: applies to table, Export and Print */
   const [stageFilter, setStageFilter] = useState<string>('')
@@ -291,44 +291,84 @@ export const StagingList = () => {
   const [referenceFilterInput, setReferenceFilterInput] = useState('')
   const [allStagingTicketsForStageFilter, setAllStagingTicketsForStageFilter] = useState<Ticket[]>([])
   const [exportTickets, setExportTickets] = useState<Ticket[]>([])
+  const listFetchGeneration = useRef(0)
+  const listPageRef = useRef(0)
+  const listExhaustedRef = useRef(false)
+  const ticketsRef = useRef<Ticket[]>([])
+  const totalRef = useRef(0)
+  const loadingMoreRef = useRef(false)
+  const tableContainerRef = useRef<HTMLDivElement>(null)
+  const tableSentinelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (openId) setDrawerTicketId(openId)
   }, [openId])
 
   useEffect(() => {
-    if (stageFilter) {
-      // When stage filter is active, fetch all pages then filter client-side
-      fetchAllStagingTicketsForStageFilter()
-    } else {
-      // Reset stage filter state when filter is cleared
-      if (allStagingTicketsForStageFilter.length > 0) {
-        setAllStagingTicketsForStageFilter([])
-      }
-      fetchStagingTickets()
-    }
-  }, [page, pageSize, stageFilter, referenceFilter])
+    ticketsRef.current = tickets
+  }, [tickets])
+  useEffect(() => {
+    totalRef.current = total
+  }, [total])
 
-  const fetchStagingTickets = async () => {
+  const fetchStagingTickets = useCallback(async () => {
+    const gen = ++listFetchGeneration.current
+    listPageRef.current = 0
+    listExhaustedRef.current = false
     setLoading(true)
+    setTickets([])
     try {
       const response = await ticketsApi.list({
         section: 'staging',
-        page,
-        limit: pageSize,
+        page: 1,
+        limit: STAGING_CHUNK,
+        ...(referenceFilter && { reference_filter: referenceFilter }),
+        sort_by: 'created_at',
+        sort_order: 'desc',
+      })
+      if (gen !== listFetchGeneration.current) return
+      const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
+      setTickets(Array.isArray(raw) ? raw : [])
+      setTotal((response as { total?: number })?.total ?? 0)
+      listPageRef.current = 1
+    } catch (error) {
+      console.error('Failed to fetch staging tickets:', error)
+    } finally {
+      if (gen === listFetchGeneration.current) setLoading(false)
+    }
+  }, [referenceFilter])
+
+  const fetchStagingTicketsMore = useCallback(async () => {
+    if (loading || loadingMoreRef.current || listExhaustedRef.current) return
+    if (totalRef.current > 0 && ticketsRef.current.length >= totalRef.current) return
+    const nextPage = listPageRef.current + 1
+    if (nextPage < 2) return
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    try {
+      const response = await ticketsApi.list({
+        section: 'staging',
+        page: nextPage,
+        limit: STAGING_CHUNK,
         ...(referenceFilter && { reference_filter: referenceFilter }),
         sort_by: 'created_at',
         sort_order: 'desc',
       })
       const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
-      setTickets(Array.isArray(raw) ? raw : [])
-      setTotal((response as { total?: number })?.total ?? 0)
+      const newRows = Array.isArray(raw) ? raw : []
+      if (newRows.length === 0) {
+        listExhaustedRef.current = true
+        return
+      }
+      setTickets((prev) => [...prev, ...newRows])
+      listPageRef.current = nextPage
     } catch (error) {
-      console.error('Failed to fetch staging tickets:', error)
+      console.error('Failed to load more staging tickets:', error)
     } finally {
-      setLoading(false)
+      loadingMoreRef.current = false
+      setLoadingMore(false)
     }
-  }
+  }, [loading, referenceFilter])
 
   /** Fetches all staging tickets across pages (section: staging, fixed sort). Used for stage filter and export. */
   const fetchAllStagingPages = async (): Promise<Ticket[]> => {
@@ -354,22 +394,65 @@ export const StagingList = () => {
     return allTickets
   }
 
-  const fetchAllStagingTicketsForStageFilter = async () => {
+  const fetchAllStagingTicketsForStageFilter = useCallback(async () => {
+    const gen = ++listFetchGeneration.current
     setLoading(true)
     try {
       const allTickets = await fetchAllStagingPages()
+      if (gen !== listFetchGeneration.current) return
       setAllStagingTicketsForStageFilter(allTickets)
       const filtered = stageFilter
         ? allTickets.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter)
         : allTickets
-      setTickets(filtered.slice((page - 1) * pageSize, page * pageSize))
+      setTickets(filtered.slice(0, STAGING_CHUNK))
       setTotal(filtered.length)
     } catch (error) {
       console.error('Failed to fetch all staging tickets for stage filter:', error)
     } finally {
-      setLoading(false)
+      if (gen === listFetchGeneration.current) setLoading(false)
     }
-  }
+  }, [fetchAllStagingPages, stageFilter])
+
+  useEffect(() => {
+    if (stageFilter) {
+      void fetchAllStagingTicketsForStageFilter()
+    } else {
+      if (allStagingTicketsForStageFilter.length > 0) {
+        setAllStagingTicketsForStageFilter([])
+      }
+      void fetchStagingTickets()
+    }
+  }, [stageFilter, referenceFilter, fetchAllStagingTicketsForStageFilter, fetchStagingTickets, allStagingTicketsForStageFilter.length])
+
+  const tryLoadMoreTickets = useCallback(() => {
+    if (loading) return
+    if (stageFilter) {
+      const filtered = stageFilter
+        ? allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter)
+        : allStagingTicketsForStageFilter
+      if (ticketsRef.current.length >= filtered.length) return
+      const next = Math.min(filtered.length, ticketsRef.current.length + STAGING_CHUNK)
+      setTickets(filtered.slice(0, next))
+      return
+    }
+    void fetchStagingTicketsMore()
+  }, [loading, stageFilter, allStagingTicketsForStageFilter, fetchStagingTicketsMore])
+
+  useEffect(() => {
+    if (loading) return
+    const root = tableContainerRef.current?.querySelector('.ant-table-body') as HTMLElement | null
+    const target = tableSentinelRef.current
+    if (!target) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return
+        tryLoadMoreTickets()
+      },
+      { root: root ?? null, rootMargin: '160px', threshold: 0 },
+    )
+    io.observe(target)
+    return () => io.disconnect()
+  }, [loading, tryLoadMoreTickets, tickets.length, total, stageFilter, allStagingTicketsForStageFilter.length])
 
   const fetchAllForExport = async (): Promise<Ticket[]> => fetchAllStagingPages()
 
@@ -407,7 +490,6 @@ export const StagingList = () => {
             onChange={(e) => setReferenceFilterInput(e.target.value)}
             onPressEnter={() => {
               setReferenceFilter(referenceFilterInput)
-              setPage(1)
             }}
             allowClear
           />
@@ -417,7 +499,6 @@ export const StagingList = () => {
             value={stageFilter || undefined}
             onChange={(v) => {
               setStageFilter(v ?? '')
-              setPage(1)
             }}
             allowClear
             aria-label="Stage filter"
@@ -428,28 +509,34 @@ export const StagingList = () => {
           </Select>
         </Space>
         <TableWithSkeletonLoading loading={loading} columns={10} rows={12}>
-          <Table
-            columns={stagingTicketColumns}
-            dataSource={ticketsForDisplay}
-            rowKey="id"
-            loading={false}
-            scroll={{ x: 'max-content' }}
-            onRow={(record) => ({
-              onClick: () => record?.id && setDrawerTicketId(record.id),
-              style: { cursor: 'pointer' },
-            })}
-            pagination={{
-              current: page,
-              pageSize,
-              total: stageFilter ? allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter).length : total,
-              showSizeChanger: true,
-              showTotal: (t) => `Total ${t} tickets`,
-              onChange: (newPage, newPageSize) => {
-                setPage(newPage)
-                setPageSize(newPageSize ?? pageSize)
-              },
-            }}
-          />
+          <div ref={tableContainerRef}>
+            <Table
+              columns={stagingTicketColumns}
+              dataSource={ticketsForDisplay}
+              rowKey="id"
+              loading={false}
+              scroll={{ x: 'max-content' }}
+              onRow={(record) => ({
+                onClick: () => record?.id && setDrawerTicketId(record.id),
+                style: { cursor: 'pointer' },
+              })}
+              pagination={false}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={stagingTicketColumns.length}>
+                      <div ref={tableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
+                      <Typography.Text type="secondary">
+                        Showing {ticketsForDisplay.length} of {stageFilter ? allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter).length : total} tickets
+                        {ticketsForDisplay.length < (stageFilter ? allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter).length : total) ? ' · scroll to load more' : ''}
+                      </Typography.Text>
+                      {loadingMore ? <span style={{ marginLeft: 8 }}>Loading...</span> : null}
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
+          </div>
         </TableWithSkeletonLoading>
       </Card>
       <StagingDetailDrawer
@@ -462,7 +549,7 @@ export const StagingList = () => {
         onUpdate={() => {
           setDrawerTicketId(null)
           if (openId) setSearchParams({})
-          fetchStagingTickets()
+          void fetchStagingTickets()
         }}
         readOnly={isUser && !isMasterAdmin}
       />

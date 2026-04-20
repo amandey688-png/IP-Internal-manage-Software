@@ -7,6 +7,7 @@ import { API_ENDPOINTS } from '../../utils/constants'
 import { apiClient } from '../../api/axios'
 import { useAuth } from '../../hooks/useAuth'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { DEFAULT_INFINITE_CHUNK, useInfiniteScrollChunk } from '../../hooks/useInfiniteScrollChunk'
 import { exportRowsToCsv, type ExportColumn } from '../../utils/exportCsv'
 
 const { Title, Text } = Typography
@@ -878,6 +879,15 @@ export function ClientPaymentPage() {
     return records.filter((r) => (r.company_name || '').toLowerCase().includes(companyFilterNorm))
   }, [records, companyFilterNorm])
 
+  const {
+    visibleItems: visibleFilteredRecords,
+    containerRef: clientPaymentTableContainerRef,
+    sentinelRef: clientPaymentTableSentinelRef,
+    total: totalFilteredRecords,
+    visibleCount: visibleFilteredRecordCount,
+    hasMore: filteredRecordsHasMore,
+  } = useInfiniteScrollChunk({ items: filteredRecords, chunkSize: DEFAULT_INFINITE_CHUNK, loading })
+
   return (
     <div style={{ padding: 24 }}>
       <Space
@@ -914,22 +924,36 @@ export function ClientPaymentPage() {
 
       <Card>
         <TableWithSkeletonLoading loading={loading} columns={9} rows={12}>
-          <Table
-            dataSource={filteredRecords}
-            columns={columns}
-            rowKey="id"
-            loading={false}
-            scroll={{ x: 900 }}
-            pagination={{ pageSize: 20, showSizeChanger: true }}
-            onRow={(record) => ({
-              onClick: () => {
-                setSelectedRecord(record)
-                setDetailOpen(true)
-                loadDrawerData(record)
-              },
-              style: { cursor: 'pointer' },
-            })}
-          />
+          <div ref={clientPaymentTableContainerRef}>
+            <Table
+              dataSource={visibleFilteredRecords}
+              columns={columns}
+              rowKey="id"
+              loading={false}
+              scroll={{ x: 900 }}
+              pagination={false}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={columns.length}>
+                      <div ref={clientPaymentTableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
+                      <Text type="secondary">
+                        Showing {visibleFilteredRecordCount} of {totalFilteredRecords} rows{filteredRecordsHasMore ? ' · scroll to load more' : ''}
+                      </Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+              onRow={(record) => ({
+                onClick: () => {
+                  setSelectedRecord(record)
+                  setDetailOpen(true)
+                  loadDrawerData(record)
+                },
+                style: { cursor: 'pointer' },
+              })}
+            />
+          </div>
         </TableWithSkeletonLoading>
       </Card>
 

@@ -1360,6 +1360,8 @@ def list_tickets(
     search_all_sections: bool = False,   # When True + search present: ignore section/type, search all tickets
     auth: dict = Depends(get_current_user),
 ):
+    page = max(1, int(page or 1))
+    limit = max(1, min(int(limit or 50), 100))
     # Approval Status section: only admin, master_admin and approver
     if section == "approval-status":
         role = _get_role_from_profile(auth["id"])

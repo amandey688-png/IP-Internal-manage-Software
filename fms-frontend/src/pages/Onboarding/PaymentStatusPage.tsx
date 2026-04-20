@@ -21,6 +21,7 @@ import type { Dayjs } from 'dayjs'
 import dayjs from 'dayjs'
 import { onboardingApi, type PaymentStatusRecord } from '../../api/onboarding'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { DEFAULT_INFINITE_CHUNK, useInfiniteScrollChunk } from '../../hooks/useInfiniteScrollChunk'
 
 const { Title } = Typography
 const { TextArea } = Input
@@ -1215,6 +1216,15 @@ export function PaymentStatusPage() {
     },
   ]
 
+  const {
+    visibleItems: visibleRecords,
+    containerRef: paymentStatusTableContainerRef,
+    sentinelRef: paymentStatusTableSentinelRef,
+    total: totalRecords,
+    visibleCount: visibleRecordCount,
+    hasMore: recordsHasMore,
+  } = useInfiniteScrollChunk({ items: records, chunkSize: DEFAULT_INFINITE_CHUNK, loading })
+
   return (
     <div style={{ padding: 24 }}>
       <Space style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2210,18 +2220,32 @@ export function PaymentStatusPage() {
 
       <Card title="Payment Status Records">
         <TableWithSkeletonLoading loading={loading} columns={10} rows={12}>
-          <Table
-            dataSource={records}
-            columns={columns}
-            rowKey="id"
-            loading={false}
-            scroll={{ x: 1100 }}
-            pagination={{ pageSize: 20, showSizeChanger: true }}
-            onRow={(record) => ({
-              onClick: () => handleRowClick(record),
-              style: { cursor: 'pointer' },
-            })}
-          />
+          <div ref={paymentStatusTableContainerRef}>
+            <Table
+              dataSource={visibleRecords}
+              columns={columns}
+              rowKey="id"
+              loading={false}
+              scroll={{ x: 1100 }}
+              pagination={false}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={columns.length}>
+                      <div ref={paymentStatusTableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
+                      <Typography.Text type="secondary">
+                        Showing {visibleRecordCount} of {totalRecords} rows{recordsHasMore ? ' · scroll to load more' : ''}
+                      </Typography.Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+              onRow={(record) => ({
+                onClick: () => handleRowClick(record),
+                style: { cursor: 'pointer' },
+              })}
+            />
+          </div>
         </TableWithSkeletonLoading>
       </Card>
     </div>
