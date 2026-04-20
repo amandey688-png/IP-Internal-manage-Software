@@ -1,5 +1,11 @@
 import { apiClient } from './axios'
 import { API_ENDPOINTS } from '../utils/constants'
+import {
+  API_CACHE_TTL_MS,
+  sessionApiCacheClearLogicalPrefix,
+  sessionApiCacheGet,
+  sessionApiCacheSet,
+} from '../utils/sessionApiCache'
 
 export interface TrainingClientRecord {
   payment_status_id: string
@@ -70,25 +76,35 @@ export interface TrainingStagesConfigResponse {
 }
 
 export const trainingApi = {
-  listClients: () =>
-    apiClient
-      .get<{ items: TrainingClientRecord[] }>(API_ENDPOINTS.TRAINING.CLIENTS)
-      .then((r) => r.data),
+  listClients: async () => {
+    const key = 'training:clients:list'
+    const cached = sessionApiCacheGet<{ items: TrainingClientRecord[] }>(key)
+    if (cached) return cached
+    const r = await apiClient.get<{ items: TrainingClientRecord[] }>(API_ENDPOINTS.TRAINING.CLIENTS)
+    sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.trainingClientsList)
+    return r.data
+  },
 
-  createAssignment: (paymentStatusId: string, payload: { poc_name: string; trainer_user_id: string; expected_day0?: string | null }) =>
-    apiClient
-      .post<{ message: string }>(API_ENDPOINTS.TRAINING.ASSIGN(paymentStatusId), payload)
-      .then((r) => r.data),
+  createAssignment: async (paymentStatusId: string, payload: { poc_name: string; trainer_user_id: string; expected_day0?: string | null }) => {
+    const r = await apiClient.post<{ message: string }>(API_ENDPOINTS.TRAINING.ASSIGN(paymentStatusId), payload)
+    sessionApiCacheClearLogicalPrefix('training:clients:list')
+    return r.data
+  },
 
-  updateAssignment: (paymentStatusId: string, payload: { poc_name?: string; trainer_user_id?: string; expected_day0?: string | null }) =>
-    apiClient
-      .put<{ message: string }>(API_ENDPOINTS.TRAINING.ASSIGN(paymentStatusId), payload)
-      .then((r) => r.data),
+  updateAssignment: async (paymentStatusId: string, payload: { poc_name?: string; trainer_user_id?: string; expected_day0?: string | null }) => {
+    const r = await apiClient.put<{ message: string }>(API_ENDPOINTS.TRAINING.ASSIGN(paymentStatusId), payload)
+    sessionApiCacheClearLogicalPrefix('training:clients:list')
+    return r.data
+  },
 
-  listUsers: () =>
-    apiClient
-      .get<{ users: TrainingUser[] }>(API_ENDPOINTS.TRAINING.USERS)
-      .then((r) => r.data),
+  listUsers: async () => {
+    const key = 'training:users'
+    const cached = sessionApiCacheGet<{ users: TrainingUser[] }>(key)
+    if (cached) return cached
+    const r = await apiClient.get<{ users: TrainingUser[] }>(API_ENDPOINTS.TRAINING.USERS)
+    sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.trainingUsers)
+    return r.data
+  },
 
   getDay0Checklist: (paymentStatusId: string) =>
     apiClient
@@ -98,7 +114,10 @@ export const trainingApi = {
   saveDay0Checklist: (paymentStatusId: string, data: Record<string, string>) =>
     apiClient
       .post<TrainingDay0ChecklistResponse>(API_ENDPOINTS.TRAINING.DAY0(paymentStatusId), { data })
-      .then((r) => r.data),
+      .then((r) => {
+        sessionApiCacheClearLogicalPrefix('training:clients:list')
+        return r.data
+      }),
 
   getStagesConfig: () =>
     apiClient
@@ -123,7 +142,10 @@ export const trainingApi = {
         API_ENDPOINTS.TRAINING.STAGE(paymentStatusId, stageKey),
         { data }
       )
-      .then((r) => r.data),
+      .then((r) => {
+        sessionApiCacheClearLogicalPrefix('training:clients:list')
+        return r.data
+      }),
 
   getAvailableForManual: () =>
     apiClient
@@ -137,5 +159,8 @@ export const trainingApi = {
       .post<{ message: string; payment_status_id: string }>(API_ENDPOINTS.TRAINING.MANUAL_ADD, {
         payment_status_id: paymentStatusId,
       })
-      .then((r) => r.data),
+      .then((r) => {
+        sessionApiCacheClearLogicalPrefix('training:clients:list')
+        return r.data
+      }),
 }

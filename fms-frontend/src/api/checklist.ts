@@ -1,4 +1,11 @@
 import { apiClient } from './axios'
+import {
+  API_CACHE_TTL_MS,
+  genericLogicalKey,
+  sessionApiCacheClearLogicalPrefix,
+  sessionApiCacheGet,
+  sessionApiCacheSet,
+} from '../utils/sessionApiCache'
 
 export const DEPARTMENTS = [
   'Customer Support & Success',
@@ -43,8 +50,14 @@ export interface ChecklistOccurrence {
 }
 
 export const checklistApi = {
-  getDepartments: () =>
-    apiClient.get<{ departments: string[] }>('/checklist/departments').then((r) => r.data),
+  getDepartments: async () => {
+    const key = 'checklist:departments'
+    const cached = sessionApiCacheGet<{ departments: string[] }>(key)
+    if (cached) return cached
+    const r = await apiClient.get<{ departments: string[] }>('/checklist/departments')
+    sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.checklistDepartments)
+    return r.data
+  },
 
   getHolidays: (year: number) =>
     apiClient.get<{ holidays: { holiday_date: string; holiday_name: string }[] }>(`/checklist/holidays?year=${year}`).then((r) => r.data),
@@ -54,23 +67,49 @@ export const checklistApi = {
     if (userId) params.set('user_id', userId)
     if (referenceNo) params.set('reference_no', referenceNo)
     const q = params.toString()
-    return apiClient.get<{ tasks: ChecklistTask[] }>(`/checklist/tasks${q ? `?${q}` : ''}`).then((r) => r.data)
+    const key = genericLogicalKey('checklist:tasks', { user_id: userId, reference_no: referenceNo })
+    const cached = sessionApiCacheGet<{ tasks: ChecklistTask[] }>(key)
+    if (cached) return Promise.resolve(cached)
+    return apiClient.get<{ tasks: ChecklistTask[] }>(`/checklist/tasks${q ? `?${q}` : ''}`).then((r) => {
+      sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.checklistTasks)
+      return r.data
+    })
   },
 
   getOccurrences: (filter: 'today' | 'completed' | 'overdue' | 'upcoming', userId?: string, referenceNo?: string) => {
     const params = new URLSearchParams({ filter })
     if (userId) params.set('user_id', userId)
     if (referenceNo) params.set('reference_no', referenceNo)
-    return apiClient.get<{ occurrences: ChecklistOccurrence[] }>(`/checklist/occurrences?${params}`).then((r) => r.data)
+    const key = genericLogicalKey('checklist:occurrences', { filter, user_id: userId, reference_no: referenceNo })
+    const cached = sessionApiCacheGet<{ occurrences: ChecklistOccurrence[] }>(key)
+    if (cached) return Promise.resolve(cached)
+    return apiClient.get<{ occurrences: ChecklistOccurrence[] }>(`/checklist/occurrences?${params}`).then((r) => {
+      sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.checklistOccurrences)
+      return r.data
+    })
   },
 
-  createTask: (data: { task_name: string; department: string; frequency: string; start_date: string }) =>
-    apiClient.post<ChecklistTask>('/checklist/tasks', data).then((r) => r.data),
+  createTask: async (data: { task_name: string; department: string; frequency: string; start_date: string }) => {
+    const r = await apiClient.post<ChecklistTask>('/checklist/tasks', data)
+    sessionApiCacheClearLogicalPrefix('checklist:tasks:')
+    sessionApiCacheClearLogicalPrefix('checklist:occurrences:')
+    return r.data
+  },
 
-  completeTask: (taskId: string, occurrenceDate: string) =>
-    apiClient.post(`/checklist/tasks/${taskId}/complete`, { occurrence_date: occurrenceDate }).then((r) => r.data),
+  completeTask: async (taskId: string, occurrenceDate: string) => {
+    const r = await apiClient.post(`/checklist/tasks/${taskId}/complete`, { occurrence_date: occurrenceDate })
+    sessionApiCacheClearLogicalPrefix('checklist:occurrences:')
+    return r.data
+  },
 
-  getUsers: () => apiClient.get<{ users: { id: string; full_name: string }[] }>('/checklist/users').then((r) => r.data),
+  getUsers: async () => {
+    const key = 'checklist:users'
+    const cached = sessionApiCacheGet<{ users: { id: string; full_name: string }[] }>(key)
+    if (cached) return cached
+    const r = await apiClient.get<{ users: { id: string; full_name: string }[] }>('/checklist/users')
+    sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.checklistUsers)
+    return r.data
+  },
 
   uploadHolidays: (year: number, holidays: { holiday_date: string; holiday_name: string }[]) =>
     apiClient.post('/checklist/holidays/upload', { year, holidays }).then((r) => r.data),

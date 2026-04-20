@@ -22,6 +22,21 @@ export const API_CACHE_TTL_MS = {
   supportCompanies: 30 * 60 * 1000,
   supportPages: 30 * 60 * 1000,
   supportDivisions: 15 * 60 * 1000,
+  usersList: 60 * 1000,
+  usersRoles: 5 * 60 * 1000,
+  onboardingPaymentStatusList: 90 * 1000,
+  trainingClientsList: 90 * 1000,
+  trainingUsers: 5 * 60 * 1000,
+  delegationTasks: 60 * 1000,
+  delegationUsers: 5 * 60 * 1000,
+  checklistTasks: 60 * 1000,
+  checklistOccurrences: 45 * 1000,
+  checklistUsers: 5 * 60 * 1000,
+  checklistDepartments: 30 * 60 * 1000,
+  dbClientOnbList: 90 * 1000,
+  leadsList: 90 * 1000,
+  leadsUsers: 5 * 60 * 1000,
+  leadsStages: 5 * 60 * 1000,
 } as const
 
 function sessionStore(): Storage | null {
@@ -126,6 +141,10 @@ function stableParamsKey(params: unknown): string {
     norm[k] = stableValue(v)
   }
   return JSON.stringify(norm)
+}
+
+export function genericLogicalKey(prefix: string, params?: object): string {
+  return `${prefix}:${stableParamsKey(params)}`
 }
 
 export function ticketsListLogicalKey(params?: object): string {

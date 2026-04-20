@@ -1,4 +1,11 @@
 import { apiClient } from './axios'
+import {
+  API_CACHE_TTL_MS,
+  genericLogicalKey,
+  sessionApiCacheClearLogicalPrefix,
+  sessionApiCacheGet,
+  sessionApiCacheSet,
+} from '../utils/sessionApiCache'
 
 export interface DelegationTask {
   id: string
@@ -30,17 +37,33 @@ export interface CreateDelegationTaskPayload {
 }
 
 export const delegationApi = {
-  getUsers: () =>
-    apiClient.get<{ users: { id: string; full_name: string }[] }>('/delegation/users').then((r) => r.data),
+  getUsers: async () => {
+    const key = 'delegation:users'
+    const cached = sessionApiCacheGet<{ users: { id: string; full_name: string }[] }>(key)
+    if (cached) return cached
+    const r = await apiClient.get<{ users: { id: string; full_name: string }[] }>('/delegation/users')
+    sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.delegationUsers)
+    return r.data
+  },
 
-  getTasks: (params?: { status?: string; assignee_id?: string; reference_no?: string }) =>
-    apiClient
-      .get<{ tasks: DelegationTask[] }>('/delegation/tasks', { params })
-      .then((r) => r.data),
+  getTasks: async (params?: { status?: string; assignee_id?: string; reference_no?: string }) => {
+    const key = genericLogicalKey('delegation:tasks', params)
+    const cached = sessionApiCacheGet<{ tasks: DelegationTask[] }>(key)
+    if (cached) return cached
+    const r = await apiClient.get<{ tasks: DelegationTask[] }>('/delegation/tasks', { params })
+    sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.delegationTasks)
+    return r.data
+  },
 
-  createTask: (data: CreateDelegationTaskPayload) =>
-    apiClient.post<DelegationTask>('/delegation/tasks', data).then((r) => r.data),
+  createTask: async (data: CreateDelegationTaskPayload) => {
+    const r = await apiClient.post<DelegationTask>('/delegation/tasks', data)
+    sessionApiCacheClearLogicalPrefix('delegation:tasks:')
+    return r.data
+  },
 
-  updateTask: (taskId: string, data: Partial<Pick<DelegationTask, 'status' | 'title' | 'due_date' | 'assignee_id' | 'delegation_on' | 'submission_date' | 'has_document' | 'document_url' | 'submitted_by' | 'completed_at'>>) =>
-    apiClient.put<DelegationTask>(`/delegation/tasks/${taskId}`, data).then((r) => r.data),
+  updateTask: async (taskId: string, data: Partial<Pick<DelegationTask, 'status' | 'title' | 'due_date' | 'assignee_id' | 'delegation_on' | 'submission_date' | 'has_document' | 'document_url' | 'submitted_by' | 'completed_at'>>) => {
+    const r = await apiClient.put<DelegationTask>(`/delegation/tasks/${taskId}`, data)
+    sessionApiCacheClearLogicalPrefix('delegation:tasks:')
+    return r.data
+  },
 }

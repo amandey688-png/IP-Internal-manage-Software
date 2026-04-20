@@ -2,12 +2,16 @@ import { apiClient } from './axios'
 import { API_ENDPOINTS } from '../utils/constants'
 import {
   API_CACHE_TTL_MS,
+  genericLogicalKey,
   sessionApiCacheGet,
   sessionApiCacheSet,
   sessionApiCacheRemove,
+  sessionApiCacheClearLogicalPrefix,
 } from '../utils/sessionApiCache'
 
 const LEADS_ACTIVE_CACHE_KEY = 'leads:list-active'
+const LEADS_STAGES_CACHE_KEY = 'leads:stages'
+const LEADS_USERS_CACHE_KEY = 'leads:users'
 
 export interface Lead {
   id: string
@@ -33,16 +37,30 @@ export interface ActiveLeadRow {
 }
 
 export const leadsApi = {
-  getStages: () =>
-    apiClient.get<{ stages: string[] }>(API_ENDPOINTS.LEADS.STAGES).then((r) => r.data),
+  getStages: async () => {
+    const cached = sessionApiCacheGet<{ stages: string[] }>(LEADS_STAGES_CACHE_KEY)
+    if (cached) return cached
+    const r = await apiClient.get<{ stages: string[] }>(API_ENDPOINTS.LEADS.STAGES)
+    sessionApiCacheSet(LEADS_STAGES_CACHE_KEY, r.data, API_CACHE_TTL_MS.leadsStages)
+    return r.data
+  },
 
-  getUsers: () =>
-    apiClient.get<{ users: { id: string; full_name: string }[] }>(API_ENDPOINTS.LEADS.USERS).then((r) => r.data),
+  getUsers: async () => {
+    const cached = sessionApiCacheGet<{ users: { id: string; full_name: string }[] }>(LEADS_USERS_CACHE_KEY)
+    if (cached) return cached
+    const r = await apiClient.get<{ users: { id: string; full_name: string }[] }>(API_ENDPOINTS.LEADS.USERS)
+    sessionApiCacheSet(LEADS_USERS_CACHE_KEY, r.data, API_CACHE_TTL_MS.leadsUsers)
+    return r.data
+  },
 
-  list: (params?: { status?: string; company?: string; stage?: string; reference_no?: string; date_from?: string; date_to?: string }) =>
-    apiClient
-      .get<{ leads: Lead[] }>(API_ENDPOINTS.LEADS.LIST, { params: params || {} })
-      .then((r) => r.data),
+  list: async (params?: { status?: string; company?: string; stage?: string; reference_no?: string; date_from?: string; date_to?: string }) => {
+    const key = genericLogicalKey('leads:list', params)
+    const cached = sessionApiCacheGet<{ leads: Lead[] }>(key)
+    if (cached) return cached
+    const r = await apiClient.get<{ leads: Lead[] }>(API_ENDPOINTS.LEADS.LIST, { params: params || {} })
+    sessionApiCacheSet(key, r.data, API_CACHE_TTL_MS.leadsList)
+    return r.data
+  },
 
   /** Active (Open) leads with person_name, city, state for dashboard */
   listActive: async (): Promise<{ leads: ActiveLeadRow[] }> => {
@@ -62,12 +80,14 @@ export const leadsApi = {
 
   create: async (payload: { company_name: string; stage: string; assigned_poc_id?: string }) => {
     const r = await apiClient.post<Lead>(API_ENDPOINTS.LEADS.LIST, payload)
+    sessionApiCacheClearLogicalPrefix('leads:list:')
     sessionApiCacheRemove(LEADS_ACTIVE_CACHE_KEY)
     return r.data
   },
 
   update: async (id: string, payload: Partial<Pick<Lead, 'stage' | 'status' | 'assigned_poc_id' | 'company_name'>>) => {
     const r = await apiClient.patch<Lead>(API_ENDPOINTS.LEADS.DETAIL(id), payload)
+    sessionApiCacheClearLogicalPrefix('leads:list:')
     sessionApiCacheRemove(LEADS_ACTIVE_CACHE_KEY)
     return r.data
   },
@@ -77,6 +97,7 @@ export const leadsApi = {
       API_ENDPOINTS.LEADS.STAGE(leadId, stageSlug),
       data,
     )
+    sessionApiCacheClearLogicalPrefix('leads:list:')
     sessionApiCacheRemove(LEADS_ACTIVE_CACHE_KEY)
     return r.data
   },

@@ -1,6 +1,13 @@
 import { apiClient } from './axios'
 import type { ApiResponse, PaginatedResponse } from './types'
 import type { User } from './types'
+import {
+  API_CACHE_TTL_MS,
+  genericLogicalKey,
+  sessionApiCacheClearLogicalPrefix,
+  sessionApiCacheGet,
+  sessionApiCacheSet,
+} from '../utils/sessionApiCache'
 
 export interface UpdateUserRequest {
   full_name?: string
@@ -28,10 +35,14 @@ export const usersApi = {
     role?: string
     search?: string
   }): Promise<ApiResponse<PaginatedResponse<User>>> => {
+    const key = genericLogicalKey('users:list', params)
+    const cached = sessionApiCacheGet<ApiResponse<PaginatedResponse<User>>>(key)
+    if (cached) return cached
     const response = await apiClient.get<ApiResponse<PaginatedResponse<User>>>(
       '/users',
       { params }
     )
+    sessionApiCacheSet(key, response.data, API_CACHE_TTL_MS.usersList)
     return response.data
   },
 
@@ -42,13 +53,19 @@ export const usersApi = {
 
   update: async (id: string, data: UpdateUserRequest): Promise<ApiResponse<User>> => {
     const response = await apiClient.put<ApiResponse<User>>(`/users/${id}`, data)
+    sessionApiCacheClearLogicalPrefix('users:list:')
     return response.data
   },
 
   /** Backend returns `{ data: RoleOption[] }` — return the inner array. */
   listRoles: async (): Promise<RoleOption[]> => {
+    const key = 'users:roles'
+    const cached = sessionApiCacheGet<RoleOption[]>(key)
+    if (cached) return cached
     const response = await apiClient.get<{ data: RoleOption[] }>('/roles')
-    return response.data?.data ?? []
+    const data = response.data?.data ?? []
+    sessionApiCacheSet(key, data, API_CACHE_TTL_MS.usersRoles)
+    return data
   },
 
   /** Backend returns `{ data: SectionPermission[] }` — return the inner array. */
