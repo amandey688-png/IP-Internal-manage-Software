@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Table,
   Card,
@@ -27,15 +27,23 @@ import { useRole } from '../../hooks/useRole'
 import { ROLE_DISPLAY_NAMES, SECTION_LABELS, PERMISSION_SECTION_KEYS } from '../../utils/constants'
 
 const { Title } = Typography
+const USERS_CHUNK = 15
 
 export const UserList = () => {
   const { isMasterAdmin } = useRole()
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [users, setUsers] = useState<User[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
   const [search, setSearch] = useState('')
+  const listFetchGeneration = useRef(0)
+  const listPageRef = useRef(0)
+  const listExhaustedRef = useRef(false)
+  const usersRef = useRef<User[]>([])
+  const totalRef = useRef(0)
+  const loadingMoreRef = useRef(false)
+  const tableContainerRef = useRef<HTMLDivElement>(null)
+  const tableSentinelRef = useRef<HTMLDivElement>(null)
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [deactivateModalOpen, setDeactivateModalOpen] = useState(false)
   const [selectedUser, setSelectedUser] = useState<User | null>(null)
@@ -44,24 +52,34 @@ export const UserList = () => {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    fetchUsers()
-  }, [page, pageSize, search])
+    usersRef.current = users
+  }, [users])
+  useEffect(() => {
+    totalRef.current = total
+  }, [total])
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
+    const gen = ++listFetchGeneration.current
+    listPageRef.current = 0
+    listExhaustedRef.current = false
     setLoading(true)
+    setUsers([])
     try {
       const response = await usersApi.list({
-        page,
-        limit: pageSize,
+        page: 1,
+        limit: USERS_CHUNK,
         ...(search && { search }),
       })
+      if (gen !== listFetchGeneration.current) return
       // Backend returns { data: User[], total: number, page, limit } directly
       if (response && Array.isArray(response.data)) {
         setUsers(response.data)
         setTotal(typeof response.total === 'number' ? response.total : response.data.length)
+        listPageRef.current = 1
       } else {
         setUsers([])
         setTotal(0)
+        listExhaustedRef.current = true
       }
     } catch (error: any) {
       console.error('Failed to fetch users:', error)
@@ -74,9 +92,57 @@ export const UserList = () => {
         message.error(msg)
       }
     } finally {
-      setLoading(false)
+      if (gen === listFetchGeneration.current) setLoading(false)
     }
-  }
+  }, [search])
+
+  const fetchUsersMore = useCallback(async () => {
+    if (loadingMoreRef.current || listExhaustedRef.current || loading) return
+    if (totalRef.current > 0 && usersRef.current.length >= totalRef.current) return
+    const nextPage = listPageRef.current + 1
+    if (nextPage < 2) return
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    try {
+      const response = await usersApi.list({
+        page: nextPage,
+        limit: USERS_CHUNK,
+        ...(search && { search }),
+      })
+      const newRows = Array.isArray(response?.data) ? response.data : []
+      if (newRows.length === 0) {
+        listExhaustedRef.current = true
+        return
+      }
+      setUsers((prev) => [...prev, ...newRows])
+      listPageRef.current = nextPage
+    } catch (error) {
+      console.error('Failed to fetch more users:', error)
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
+  }, [search, loading])
+
+  useEffect(() => {
+    void fetchUsers()
+  }, [fetchUsers])
+
+  useEffect(() => {
+    if (loading) return
+    const root = tableContainerRef.current?.querySelector('.ant-table-body') as HTMLElement | null
+    const target = tableSentinelRef.current
+    if (!target) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return
+        void fetchUsersMore()
+      },
+      { root: root ?? null, rootMargin: '160px', threshold: 0 },
+    )
+    io.observe(target)
+    return () => io.disconnect()
+  }, [loading, fetchUsersMore, users.length, total])
 
   const openEditModal = async (user: User) => {
     setSelectedUser(user)
@@ -312,23 +378,28 @@ export const UserList = () => {
         </Space>
 
         <TableWithSkeletonLoading loading={loading} columns={6} rows={12}>
-          <Table
-            columns={columns}
-            dataSource={users}
-            rowKey="id"
-            loading={false}
-            pagination={{
-              current: page,
-              pageSize,
-              total,
-              showSizeChanger: true,
-              showTotal: (total) => `Total ${total} users`,
-              onChange: (newPage, newPageSize) => {
-                setPage(newPage)
-                if (newPageSize) setPageSize(newPageSize)
-              },
-            }}
-          />
+          <div ref={tableContainerRef}>
+            <Table
+              columns={columns}
+              dataSource={users}
+              rowKey="id"
+              loading={false}
+              pagination={false}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={columns.length}>
+                      <div ref={tableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
+                      <Typography.Text type="secondary">
+                        Showing {users.length} of {total} users{users.length < total ? ' · scroll to load more' : ''}
+                      </Typography.Text>
+                      {loadingMore ? <span style={{ marginLeft: 8 }}>Loading...</span> : null}
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+            />
+          </div>
         </TableWithSkeletonLoading>
       </Card>
 

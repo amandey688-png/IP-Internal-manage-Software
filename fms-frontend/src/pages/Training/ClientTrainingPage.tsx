@@ -11,6 +11,7 @@ import {
   type TrainingUser,
 } from '../../api/training'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { DEFAULT_INFINITE_CHUNK, useInfiniteScrollChunk } from '../../hooks/useInfiniteScrollChunk'
 
 const { Title } = Typography
 
@@ -327,6 +328,15 @@ export function ClientTrainingPage() {
     setFilterTrainer(undefined)
   }
 
+  const {
+    visibleItems: visibleDisplayItems,
+    containerRef: trainingTableContainerRef,
+    sentinelRef: trainingTableSentinelRef,
+    total: totalDisplayItems,
+    visibleCount: visibleDisplayCount,
+    hasMore: displayItemsHasMore,
+  } = useInfiniteScrollChunk({ items: displayItems, chunkSize: DEFAULT_INFINITE_CHUNK, loading })
+
   return (
     <div style={{ padding: 24 }}>
       <Title level={4} style={{ marginBottom: 24 }}>
@@ -395,19 +405,33 @@ export function ClientTrainingPage() {
           <Button onClick={clearFilters}>Clear filters</Button>
         </div>
         <TableWithSkeletonLoading loading={loading} columns={12} rows={12}>
-          <Table
-            dataSource={displayItems}
-            columns={columns}
-            rowKey="payment_status_id"
-            loading={false}
-            pagination={{ pageSize: 20, showSizeChanger: true }}
-            scroll={{ x: 4000 }}
-            locale={{ emptyText: loading ? undefined : 'No clients. Submit Final Setup in Onboarding (Payment Status) for a company to appear here.' }}
-            onRow={(record) => ({
-              onClick: () => openDetails(record),
-              style: { cursor: 'pointer' },
-            })}
-          />
+          <div ref={trainingTableContainerRef}>
+            <Table
+              dataSource={visibleDisplayItems}
+              columns={columns}
+              rowKey="payment_status_id"
+              loading={false}
+              pagination={false}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={columns.length}>
+                      <div ref={trainingTableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
+                      <Typography.Text type="secondary">
+                        Showing {visibleDisplayCount} of {totalDisplayItems} rows{displayItemsHasMore ? ' · scroll to load more' : ''}
+                      </Typography.Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+              scroll={{ x: 4000 }}
+              locale={{ emptyText: loading ? undefined : 'No clients. Submit Final Setup in Onboarding (Payment Status) for a company to appear here.' }}
+              onRow={(record) => ({
+                onClick: () => openDetails(record),
+                style: { cursor: 'pointer' },
+              })}
+            />
+          </div>
         </TableWithSkeletonLoading>
 
         <Drawer

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Table,
   Input,
@@ -10,6 +10,7 @@ import {
   DatePicker,
   Button,
   Dropdown,
+  Spin,
 } from 'antd'
 import { SearchOutlined, PhoneOutlined, MailOutlined, MessageOutlined, LinkOutlined, MoreOutlined } from '@ant-design/icons'
 import { useSearchParams, useLocation, useNavigate } from 'react-router-dom'
@@ -37,7 +38,7 @@ import type { Ticket } from '../../api/tickets'
 import type { Company } from '../../api/support'
 import { ROUTES } from '../../utils/constants'
 
-const { Title } = Typography
+const { Title, Text } = Typography
 const { Option } = Select
 const { RangePicker } = DatePicker
 
@@ -62,6 +63,9 @@ const truncate = (text: string | undefined, len = 40) => {
   return text.length > len ? `${text.slice(0, len)}...` : text
 }
 
+/** Rows per scroll chunk (API uses same limit; server allows up to 100 per request). */
+const TICKETS_CHUNK = 15
+
 export const TicketList = () => {
   const navigate = useNavigate()
   const { canAccessApproval, isUser, isMasterAdmin } = useRole()
@@ -69,8 +73,15 @@ export const TicketList = () => {
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [allTicketsForStageFilter, setAllTicketsForStageFilter] = useState<Ticket[]>([])
   const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(20)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const listFetchGeneration = useRef(0)
+  const serverListPageRef = useRef(0)
+  const loadingMoreRef = useRef(false)
+  const listExhaustedRef = useRef(false)
+  const ticketsRef = useRef<Ticket[]>([])
+  const totalRef = useRef(0)
+  const scrollRootRef = useRef<HTMLDivElement>(null)
+  const loadMoreSentinelRef = useRef<HTMLDivElement>(null)
   const [exportTickets, setExportTickets] = useState<Ticket[]>([])
   const [searchParams] = useSearchParams()
   const location = useLocation()
@@ -81,6 +92,11 @@ export const TicketList = () => {
   const showStageFilter = sectionFromUrl === 'chores-bugs'
   const showStageFilterForFeature = typeFromUrl === 'feature' && !isApprovalSection
   const isChoresBugsSection = sectionFromUrl === 'chores-bugs'
+  const isChoresBugs =
+    sectionFromUrl === 'chores-bugs' ||
+    sectionFromUrl === 'completed-chores-bugs' ||
+    sectionFromUrl === 'rejected-tickets' ||
+    sectionFromUrl === 'solutions'
 
   useEffect(() => {
     if (isApprovalSection && !canAccessApproval) {
@@ -198,105 +214,67 @@ export const TicketList = () => {
     })
   }, [searchParams])
 
-  /** Feature page: default 100 per page; other sections: 20 per page */
-  useEffect(() => {
-    if (typeFromUrl === 'feature' || sectionFromUrl === 'completed-feature') {
-      setPageSize(100)
-      setPage(1)
-    } else {
-      setPageSize(20)
-      setPage(1)
-    }
-  }, [typeFromUrl, sectionFromUrl])
-
   useEffect(() => {
     supportApi.getCompanies().then(setCompanies).catch(() => setCompanies([]))
   }, [])
 
-  useEffect(() => {
-    if ((showStageFilter && stageFilter) || (showStageFilterForFeature && stageFilter)) {
-      // When stage filter is active (Chores & Bug or Feature), fetch all pages then filter client-side
-      fetchAllTicketsForStageFilter()
-    } else {
-      // Reset stage filter state when filter is cleared
-      if (allTicketsForStageFilter.length > 0) {
-        setAllTicketsForStageFilter([])
-      }
-      fetchTickets()
-    }
-    // Refetch when navigating back to list (e.g. from ticket detail) so Stage filter shows current data
-  }, [page, pageSize, filters, isApprovalSection, approvalFilter, stageFilter, status2Filter, typeOfRequestFilter, showStageFilter, showStageFilterForFeature, location.pathname])
-
-  const fetchTickets = async () => {
-    setLoading(true)
-    try {
-      const response = await ticketsApi.list({
-        page,
-        limit: pageSize,
-        ...(filters.search && { search: filters.search, search_all_sections: true }),
-        ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
-        ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
-        ...(isChoresBugsSection && typeOfRequestFilter && { type_filter: typeOfRequestFilter }),
-        ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
-        ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
-        ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
-        ...(sectionFromUrl === 'rejected-tickets' && { section: 'rejected-tickets' }),
-        ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
-        ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
-        ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
-        ...(filters.company_ids?.length ? { company_ids: filters.company_ids } : {}),
-        ...(!isChoresBugsSection && filters.priority && { priority: filters.priority }),
-        ...(filters.date_from && { date_from: filters.date_from }),
-        ...(filters.date_to && { date_to: filters.date_to }),
-        sort_by: filters.sort_by,
-        sort_order: filters.sort_order,
-      })
-      const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
-      let list = Array.isArray(raw) ? raw : []
-      if (isChoresBugs) {
-        list = keepOnlyChoresAndBugs(list)
-      }
-      setTickets(list)
-      setTotal(isChoresBugs ? list.length : ((response as { total?: number })?.total ?? 0))
-    } catch (error) {
-      console.error('Failed to fetch tickets:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const getTicketsListParams = useCallback(
+    (pageNum: number, limitSize: number) => ({
+      page: pageNum,
+      limit: limitSize,
+      ...(filters.search && { search: filters.search, search_all_sections: true }),
+      ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
+      ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
+      ...(isChoresBugsSection && typeOfRequestFilter && { type_filter: typeOfRequestFilter }),
+      ...(!isChoresBugsSection &&
+        sectionFromUrl !== 'completed-chores-bugs' &&
+        sectionFromUrl !== 'rejected-tickets' &&
+        sectionFromUrl !== 'solutions' &&
+        sectionFromUrl !== 'completed-feature' &&
+        filters.status && { status: filters.status }),
+      ...(sectionFromUrl !== 'completed-chores-bugs' &&
+        sectionFromUrl !== 'rejected-tickets' &&
+        sectionFromUrl !== 'solutions' &&
+        sectionFromUrl !== 'completed-feature' &&
+        filters.types_in && { types_in: filters.types_in }),
+      ...(sectionFromUrl !== 'completed-chores-bugs' &&
+        sectionFromUrl !== 'rejected-tickets' &&
+        sectionFromUrl !== 'solutions' &&
+        sectionFromUrl !== 'completed-feature' &&
+        !filters.types_in &&
+        filters.type && { type: filters.type }),
+      ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
+      ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
+      ...(sectionFromUrl === 'rejected-tickets' && { section: 'rejected-tickets' }),
+      ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
+      ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
+      ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
+      ...(filters.company_ids?.length ? { company_ids: filters.company_ids } : {}),
+      ...(!isChoresBugsSection && filters.priority && { priority: filters.priority }),
+      ...(filters.date_from && { date_from: filters.date_from }),
+      ...(filters.date_to && { date_to: filters.date_to }),
+      sort_by: filters.sort_by,
+      sort_order: filters.sort_order,
+    }),
+    [
+      filters,
+      isChoresBugsSection,
+      sectionFromUrl,
+      isApprovalSection,
+      approvalFilter,
+      status2Filter,
+      typeOfRequestFilter,
+    ],
+  )
 
   /** Fetches all tickets across pages with current filters/section/view. Used for stage filter and export. */
-  const fetchAllTicketsWithFilters = async (): Promise<Ticket[]> => {
+  const fetchAllTicketsWithFilters = useCallback(async (): Promise<Ticket[]> => {
     const allTickets: Ticket[] = []
     let currentPage = 1
     const limit = 100
     let hasMore = true
     while (hasMore) {
-      const response = await ticketsApi.list({
-        page: currentPage,
-        limit,
-        ...(filters.search && { search: filters.search, search_all_sections: true }),
-        ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
-        ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
-        ...(isChoresBugsSection && typeOfRequestFilter && { type_filter: typeOfRequestFilter }),
-        ...(!isChoresBugsSection && sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.status && { status: filters.status }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && filters.types_in && { types_in: filters.types_in }),
-        ...(sectionFromUrl !== 'completed-chores-bugs' && sectionFromUrl !== 'rejected-tickets' && sectionFromUrl !== 'solutions' && sectionFromUrl !== 'completed-feature' && !filters.types_in && filters.type && { type: filters.type }),
-        ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
-        ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
-        ...(sectionFromUrl === 'rejected-tickets' && { section: 'rejected-tickets' }),
-        ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
-        ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
-        ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
-        ...(filters.company_ids?.length ? { company_ids: filters.company_ids } : {}),
-        ...(!isChoresBugsSection && filters.priority && { priority: filters.priority }),
-        ...(filters.date_from && { date_from: filters.date_from }),
-        ...(filters.date_to && { date_to: filters.date_to }),
-        sort_by: filters.sort_by,
-        sort_order: filters.sort_order,
-      })
+      const response = await ticketsApi.list(getTicketsListParams(currentPage, limit))
       const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
       const rawTickets: Ticket[] = Array.isArray(raw) ? raw : []
       let pageTickets: Ticket[] = rawTickets
@@ -308,12 +286,14 @@ export const TicketList = () => {
       currentPage++
     }
     return allTickets
-  }
+  }, [getTicketsListParams, isChoresBugs])
 
-  const fetchAllTicketsForStageFilter = async () => {
+  const fetchAllTicketsForStageFilter = useCallback(async () => {
+    const gen = ++listFetchGeneration.current
     setLoading(true)
     try {
       const allTickets = await fetchAllTicketsWithFilters()
+      if (gen !== listFetchGeneration.current) return
       let list = stageFilter
         ? allTickets.filter((t) =>
             showStageFilter
@@ -331,51 +311,181 @@ export const TicketList = () => {
         })
       }
       setAllTicketsForStageFilter(list)
-      setTickets(list.slice((page - 1) * pageSize, page * pageSize))
+      const initial = list.slice(0, TICKETS_CHUNK)
+      setTickets(initial)
       setTotal(list.length)
+      serverListPageRef.current = 0
     } catch (error) {
       console.error('Failed to fetch all tickets for stage filter:', error)
     } finally {
-      setLoading(false)
+      if (gen === listFetchGeneration.current) setLoading(false)
     }
-  }
+  }, [
+    fetchAllTicketsWithFilters,
+    stageFilter,
+    showStageFilter,
+    showStageFilterForFeature,
+    typeFromUrl,
+    sectionFromUrl,
+  ])
+
+  const fetchTicketsInitial = useCallback(async () => {
+    const gen = ++listFetchGeneration.current
+    listExhaustedRef.current = false
+    setLoading(true)
+    serverListPageRef.current = 0
+    setTickets([])
+    try {
+      const response = await ticketsApi.list(getTicketsListParams(1, TICKETS_CHUNK))
+      if (gen !== listFetchGeneration.current) return
+      const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
+      let list = Array.isArray(raw) ? raw : []
+      if (isChoresBugs) {
+        list = keepOnlyChoresAndBugs(list)
+      }
+      const apiTotal = (response as { total?: number })?.total ?? 0
+      setTickets(list)
+      setTotal(apiTotal)
+      serverListPageRef.current = 1
+    } catch (error) {
+      console.error('Failed to fetch tickets:', error)
+    } finally {
+      if (gen === listFetchGeneration.current) setLoading(false)
+    }
+  }, [getTicketsListParams, isChoresBugs])
+
+  const fetchTicketsAppend = useCallback(async () => {
+    const gen = listFetchGeneration.current
+    if (listExhaustedRef.current) return
+    if (loadingMoreRef.current || serverListPageRef.current < 1) return
+    if (totalRef.current > 0 && ticketsRef.current.length >= totalRef.current) return
+
+    loadingMoreRef.current = true
+    setLoadingMore(true)
+    try {
+      const nextPage = serverListPageRef.current + 1
+      const response = await ticketsApi.list(getTicketsListParams(nextPage, TICKETS_CHUNK))
+      if (gen !== listFetchGeneration.current) return
+      const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
+      let newRows = Array.isArray(raw) ? raw : []
+      if (isChoresBugs) {
+        newRows = keepOnlyChoresAndBugs(newRows)
+      }
+      if (newRows.length === 0) {
+        listExhaustedRef.current = true
+        return
+      }
+      setTickets((prev) => [...prev, ...newRows])
+      serverListPageRef.current = nextPage
+    } catch (error) {
+      console.error('Failed to load more tickets:', error)
+    } finally {
+      loadingMoreRef.current = false
+      setLoadingMore(false)
+    }
+  }, [getTicketsListParams, isChoresBugs])
+
+  const allTicketsForStageFilterRef = useRef<Ticket[]>([])
+  useEffect(() => {
+    allTicketsForStageFilterRef.current = allTicketsForStageFilter
+  }, [allTicketsForStageFilter])
+
+  useEffect(() => {
+    ticketsRef.current = tickets
+  }, [tickets])
+  useEffect(() => {
+    totalRef.current = total
+  }, [total])
+
+  const stageClientInfinite =
+    (showStageFilter && !!stageFilter) || (showStageFilterForFeature && !!stageFilter)
+
+  const tryLoadMoreTickets = useCallback(() => {
+    if (loading) return
+    if (loadingMoreRef.current) return
+    if (stageClientInfinite) {
+      const full = allTicketsForStageFilterRef.current
+      if (ticketsRef.current.length >= full.length) return
+      const next = Math.min(full.length, ticketsRef.current.length + TICKETS_CHUNK)
+      setTickets(full.slice(0, next))
+      return
+    }
+    void fetchTicketsAppend()
+  }, [loading, stageClientInfinite, fetchTicketsAppend])
+
+  useEffect(() => {
+    if ((showStageFilter && stageFilter) || (showStageFilterForFeature && stageFilter)) {
+      void fetchAllTicketsForStageFilter()
+    } else {
+      if (allTicketsForStageFilter.length > 0) {
+        setAllTicketsForStageFilter([])
+      }
+      void fetchTicketsInitial()
+    }
+  }, [
+    fetchAllTicketsForStageFilter,
+    fetchTicketsInitial,
+    filters,
+    isApprovalSection,
+    approvalFilter,
+    stageFilter,
+    status2Filter,
+    typeOfRequestFilter,
+    showStageFilter,
+    showStageFilterForFeature,
+    location.pathname,
+  ])
+
+  useEffect(() => {
+    if (loading) return
+    const root = scrollRootRef.current?.querySelector('.ant-table-body') as HTMLElement | null
+    const target = loadMoreSentinelRef.current
+    if (!target) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return
+        tryLoadMoreTickets()
+      },
+      { root: root ?? null, rootMargin: '160px', threshold: 0 },
+    )
+    io.observe(target)
+    return () => io.disconnect()
+  }, [loading, tryLoadMoreTickets, tickets.length, total, allTicketsForStageFilter.length, stageClientInfinite])
 
   const fetchAllForExport = async (): Promise<Ticket[]> => fetchAllTicketsWithFilters()
 
-  const fetchTicketsRef = useRef(fetchTickets)
-  fetchTicketsRef.current = fetchTickets
-  /** Refetch list so Stage filter shows current data (e.g. after a ticket's stage changes or drawer closes). */
-  const refetchList = () => {
+  const refetchList = useCallback(() => {
     if ((showStageFilter && stageFilter) || (showStageFilterForFeature && stageFilter)) {
-      fetchAllTicketsForStageFilter()
+      void fetchAllTicketsForStageFilter()
     } else {
-      fetchTickets()
+      void fetchTicketsInitial()
     }
-  }
+  }, [showStageFilter, showStageFilterForFeature, stageFilter, fetchAllTicketsForStageFilter, fetchTicketsInitial])
+
+  const refetchListRef = useRef(refetchList)
+  refetchListRef.current = refetchList
   useEffect(() => {
-    const onTicketCreated = () => fetchTicketsRef.current()
+    const onTicketCreated = () => {
+      void refetchListRef.current()
+    }
     window.addEventListener('support-ticket-created', onTicketCreated)
     return () => window.removeEventListener('support-ticket-created', onTicketCreated)
   }, [])
 
   const handleSearch = () => {
     setFilters((f) => ({ ...f, search: searchInput }))
-    setPage(1)
   }
 
   const handleReferenceFilterApply = () => {
     setFilters((f) => ({ ...f, reference_filter: referenceFilterInput }))
-    setPage(1)
   }
 
   const handleDateRange = (_: unknown, dateStrings: [string, string]) => {
     const from = dateStrings[0] ? `${dateStrings[0]}T00:00:00.000Z` : ''
     const to = dateStrings[1] ? `${dateStrings[1]}T23:59:59.999Z` : ''
     setFilters((f) => ({ ...f, date_from: from, date_to: to }))
-    setPage(1)
   }
 
-  const isChoresBugs = sectionFromUrl === 'chores-bugs' || sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'rejected-tickets' || sectionFromUrl === 'solutions'
   const showChoresBugsDrawer = isChoresBugs || drawerTicketType === 'chore' || drawerTicketType === 'bug'
   const isSolutionsSection = sectionFromUrl === 'solutions'
 
@@ -981,7 +1091,6 @@ export const TicketList = () => {
               value={approvalFilter}
               onChange={(v) => {
                 setApprovalFilter(v ?? 'pending')
-                setPage(1)
               }}
               getPopupContainer={() => document.body}
               options={[
@@ -998,7 +1107,6 @@ export const TicketList = () => {
             value={filters.company_ids?.length ? filters.company_ids : undefined}
             onChange={(v) => {
               setFilters((f) => ({ ...f, company_ids: Array.isArray(v) ? v : [] }))
-              setPage(1)
             }}
             allowClear
             showSearch
@@ -1014,7 +1122,6 @@ export const TicketList = () => {
               value={status2Filter || undefined}
               onChange={(v) => {
                 setStatus2Filter(v ?? '')
-                setPage(1)
               }}
               allowClear
               getPopupContainer={() => document.body}
@@ -1050,7 +1157,6 @@ export const TicketList = () => {
               value={typeOfRequestFilter || undefined}
               onChange={(v) => {
                 setTypeOfRequestFilter(v ?? '')
-                setPage(1)
               }}
               allowClear
               getPopupContainer={() => document.body}
@@ -1079,7 +1185,6 @@ export const TicketList = () => {
               value={stageFilter || undefined}
               onChange={(v) => {
                 setStageFilter(v ?? '')
-                setPage(1)
               }}
               allowClear
               aria-label="Filter by stage"
@@ -1098,7 +1203,6 @@ export const TicketList = () => {
               value={stageFilter || undefined}
               onChange={(v) => {
                 setStageFilter(v ?? '')
-                setPage(1)
               }}
               allowClear
               aria-label="Filter by stage"
@@ -1117,51 +1221,68 @@ export const TicketList = () => {
         </Space>
 
         <TableWithSkeletonLoading loading={loading} columns={12} rows={14}>
-          <Table
-            className={isCompletedChoresBugs ? 'completed-chores-bugs-wrap' : undefined}
-            columns={columns}
-            dataSource={ticketsForDisplay}
-            rowKey="id"
-            loading={false}
-            locale={{ emptyText: 'No tickets yet.' }}
-            scroll={{ x: 2400, y: 'calc(100vh - 320px)' }}
-            pagination={{
-              current: page,
-              pageSize,
-              total:
-                showStageFilter && stageFilter
-                  ? allTicketsForStageFilter.filter((t) => getChoresBugsCurrentStage(t).stageLabel === stageFilter).length
-                  : showStageFilterForFeature && stageFilter
-                    ? allTicketsForStageFilter.filter((t) => getFeatureCurrentStage(t).stageLabel === stageFilter).length
-                    : total,
-              showSizeChanger: true,
-              showTotal: (t) => `Total ${t} tickets`,
-              pageSizeOptions: ['10', '20', '50', '100'],
-              onChange: (newPage, newPageSize) => {
-                setPage(newPage)
-                setPageSize(newPageSize || 20)
-              },
-            }}
-            onChange={(_, __, sorter) => {
-              const s = Array.isArray(sorter) ? sorter[0] : sorter
-              if (s && 'field' in s && s.field) {
-                setFilters((f) => ({
-                  ...f,
-                  sort_by: String(s.field),
-                  sort_order: s.order === 'ascend' ? 'asc' : 'desc',
-                }))
-                setPage(1)
-              }
-            }}
-            onRow={(record) => ({
-              onClick: () => {
-                setDrawerTicketId(record.id)
-                setDrawerTicketType((record as { type?: string }).type ?? null)
-              },
-              style: { cursor: 'pointer' },
-            })}
-            size="small"
-          />
+          <div ref={scrollRootRef}>
+            <Table
+              className={isCompletedChoresBugs ? 'completed-chores-bugs-wrap' : undefined}
+              columns={columns}
+              dataSource={ticketsForDisplay}
+              rowKey="id"
+              loading={false}
+              locale={{ emptyText: 'No tickets yet.' }}
+              scroll={{ x: 2400, y: 'calc(100vh - 320px)' }}
+              pagination={false}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={columns.length}>
+                      <div
+                        ref={loadMoreSentinelRef}
+                        style={{ height: 8, minHeight: 8 }}
+                        aria-hidden
+                      />
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: 8,
+                          paddingBottom: 4,
+                        }}
+                      >
+                        <Text type="secondary">
+                          Showing {ticketsForDisplay.length} of{' '}
+                          {stageClientInfinite ? allTicketsForStageFilter.length : total} tickets
+                          {ticketsForDisplay.length <
+                          (stageClientInfinite ? allTicketsForStageFilter.length : total)
+                            ? ' · scroll to load more'
+                            : ''}
+                        </Text>
+                        {loadingMore ? <Spin size="small" /> : null}
+                      </div>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+              onChange={(_, __, sorter) => {
+                const s = Array.isArray(sorter) ? sorter[0] : sorter
+                if (s && 'field' in s && s.field) {
+                  setFilters((f) => ({
+                    ...f,
+                    sort_by: String(s.field),
+                    sort_order: s.order === 'ascend' ? 'asc' : 'desc',
+                  }))
+                }
+              }}
+              onRow={(record) => ({
+                onClick: () => {
+                  setDrawerTicketId(record.id)
+                  setDrawerTicketType((record as { type?: string }).type ?? null)
+                },
+                style: { cursor: 'pointer' },
+              })}
+              size="small"
+            />
+          </div>
         </TableWithSkeletonLoading>
       </Card>
 

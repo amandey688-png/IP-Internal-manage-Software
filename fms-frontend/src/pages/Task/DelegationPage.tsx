@@ -22,6 +22,7 @@ import { delegationApi, type DelegationTask } from '../../api/delegation'
 import { uploadAttachment } from '../../api/upload'
 import { PrintExport } from '../../components/common/PrintExport'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { DEFAULT_INFINITE_CHUNK, useInfiniteScrollChunk } from '../../hooks/useInfiniteScrollChunk'
 
 const { Title, Text } = Typography
 const { Dragger } = Upload
@@ -358,6 +359,15 @@ export const DelegationPage = () => {
     },
   ]
 
+  const {
+    visibleItems: visibleDisplayTasks,
+    containerRef: delegationTableContainerRef,
+    sentinelRef: delegationTableSentinelRef,
+    total: totalDisplayTasks,
+    visibleCount: visibleDisplayTaskCount,
+    hasMore: displayTasksHasMore,
+  } = useInfiniteScrollChunk({ items: displayTasks, chunkSize: DEFAULT_INFINITE_CHUNK, loading })
+
   return (
     <div style={{ padding: 24 }}>
       <Card>
@@ -424,14 +434,28 @@ export const DelegationPage = () => {
           exportFilename={delegationExportFilename}
         />
         <TableWithSkeletonLoading loading={loading} columns={7} rows={12}>
-          <Table
-            dataSource={displayTasks}
-            columns={columns}
-            rowKey="id"
-            loading={false}
-            pagination={{ pageSize: 20 }}
-            style={{ marginTop: 16 }}
-          />
+          <div ref={delegationTableContainerRef}>
+            <Table
+              dataSource={visibleDisplayTasks}
+              columns={columns}
+              rowKey="id"
+              loading={false}
+              pagination={false}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={columns.length}>
+                      <div ref={delegationTableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
+                      <Text type="secondary">
+                        Showing {visibleDisplayTaskCount} of {totalDisplayTasks} rows{displayTasksHasMore ? ' · scroll to load more' : ''}
+                      </Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+              style={{ marginTop: 16 }}
+            />
+          </div>
         </TableWithSkeletonLoading>
       </Card>
 

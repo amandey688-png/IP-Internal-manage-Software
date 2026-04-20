@@ -25,6 +25,7 @@ import {
   type ChecklistOccurrence,
 } from '../../api/checklist'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { DEFAULT_INFINITE_CHUNK, useInfiniteScrollChunk } from '../../hooks/useInfiniteScrollChunk'
 
 const { Title, Text } = Typography
 
@@ -212,6 +213,15 @@ export const ChecklistPage = () => {
     },
   ]
 
+  const {
+    visibleItems: visibleOccurrences,
+    containerRef: checklistTableContainerRef,
+    sentinelRef: checklistTableSentinelRef,
+    total: totalOccurrences,
+    visibleCount: visibleOccurrenceCount,
+    hasMore: occurrencesHasMore,
+  } = useInfiniteScrollChunk({ items: occurrences, chunkSize: DEFAULT_INFINITE_CHUNK, loading })
+
   return (
     <div style={{ padding: 24 }}>
       <Title level={4}>
@@ -289,14 +299,28 @@ export const ChecklistPage = () => {
         }
       >
         <TableWithSkeletonLoading loading={loading} columns={7} rows={12}>
-          <Table
-            dataSource={occurrences}
-            columns={columns}
-            rowKey={(r) => `${r.task_id}-${r.occurrence_date}`}
-            loading={false}
-            pagination={{ pageSize: 20 }}
-            size="small"
-          />
+          <div ref={checklistTableContainerRef}>
+            <Table
+              dataSource={visibleOccurrences}
+              columns={columns}
+              rowKey={(r) => `${r.task_id}-${r.occurrence_date}`}
+              loading={false}
+              pagination={false}
+              summary={() => (
+                <Table.Summary>
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={columns.length}>
+                      <div ref={checklistTableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
+                      <Text type="secondary">
+                        Showing {visibleOccurrenceCount} of {totalOccurrences} rows{occurrencesHasMore ? ' · scroll to load more' : ''}
+                      </Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                </Table.Summary>
+              )}
+              size="small"
+            />
+          </div>
         </TableWithSkeletonLoading>
       </Card>
 

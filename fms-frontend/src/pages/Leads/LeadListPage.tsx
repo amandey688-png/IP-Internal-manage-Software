@@ -7,6 +7,7 @@ import dayjs from 'dayjs'
 import { ROUTES } from '../../utils/constants'
 import { leadsApi, type Lead } from '../../api/leads'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { DEFAULT_INFINITE_CHUNK, useInfiniteScrollChunk } from '../../hooks/useInfiniteScrollChunk'
 
 const { Title, Text } = Typography
 const { RangePicker } = DatePicker
@@ -84,6 +85,15 @@ export const LeadListPage = () => {
     }
     return result
   }, [leads, filterCompany, filterStage, filterReferenceNo, filterDateRange])
+
+  const {
+    visibleItems: visibleLeads,
+    containerRef: leadTableContainerRef,
+    sentinelRef: leadTableSentinelRef,
+    total: totalLeads,
+    visibleCount: visibleLeadCount,
+    hasMore: leadHasMore,
+  } = useInfiniteScrollChunk({ items: filteredLeads, chunkSize: DEFAULT_INFINITE_CHUNK, loading })
 
   const handleAddLead = () => {
     form.validateFields().then((values) => {
@@ -171,9 +181,10 @@ export const LeadListPage = () => {
         </Space>
 
         <TableWithSkeletonLoading loading={loading} columns={5} rows={12}>
-          <Table
+          <div ref={leadTableContainerRef}>
+            <Table
             loading={false}
-            dataSource={filteredLeads}
+            dataSource={visibleLeads}
             rowKey="id"
             onRow={(record) => ({
               onClick: () => navigate(ROUTES.LEAD_DETAIL.replace(':id', record.reference_no)),
@@ -220,9 +231,22 @@ export const LeadListPage = () => {
                 render: (v: string) => wrapRender(v),
               },
             ]}
-            pagination={{ pageSize: 20 }}
+            pagination={false}
+            summary={() => (
+              <Table.Summary>
+                <Table.Summary.Row>
+                  <Table.Summary.Cell index={0} colSpan={5}>
+                    <div ref={leadTableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
+                    <Text type="secondary">
+                      Showing {visibleLeadCount} of {totalLeads} leads{leadHasMore ? ' · scroll to load more' : ''}
+                    </Text>
+                  </Table.Summary.Cell>
+                </Table.Summary.Row>
+              </Table.Summary>
+            )}
             size="small"
-          />
+            />
+          </div>
         </TableWithSkeletonLoading>
       </Card>
 
