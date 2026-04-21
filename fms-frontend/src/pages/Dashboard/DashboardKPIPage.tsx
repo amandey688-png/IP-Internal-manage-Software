@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import {
   Typography,
   Card,
@@ -48,6 +48,7 @@ import {
   type AdrijaSocialKpiDailyRow,
 } from '../../api/dashboardKpi'
 import { useAuth } from '../../hooks/useAuth'
+import { ROUTES } from '../../utils/constants'
 import { DashboardBlockSkeleton } from '../../components/common/skeletons'
 import { getDefaultPreviousWeekFilter, maxWeekOfMonth, weekOfMonth } from './kpiWeekUtils'
 
@@ -189,6 +190,8 @@ const getPerformanceLevel = (value?: number) => {
 
 export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi' }: DashboardKPIPageProps) => {
   const { user } = useAuth()
+  const navigate = useNavigate()
+  const location = useLocation()
   const [searchParams, setSearchParams] = useSearchParams()
   const previousWeekDefaults = getDefaultPreviousWeekFilter()
   const [selectedPerson, setSelectedPerson] = useState<DashboardKpiPerson | null>(forceOpen ? defaultPerson : null)
@@ -463,6 +466,16 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
     }
   }, [selectedPerson])
 
+  const handleBackToDashboard = useCallback(() => {
+    const restoreY = (location.state as { restoreScrollY?: number } | null)?.restoreScrollY
+    navigate(ROUTES.DASHBOARD, {
+      state:
+        typeof restoreY === 'number' && Number.isFinite(restoreY)
+          ? { restoreScrollY: restoreY }
+          : undefined,
+    })
+  }, [location.state, navigate])
+
   // List view: dashboard chooser cards
   if (!forceOpen && selectedPerson === null) {
     return (
@@ -538,12 +551,9 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
             <Button
               type="text"
               icon={<ArrowLeftOutlined />}
-              onClick={() => {
-                setSelectedPerson(null)
-                setSearchParams({}, { replace: true })
-              }}
+              onClick={handleBackToDashboard}
             >
-              Back to dashboards
+              Back to Dashboard
             </Button>
           </Space>
         )}

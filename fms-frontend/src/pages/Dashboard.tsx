@@ -8,7 +8,7 @@ import {
 } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState, lazy, Suspense, type ReactNode } from 'react'
 import dayjs from 'dayjs'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { dashboardApi, type DashboardDetailTicket, type TrendPoint } from '../api/dashboard'
 
 const DashboardTrendCharts = lazy(() =>
@@ -131,6 +131,7 @@ const metricCardColors = [
 
 export const Dashboard = () => {
   const navigate = useNavigate()
+  const location = useLocation()
   const { user } = useAuth()
   const emailLower = (user?.email || '').trim().toLowerCase()
   /** Full custom KPIs: payments + delegation */
@@ -191,6 +192,18 @@ export const Dashboard = () => {
 
   /** Invalidates in-flight dashboard fetch when effect re-runs (e.g. React StrictMode) so stale responses are ignored. */
   const dashboardFetchGen = useRef(0)
+
+  useEffect(() => {
+    const restoreY = (location.state as { restoreScrollY?: number } | null)?.restoreScrollY
+    if (typeof restoreY !== 'number' || !Number.isFinite(restoreY)) return
+    // Restore last viewport after returning from Dashboard KPI person view.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        window.scrollTo({ top: Math.max(0, restoreY), behavior: 'auto' })
+        navigate(`${location.pathname}${location.search}`, { replace: true, state: null })
+      })
+    })
+  }, [location.pathname, location.search, location.state, navigate])
 
   useEffect(() => {
     if (!isCustomDashboardFullUser) {
@@ -999,7 +1012,11 @@ export const Dashboard = () => {
                       hoverable
                       style={{ cursor: 'pointer', height: '100%' }}
                       styles={{ body: { padding: '16px 18px 20px' } }}
-                      onClick={() => navigate(`${ROUTES.DASHBOARD_KPI}?person=${encodeURIComponent(person)}`)}
+                      onClick={() =>
+                        navigate(`${ROUTES.DASHBOARD_KPI}?person=${encodeURIComponent(person)}`, {
+                          state: { fromDashboard: true, restoreScrollY: window.scrollY },
+                        })
+                      }
                     >
                       <Title level={5} style={{ marginTop: 0, marginBottom: 6 }}>
                         {KPI_DASHBOARD_LINK_LABELS[person]}
