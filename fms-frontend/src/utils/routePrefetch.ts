@@ -11,7 +11,8 @@ import { dbClientOnbApi } from '../api/dbClientOnb'
 import { dashboardApi } from '../api/dashboard'
 import { supportDashboardApi } from '../api/supportDashboard'
 import { apiClient } from '../api/axios'
-import { DASHBOARD_KPI_NAMES, dashboardKpiApi } from '../api/dashboardKpi'
+import { DASHBOARD_KPI_NAMES, MONTHS, dashboardKpiApi } from '../api/dashboardKpi'
+import { dayjsFromIstNow, weekOfMonth } from '../pages/Dashboard/kpiWeekUtils'
 
 const inFlight = new Set<string>()
 const prefetched = new Set<string>()
@@ -48,16 +49,16 @@ export function prefetchRouteData(routeKey: string): void {
 
   if (path === ROUTES.DASHBOARD_KPI || path === ROUTES.SUCCESS_DASHBOARD) {
     fire('prefetch:dashboard-kpi', async () => {
-      const now = new Date()
-      const year = String(now.getFullYear())
-      const month = now.toLocaleString('en-US', { month: 'short' })
-      const week = `week ${Math.min(5, Math.floor((now.getDate() - 1) / 7) + 1)}`
+      const now = dayjsFromIstNow()
+      const year = String(now.year())
+      const month = MONTHS[now.month()] ?? 'Jan'
+      const week = `week ${weekOfMonth(now)}`
       await Promise.all([
         ...DASHBOARD_KPI_NAMES.map((name) =>
           dashboardKpiApi.getData({ name, month, year, week }),
         ),
-        dashboardKpiApi.getKpiDailyLog(now.getFullYear(), now.getMonth() + 1),
-        dashboardKpiApi.getAdrijaSocialKpiDaily(now.getFullYear(), now.getMonth() + 1),
+        dashboardKpiApi.getKpiDailyLog(now.year(), now.month() + 1),
+        dashboardKpiApi.getAdrijaSocialKpiDaily(now.year(), now.month() + 1),
       ])
     })
     return

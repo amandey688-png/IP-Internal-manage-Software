@@ -33,7 +33,7 @@ import {
   type DashboardKpiPerson,
   type DashboardKpiResponse,
 } from '../api/dashboardKpi'
-import { weekOfMonth } from './Dashboard/kpiWeekUtils'
+import { getDefaultPreviousWeekFilter } from './Dashboard/kpiWeekUtils'
 import type { Ticket } from '../api/tickets'
 import type { DashboardMetrics } from '../api/dashboard'
 import { sessionApiCacheGet, ticketsListLogicalKey } from '../utils/sessionApiCache'
@@ -72,19 +72,26 @@ function formatDateTime(v?: string | null): string {
   return d.isValid() ? d.format('DD-MM-YY hh:mm:ss A') : '—'
 }
 
-function formatKpiWeeklySnapshot(data: DashboardKpiResponse | undefined): string {
-  if (!data) return ''
+/** Metric chips for Team KPI cards — each segment stays on one line to avoid splits like "Support FMS" / "0%". */
+function kpiWeeklySnapshotParts(
+  data: DashboardKpiResponse | undefined,
+  opts?: { hideSupportFms?: boolean },
+): string[] {
+  if (!data) return []
   const parts: string[] = []
   const c = data.checklist?.weeklyPercentage
   if (c != null && Number.isFinite(Number(c))) parts.push(`Checklist ${c}%`)
   const del = data.delegation?.weeklyPercentage
   if (del != null && Number.isFinite(Number(del))) parts.push(`Delegation ${del}%`)
-  const sup = data.supportFMS?.weeklyPercentage
-  if (sup != null && Number.isFinite(Number(sup))) parts.push(`Support FMS ${sup}%`)
+  if (!opts?.hideSupportFms) {
+    const sup = data.supportFMS?.weeklyPercentage
+    const supportPct = Number.isFinite(Number(sup)) ? Number(sup) : 0
+    parts.push(`Support FMS ${supportPct}%`)
+  }
   if (data.successKpi != null) parts.push(`Success KPI ${data.successKpi.overallPercentage ?? 0}%`)
   const ad = data.adrijaSocialKpi?.weeklyPercent
   if (ad != null && Number.isFinite(Number(ad))) parts.push(`Adrija social (week) ${ad}%`)
-  return parts.join(' · ') || 'No weekly snapshot'
+  return parts
 }
 
 function formatINR(n: number): string {
@@ -174,8 +181,7 @@ export const Dashboard = () => {
   const [trendPoints, setTrendPoints] = useState<TrendPoint[]>([])
   const [kpiSnapshotByPerson, setKpiSnapshotByPerson] = useState<Partial<Record<DashboardKpiPerson, DashboardKpiResponse>>>({})
   const [kpiSnapshotLoading, setKpiSnapshotLoading] = useState(false)
-  const [kpiSnapshotFilterLabel, setKpiSnapshotFilterLabel] = useState('')
-  const [successKpiTillDate, setSuccessKpiTillDate] = useState<DashboardKpiResponse['successKpi'] | null>(null)
+  const [successKpiPreviousWeek, setSuccessKpiPreviousWeek] = useState<DashboardKpiResponse['successKpi'] | null>(null)
   const [successPerformanceLoading, setSuccessPerformanceLoading] = useState(false)
   const [successDetailModal, setSuccessDetailModal] = useState<{
     key: 'poc' | 'training' | 'followup' | 'increase'
@@ -189,14 +195,12 @@ export const Dashboard = () => {
   useEffect(() => {
     if (!isCustomDashboardFullUser) {
       setKpiSnapshotByPerson({})
-      setKpiSnapshotFilterLabel('')
       return
     }
-    const now = dayjs()
-    const month = MONTHS[now.month()] ?? MONTHS[dayjs().month()]
-    const year = String(now.year())
-    const week = `week ${weekOfMonth(now)}`
-    setKpiSnapshotFilterLabel(`${month} ${year} · ${week} (running month, till date)`)
+    const prev = getDefaultPreviousWeekFilter()
+    const month = MONTHS[prev.monthIndex] ?? MONTHS[0]
+    const year = prev.year
+    const week = `week ${prev.week}`
     setKpiSnapshotLoading(true)
     void Promise.all(
       [...DASHBOARD_KPI_NAMES].map((name) =>
@@ -216,14 +220,18 @@ export const Dashboard = () => {
 
   useEffect(() => {
     if (!isCustomDashboardFullUser) {
-      setSuccessKpiTillDate(null)
+      setSuccessKpiPreviousWeek(null)
       return
     }
     setSuccessPerformanceLoading(true)
-    void dashboardApi
-      .getSuccessKpiTillDate()
-      .then((res) => setSuccessKpiTillDate(res?.successKpi ?? null))
-      .catch(() => setSuccessKpiTillDate(null))
+    const prev = getDefaultPreviousWeekFilter()
+    const month = MONTHS[prev.monthIndex] ?? MONTHS[0]
+    const { year, week: weekNum } = prev
+    const week = `week ${weekNum}`
+    void dashboardKpiApi
+      .getData({ name: 'Rimpa', month, year, week })
+      .then((res) => setSuccessKpiPreviousWeek(res?.successKpi ?? null))
+      .catch(() => setSuccessKpiPreviousWeek(null))
       .finally(() => setSuccessPerformanceLoading(false))
   }, [isCustomDashboardFullUser])
 
@@ -672,10 +680,10 @@ export const Dashboard = () => {
     </>
   ) : null
 
-  const successPoc = successKpiTillDate?.pocCollected
-  const successTraining = successKpiTillDate?.weeklyTrainingTarget
-  const successFollowup = successKpiTillDate?.trainingFollowUp
-  const successIncrease = successKpiTillDate?.successIncrease
+  const successPoc = successKpiPreviousWeek?.pocCollected
+  const successTraining = successKpiPreviousWeek?.weeklyTrainingTarget
+  const successFollowup = successKpiPreviousWeek?.trainingFollowUp
+  const successIncrease = successKpiPreviousWeek?.successIncrease
   const successCards = [
     { key: 'poc', title: 'POC Collected', current: Number(successPoc?.currentValue ?? 0) },
     { key: 'training', title: 'Training Target', current: Number(successTraining?.currentValue ?? 0) },
@@ -947,7 +955,7 @@ export const Dashboard = () => {
                     <Title level={4} style={{ margin: '8px 0 0 0' }}>
                       {c.current}
                     </Title>
-                    <Text type="secondary">Start to till date (Performance Monitoring)</Text>
+                    <Text type="secondary">Previous week (Performance Monitoring)</Text>
                   </Card>
                 </Col>
               ))}
@@ -976,33 +984,63 @@ export const Dashboard = () => {
               {renderMetricStatCard(delegationCard, 0, 'delegation', false)}
             </Col>
           </Row>
-          <Title level={5} style={{ marginBottom: 8, color: '#1e293b', fontWeight: 600 }}>
+          <Title level={5} style={{ marginBottom: 12, color: '#1e293b', fontWeight: 600 }}>
             Team KPI dashboards
           </Title>
-          <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-            {kpiSnapshotFilterLabel || 'Loading week filter…'}
-          </Text>
           <Spin spinning={kpiSnapshotLoading}>
             <Row gutter={[16, 16]} style={{ marginBottom: 28 }}>
-              {DASHBOARD_KPI_NAMES.map((person) => (
-                <Col xs={24} sm={12} md={6} key={person}>
-                  <Card
-                    hoverable
-                    style={{ cursor: 'pointer', minHeight: 148 }}
-                    onClick={() => navigate(`${ROUTES.DASHBOARD_KPI}?person=${encodeURIComponent(person)}`)}
-                  >
-                    <Title level={5} style={{ marginTop: 0 }}>
-                      {KPI_DASHBOARD_LINK_LABELS[person]}
-                    </Title>
-                    <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-                      Weekly snapshot
-                    </Text>
-                    <Text style={{ fontSize: 13, lineHeight: 1.55 }}>
-                      {formatKpiWeeklySnapshot(kpiSnapshotByPerson[person])}
-                    </Text>
-                  </Card>
-                </Col>
-              ))}
+              {DASHBOARD_KPI_NAMES.map((person) => {
+                const snapshotParts = kpiWeeklySnapshotParts(kpiSnapshotByPerson[person], {
+                  hideSupportFms: person === 'Rimpa' || person === 'Adrija',
+                })
+                return (
+                  <Col xs={24} sm={12} md={6} key={person}>
+                    <Card
+                      hoverable
+                      style={{ cursor: 'pointer', height: '100%' }}
+                      styles={{ body: { padding: '16px 18px 20px' } }}
+                      onClick={() => navigate(`${ROUTES.DASHBOARD_KPI}?person=${encodeURIComponent(person)}`)}
+                    >
+                      <Title level={5} style={{ marginTop: 0, marginBottom: 6 }}>
+                        {KPI_DASHBOARD_LINK_LABELS[person]}
+                      </Title>
+                      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 10 }}>
+                        Weekly snapshot
+                      </Text>
+                      <div
+                        style={{
+                          display: 'flex',
+                          flexWrap: 'wrap',
+                          columnGap: 0,
+                          rowGap: 8,
+                          alignItems: 'baseline',
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        {snapshotParts.length === 0 ? (
+                          <Text type="secondary" style={{ fontSize: 13 }}>
+                            {kpiSnapshotLoading ? '…' : 'No weekly snapshot'}
+                          </Text>
+                        ) : (
+                          snapshotParts.map((part, i) => (
+                            <span
+                              key={`${person}-kpi-${i}`}
+                              style={{
+                                whiteSpace: 'nowrap',
+                                fontSize: 13,
+                                color: '#334155',
+                              }}
+                            >
+                              {i > 0 ? <span style={{ color: '#94a3b8', margin: '0 6px' }}>·</span> : null}
+                              {part}
+                            </span>
+                          ))
+                        )}
+                      </div>
+                    </Card>
+                  </Col>
+                )
+              })}
             </Row>
           </Spin>
         </>
@@ -1150,7 +1188,7 @@ export const Dashboard = () => {
       </Card>
 
       <Modal
-        title={successDetailModal ? `${successDetailModal.title} — till date` : 'Success detail'}
+        title={successDetailModal ? `${successDetailModal.title} — previous week` : 'Success detail'}
         open={!!successDetailModal}
         onCancel={() => setSuccessDetailModal(null)}
         footer={null}
@@ -1166,7 +1204,7 @@ export const Dashboard = () => {
             columns={successDetailColumns as never}
           />
         ) : (
-          <Text type="secondary">No till-date rows found for this box.</Text>
+          <Text type="secondary">No rows found for this metric in the previous week.</Text>
         )}
       </Modal>
 

@@ -1,6 +1,12 @@
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 
+/** Same IST offset as legacy `getDefaultPreviousWeekFilter` — KPIs are reviewed on India calendar. */
+export function dayjsFromIstNow(): Dayjs {
+  const nowIst = new Date(Date.now() + (330 - new Date().getTimezoneOffset()) * 60_000)
+  return dayjs(nowIst)
+}
+
 /**
  * KPI week-of-month (1–5), matching backend `_week_of_month_kpi_date`:
  * - calendar ranges for each week are Mon–Sun (see API); week-1 bucketing uses first Saturday + Mon-before-first-Monday rule
@@ -29,10 +35,7 @@ export function maxWeekOfMonth(reference: Dayjs): number {
 }
 
 export function getDefaultPreviousWeekFilter() {
-  // Consistent IST time context for default selection.
-  const nowIst = new Date(Date.now() + (330 - new Date().getTimezoneOffset()) * 60_000)
-  const prevWeek = new Date(nowIst.getTime() - 7 * 24 * 60 * 60 * 1000)
-  const safe = dayjs(prevWeek)
+  const safe = dayjsFromIstNow().subtract(7, 'day')
   const monthIndex = safe.month()
   const year = String(safe.year())
   const week = weekOfMonth(safe)
