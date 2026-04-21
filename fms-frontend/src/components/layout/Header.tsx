@@ -8,6 +8,7 @@ import { getInitials, canViewSection } from '../../utils/helpers'
 import { ROUTES } from '../../utils/constants'
 import type { UserRole } from '../../types/auth'
 import { dashboardApi } from '../../api/dashboard'
+import { DASHBOARD_KPI_NAMES } from '../../api/dashboardKpi'
 
 const { Header: AntHeader } = Layout
 const { Text } = Typography
@@ -40,6 +41,12 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
     logout()
     navigate(ROUTES.LOGIN)
   }
+
+  const dashboardKpiMenuItems: MenuProps['items'] = DASHBOARD_KPI_NAMES.map((name) => ({
+    key: `dashboard-kpi-${name}`,
+    label: `${name} Dashboard`,
+    onClick: () => navigate(`${ROUTES.DASHBOARD_KPI}?person=${encodeURIComponent(name)}`),
+  }))
 
   const menuItems: MenuProps['items'] = [
     {
@@ -116,14 +123,19 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
       </Space>
       <Space size="middle">
         {canViewDashboardKpi ? (
-          <Button
-            type="default"
-            icon={<DashboardOutlined />}
-            onClick={() => navigate(ROUTES.DASHBOARD_KPI)}
-            style={{ fontWeight: 500 }}
+          <Dropdown
+            trigger={['click']}
+            menu={{ items: dashboardKpiMenuItems }}
+            placement="bottomLeft"
           >
-            Dashboard - KPI
-          </Button>
+            <Button
+              type="default"
+              icon={<DashboardOutlined />}
+              style={{ fontWeight: 500 }}
+            >
+              Dashboard - KPI
+            </Button>
+          </Dropdown>
         ) : null}
         {!hideAddNew && onAddNew && (
           <Button
