@@ -106,7 +106,6 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   )
   const allSupportItems: MenuProps['items'] = [
     { key: ROUTES.SUPPORT_DASHBOARD, icon: <DashboardOutlined />, label: prefetchedLabel(ROUTES.SUPPORT_DASHBOARD, ROUTES.SUPPORT_DASHBOARD, 'Support Dashboard'), sectionKey: 'support_dashboard' },
-    { key: ROUTES.TICKETS, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.TICKETS, ROUTES.TICKETS, 'All Tickets'), sectionKey: 'all_tickets' },
     { key: `${ROUTES.TICKETS}?section=chores-bugs`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?section=chores-bugs`, { pathname: ROUTES.TICKETS, search: 'section=chores-bugs' }, 'Chores & Bugs'), sectionKey: 'chores_bugs' },
     { key: ROUTES.STAGING, icon: <RocketOutlined />, label: prefetchedLabel(ROUTES.STAGING, ROUTES.STAGING, 'Staging'), sectionKey: 'staging' },
     { key: `${ROUTES.TICKETS}?type=feature`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?type=feature`, `${ROUTES.TICKETS}?type=feature`, 'Feature'), sectionKey: 'feature' },
