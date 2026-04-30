@@ -5,7 +5,6 @@ import {
   Checkbox,
   Collapse,
   Col,
-  InputNumber,
   Modal,
   Row,
   Space,
@@ -14,7 +13,7 @@ import {
   message,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { ReloadOutlined, EditOutlined } from '@ant-design/icons'
+import { ReloadOutlined } from '@ant-design/icons'
 import { apiClient } from '../../api/axios'
 import { API_ENDPOINTS } from '../../utils/constants'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
@@ -41,9 +40,6 @@ type PaymentAgeingKpis = {
   }>
 }
 
-/** Must match backend PAYMENT_AGEING_QUARTER_COUNT (sheet: Q3 FY23-24 … Q4 FY25-26). */
-const QUARTER_COUNT = 10
-
 /** Table-only DDL (Supabase). */
 const SQL_SETUP_HREF = '/SUPABASE_PAYMENT_AGEING_REPORT.sql'
 /** Full script: create tables + load 69 companies (run once). */
@@ -54,7 +50,7 @@ type AgeingRow = {
   company_name: string
   amount_incl_gst: number
   quarter_days: (number | null)[]
-  median_value: number
+  median_value: number | null
   last_quarter_days: number | null
   received_amount: number
   /** ISO date; used server-side for bucket weighting (optional on older API). */
@@ -138,10 +134,6 @@ function buildFilters(values: (string | number | null | undefined)[]) {
 export function PaymentAgeingReportPage() {
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<ReportPayload | null>(null)
-  const [editOpen, setEditOpen] = useState(false)
-  const [editRow, setEditRow] = useState<AgeingRow | null>(null)
-  const [editDays, setEditDays] = useState<(number | null)[]>(Array(QUARTER_COUNT).fill(null))
-  const [saving, setSaving] = useState(false)
   const [receivedCompanyModalOpen, setReceivedCompanyModalOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [selectedExportColumns, setSelectedExportColumns] = useState<string[]>([])
@@ -194,9 +186,9 @@ export function PaymentAgeingReportPage() {
         title: 'Company Name',
         dataIndex: 'company_name',
         key: 'company_name',
-        width: 280,
-        fixed: 'left',
+        width: 1,
         ellipsis: true,
+        onCell: () => ({ style: { maxWidth: 130 } }),
         filters: buildFilters((data?.rows || []).map((r) => r.company_name)),
         onFilter: (value, record) => record.company_name === value,
         filterSearch: true,
@@ -205,7 +197,7 @@ export function PaymentAgeingReportPage() {
         title: 'Amount (Incl GST)',
         dataIndex: 'amount_incl_gst',
         key: 'amount_incl_gst',
-        width: 140,
+        width: 120,
         align: 'right',
         render: (v: number) => fmt(v),
         filters: buildFilters((data?.rows || []).map((r) => fmt(r.amount_incl_gst))),
@@ -213,8 +205,7 @@ export function PaymentAgeingReportPage() {
       },
     ]
 
-    const historicalQuarterLabels = data.quarter_labels.slice(0, -1)
-    historicalQuarterLabels.forEach((label, idx) => {
+    data.quarter_labels.forEach((label, idx) => {
       base.push({
         title: (
           <span>
@@ -236,127 +227,27 @@ export function PaymentAgeingReportPage() {
       })
     })
 
-    const latestQuarterLabel = data.quarter_labels[data.quarter_labels.length - 1] || 'Current quarter'
-
-    base.push(
-      {
-        title: 'Median value',
-        dataIndex: 'median_value',
-        key: 'median_value',
-        width: 100,
-        align: 'center',
-        filters: buildFilters((data?.rows || []).map((r) => String(r.median_value))),
-        onFilter: (value, record) => String(record.median_value) === value,
-      },
-      {
-        title: `${latestQuarterLabel} (Days)`,
-        dataIndex: 'last_quarter_days',
-        key: 'last_quarter_days',
-        width: 100,
-        align: 'center',
-        render: (v: number | null | undefined) =>
-          v === null || v === undefined ? '—' : String(v),
-        filters: buildFilters(
-          (data?.rows || []).map((r) =>
-            r.last_quarter_days === null || r.last_quarter_days === undefined ? '—' : String(r.last_quarter_days),
-          ),
-        ),
-        onFilter: (value, record) =>
-          (record.last_quarter_days === null || record.last_quarter_days === undefined ? '—' : String(record.last_quarter_days)) ===
-          value,
-      },
-      {
-        title: '',
-        key: 'actions',
-        width: 72,
-        fixed: 'right',
-        render: (_: unknown, record: AgeingRow) => (
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={() => {
-              setEditRow(record)
-              const nq = data?.quarter_labels?.length || QUARTER_COUNT
-              const d = [...(record.quarter_days || [])]
-              while (d.length < nq) d.push(null)
-              setEditDays(d.slice(0, nq))
-              setEditOpen(true)
-            }}
-          >
-            Edit
-          </Button>
-        ),
-      }
-    )
+    base.push({
+      title: 'Median',
+      dataIndex: 'median_value',
+      key: 'median_value',
+      width: 40,
+      align: 'center',
+      render: (v: number | null | undefined) => (v === null || v === undefined ? '—' : String(v)),
+      filters: buildFilters((data?.rows || []).map((r) => (r.median_value == null ? '—' : String(r.median_value)))),
+      onFilter: (value, record) => (record.median_value == null ? '—' : String(record.median_value)) === value,
+    })
 
     return base
   }, [data])
 
-  const saveQuarters = () => {
-    if (!editRow) return
-    const nq = data?.quarter_labels?.length || QUARTER_COUNT
-    const padded = [...editDays]
-    while (padded.length < nq) padded.push(null)
-    const key = editRow.company_id || editRow.company_name
-    const pathKey = encodeURIComponent(key)
-    setSaving(true)
-    apiClient
-      .put(`${API_ENDPOINTS.CLIENT_PAYMENT.PAYMENT_AGEING_REPORT}/${pathKey}`, { quarter_days: padded.slice(0, nq) })
-      .then(() => {
-        message.success('Quarter days saved')
-        setEditOpen(false)
-        load()
-      })
-      .catch((err) => {
-        const d = err?.response?.data?.detail
-        message.error(typeof d === 'string' ? d : 'Save failed')
-      })
-      .finally(() => setSaving(false))
-  }
-
   const summaryTableColumns: ColumnsType<AgeingSummaryRow> = [
-    { title: 'Days', dataIndex: 'days', key: 'days', width: 120, fixed: 'left' },
-    { title: 'Median', dataIndex: 'median', key: 'median', align: 'right', render: (v: number) => fmt(v) },
-    { title: 'Received', dataIndex: 'received', key: 'received', align: 'right', render: (v: number) => fmt(v) },
-    { title: 'Due/Excs for Wk', dataIndex: 'due_excs_for_wk', key: 'due', align: 'right', render: (v: number) => fmt(v) },
-    {
-      title: (
-        <span>
-          FY 24-25 Q4
-          <br />
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            (Amount alloc.)
-          </Text>
-        </span>
-      ),
-      dataIndex: 'fy_24_25_q4_to_be',
-      key: 'fyq4tb',
-      align: 'right',
-      width: 120,
-      render: (v: number) => fmt(v),
-    },
-    { title: 'To be %', dataIndex: 'to_be_pct', key: 'tbp', align: 'right', render: (v: number) => fmtPct(v) },
-    { title: 'Received %', dataIndex: 'received_pct', key: 'rcp', align: 'right', render: (v: number) => fmtPct(v) },
-    { title: 'FY 24-25 Q1', dataIndex: 'fy_24_25_q1', key: 'fyq1', align: 'right', width: 110, render: (v: number) => fmt(v) },
-    { title: 'FY 24-25 Q2', dataIndex: 'fy_24_25_q2', key: 'fyq2', align: 'right', width: 110, render: (v: number) => fmt(v) },
-    {
-      title: (
-        <span>
-          FY 24-25 Q4
-          <br />
-          <Text type="secondary" style={{ fontSize: 11 }}>
-            (Received alloc.)
-          </Text>
-        </span>
-      ),
-      dataIndex: 'fy_24_25_q4_received',
-      key: 'fyq4rc',
-      align: 'right',
-      width: 130,
-      render: (v: number) => fmt(v),
-    },
-    { title: 'FY 24-25 Q3', dataIndex: 'fy_24_25_q3', key: 'fyq3', align: 'right', width: 110, render: (v: number) => fmt(v) },
+    { title: 'Days', dataIndex: 'days', key: 'days', width: 95, fixed: 'left' },
+    { title: 'Median', dataIndex: 'median', key: 'median', width: 85, align: 'right', render: (v: number) => fmt(v) },
+    { title: 'Received', dataIndex: 'received', key: 'received', width: 90, align: 'right', render: (v: number) => fmt(v) },
+    { title: 'Due/Excs for Wk', dataIndex: 'due_excs_for_wk', key: 'due', width: 105, align: 'right', render: (v: number) => fmt(v) },
+    { title: 'To be %', dataIndex: 'to_be_pct', key: 'tbp', width: 75, align: 'right', render: (v: number) => fmtPct(v) },
+    { title: 'Received %', dataIndex: 'received_pct', key: 'rcp', width: 90, align: 'right', render: (v: number) => fmtPct(v) },
   ]
 
   const summaryTotals = data?.summary?.totals
@@ -367,23 +258,14 @@ export function PaymentAgeingReportPage() {
       { key: 'company_name', label: 'Company Name', getValue: (r) => r.company_name || '' },
       { key: 'amount_incl_gst', label: 'Amount (Incl GST)', getValue: (r) => r.amount_incl_gst },
     ]
-    const historicalQuarterLabels = (data?.quarter_labels || []).slice(0, -1)
-    historicalQuarterLabels.forEach((label, idx) => {
+    ;(data?.quarter_labels || []).forEach((label, idx) => {
       cols.push({
         key: `q${idx}`,
         label: `${label} (Days)`,
         getValue: (r) => (r.quarter_days[idx] == null ? '' : r.quarter_days[idx]),
       })
     })
-    const latestQuarterLabel = data?.quarter_labels?.[data.quarter_labels.length - 1] || 'Current quarter'
-    cols.push(
-      { key: 'median_value', label: 'Median value', getValue: (r) => r.median_value },
-      {
-        key: 'last_quarter_days',
-        label: `${latestQuarterLabel} (Days)`,
-        getValue: (r) => (r.last_quarter_days == null ? '' : r.last_quarter_days),
-      },
-    )
+    cols.push({ key: 'median_value', label: 'Median', getValue: (r) => r.median_value ?? '' })
     return cols
   }, [data?.quarter_labels])
   const exportOptions = exportColumns.map((c) => ({ label: c.label, value: c.key }))
@@ -482,13 +364,29 @@ export function PaymentAgeingReportPage() {
         </Space>
 
         <Card size="small">
+          <style>
+            {`
+              .payment-ageing-compact-table .ant-table,
+              .payment-ageing-compact-table .ant-table-container table {
+                width: max-content !important;
+                min-width: 0 !important;
+              }
+              .payment-ageing-compact-table .ant-table-thead > tr > th,
+              .payment-ageing-compact-table .ant-table-tbody > tr > td {
+                padding-left: 8px !important;
+                padding-right: 8px !important;
+                white-space: nowrap;
+              }
+            `}
+          </style>
           <TableWithSkeletonLoading loading={loading} columns={12} rows={14}>
             <Table<AgeingRow>
+              className="payment-ageing-compact-table"
               rowKey={(r) => `${r.company_id ?? ''}::${r.company_name || ''}`}
               loading={false}
               columns={columns}
               dataSource={data?.rows || []}
-              scroll={{ x: 1200 + (data?.quarter_labels?.length || 0) * 90 }}
+              scroll={{ x: 'max-content' }}
               pagination={{ pageSize: 100, showSizeChanger: true, pageSizeOptions: ['50', '100', '200'] }}
               size="small"
             />
@@ -508,7 +406,8 @@ export function PaymentAgeingReportPage() {
                       size="small"
                       pagination={false}
                       rowKey="days"
-                      scroll={{ x: 1400 }}
+                      tableLayout="fixed"
+                      scroll={{ x: 540 }}
                       columns={summaryTableColumns}
                       dataSource={data.summary.rows}
                       summary={() =>
@@ -528,25 +427,10 @@ export function PaymentAgeingReportPage() {
                                 <Text strong>{fmt(summaryTotals.due_excs_for_wk)}</Text>
                               </Table.Summary.Cell>
                               <Table.Summary.Cell index={4}>
-                                <Text strong>{fmt(summaryTotals.fy_24_25_q4_to_be)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={5}>
                                 <Text strong>{fmtPct(summaryTotals.to_be_pct)}</Text>
                               </Table.Summary.Cell>
-                              <Table.Summary.Cell index={6}>
+                              <Table.Summary.Cell index={5}>
                                 <Text strong>{fmtPct(summaryTotals.received_pct)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={7}>
-                                <Text strong>{fmt(summaryTotals.fy_24_25_q1)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={8}>
-                                <Text strong>{fmt(summaryTotals.fy_24_25_q2)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={9}>
-                                <Text strong>{fmt(summaryTotals.fy_24_25_q4_received)}</Text>
-                              </Table.Summary.Cell>
-                              <Table.Summary.Cell index={10}>
-                                <Text strong>{fmt(summaryTotals.fy_24_25_q3)}</Text>
                               </Table.Summary.Cell>
                             </Table.Summary.Row>
                           </Table.Summary>
@@ -557,9 +441,7 @@ export function PaymentAgeingReportPage() {
                     <Text type="secondary">No summary data.</Text>
                   )}
                   <Text type="secondary" style={{ fontSize: 12 }}>
-                    FY 24-25 Q1–Q4 columns allocate each company&apos;s Amount (or Received for the second Q4) across FY 24-25 quarters in
-                    proportion to that row&apos;s quarter &quot;Days&quot; values (same grid as above). Percent columns are share of row
-                    Median / Received vs report totals.
+                    Percent columns are share of row Median / Received vs report totals.
                   </Text>
                 </Space>
               ),
@@ -567,42 +449,6 @@ export function PaymentAgeingReportPage() {
           ]}
         />
       </Space>
-
-      <Modal
-        title={editRow ? `Edit days — ${editRow.company_name}` : 'Edit days'}
-        open={editOpen}
-        onCancel={() => setEditOpen(false)}
-        onOk={saveQuarters}
-        confirmLoading={saving}
-        width={720}
-        destroyOnClose
-      >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          <Text type="secondary">
-            Enter payment days for each fiscal quarter column (oldest → newest). Values are overwritten on refresh when
-            Payment Management has a received date in that quarter (invoice date → payment date).
-          </Text>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
-            {data?.quarter_labels?.map((label, i) => (
-              <div key={label}>
-                <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
-                  {label}
-                </Text>
-                <InputNumber
-                  style={{ width: '100%' }}
-                  min={0}
-                  value={editDays[i] ?? undefined}
-                  onChange={(v) => {
-                    const next = [...editDays]
-                    next[i] = v === null || v === undefined ? null : Number(v)
-                    setEditDays(next)
-                  }}
-                />
-              </div>
-            ))}
-          </div>
-        </Space>
-      </Modal>
 
       <Modal
         title="Payment Received This Quarter - Company Days"

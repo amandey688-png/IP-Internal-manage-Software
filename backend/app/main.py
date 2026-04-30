@@ -1319,10 +1319,11 @@ def _enrich_tickets_with_lookups(rows: list) -> list:
     except Exception:
         pass
     for row in rows:
-        # Prefer ticket's own company_name; then companies lookup; then reference_no fallback (for production when DB not updated)
+        # Prefer lookup by selected IDs, then existing legacy text, then reference_no fallback.
+        # This ensures edit modal changes (company_id/page_id/division_id) reflect immediately in UI.
         row["company_name"] = (
-            (row.get("company_name") and str(row.get("company_name")).strip())
-            or (companies_map.get(row.get("company_id")) if row.get("company_id") else None)
+            (companies_map.get(row.get("company_id")) if row.get("company_id") else None)
+            or (row.get("company_name") and str(row.get("company_name")).strip())
             or ref_to_company.get(row.get("reference_no") or "")
         )
         row["page_name"] = (
@@ -1547,6 +1548,22 @@ _FEATURE_STAGE_2_KEYS = {"live_status", "live_actual", "live_planned"}
 @api_router.put("/tickets/{ticket_id}")
 def update_ticket(ticket_id: str, payload: UpdateTicketRequest, auth: dict = Depends(get_current_user)):
     data = {k: v for k, v in payload.model_dump().items() if v is not None}
+    # Keep denormalized display columns in sync when IDs are edited from ticket modal.
+    try:
+        if data.get("company_id"):
+            cr = supabase.table("companies").select("name").eq("id", data["company_id"]).single().execute()
+            if cr.data and cr.data.get("name"):
+                data["company_name"] = str(cr.data.get("name")).strip()
+        if data.get("page_id"):
+            pr = supabase.table("pages").select("name").eq("id", data["page_id"]).single().execute()
+            if pr.data and pr.data.get("name"):
+                data["page"] = str(pr.data.get("name")).strip()
+        if data.get("division_id"):
+            dr = supabase.table("divisions").select("name").eq("id", data["division_id"]).single().execute()
+            if dr.data and dr.data.get("name"):
+                data["division"] = str(dr.data.get("name")).strip()
+    except Exception:
+        pass
     role = _get_role_from_profile(auth["id"])
     # Approve/Unapprove: only admin, master_admin and approver
     if "approval_status" in data:
@@ -5797,6 +5814,221 @@ def _payment_ageing_report_payload():
         "rows": out_rows,
         "summary": {"rows": summary_rows, "totals": totals},
         "summary_uploaded": summary_upload or [],
+        "kpis": kpis,
+    }
+
+
+def _next_fiscal_quarter_key(fy: int, q: int) -> tuple[int, int]:
+    if q >= 4:
+        return (fy + 1, 1)
+    return (fy, q + 1)
+
+
+def _fiscal_quarter_ordinal(key: tuple[int, int]) -> int:
+    return int(key[0]) * 4 + int(key[1])
+
+
+def _median_value_or_none(values: list[int | float | None], *, min_count: int = 1) -> int | float | None:
+    nums = sorted(float(v) for v in values if v is not None)
+    if len(nums) < min_count:
+        return None
+    mid = len(nums) // 2
+    if len(nums) % 2 == 1:
+        median = nums[mid]
+    else:
+        median = (nums[mid - 1] + nums[mid]) / 2
+    return int(median) if median.is_integer() else median
+
+
+def _payment_ageing_report_payload():
+    """Build Payment Ageing from Add Invoice company names and dynamic invoice quarters."""
+    today = date.today()
+
+    pay_rows: list[dict] = []
+    try:
+        pr = (
+            supabase.table("onboarding_client_payment")
+            .select("id,company_name,invoice_amount,invoice_date,timestamp,payment_received_date,genre")
+            .limit(5000)
+            .execute()
+        )
+        pay_rows = pr.data or []
+    except Exception as e:
+        _log(f"payment ageing invoices: {e}")
+
+    receive_rows: list[dict] = []
+    try:
+        rr = (
+            supabase.table("onboarding_client_payment_receive")
+            .select("client_payment_id,amount,payment_date")
+            .limit(5000)
+            .execute()
+        )
+        receive_rows = rr.data or []
+    except Exception as e:
+        _log(f"payment ageing receive rows: {e}")
+
+    receive_by_cp_id: dict[str, dict] = {}
+    for rr in receive_rows:
+        cid = str(rr.get("client_payment_id") or "").strip()
+        if cid:
+            receive_by_cp_id[cid] = rr
+
+    payment_quarter_key_set: set[tuple[int, int]] = set()
+    invoice_quarter_key_set: set[tuple[int, int]] = set()
+    by_name: dict[str, dict] = {}
+    for row in pay_rows:
+        company_name = (row.get("company_name") or "").strip()
+        nm = _norm_name_company(company_name)
+        if not nm:
+            continue
+        inv_d = _pa._parse_date(row.get("invoice_date")) or _pa._parse_date(row.get("timestamp"))
+        if not inv_d:
+            continue
+        invoice_quarter_key_set.add(_pa.fy_quarter_key(inv_d))
+        if nm not in by_name:
+            by_name[nm] = {
+                "display_name": company_name,
+                "invoice_total": 0,
+                "received_total": 0,
+                "first_date": inv_d,
+                "quarter_days": defaultdict(list),
+            }
+        agg = by_name[nm]
+        agg["display_name"] = company_name or agg["display_name"]
+        if inv_d < agg["first_date"]:
+            agg["first_date"] = inv_d
+        cp_id = str(row.get("id") or "").strip()
+        rec_row = receive_by_cp_id.get(cp_id) if cp_id else None
+        amount = _parse_invoice_amount(row.get("invoice_amount"))
+        received_amount = _parse_invoice_amount((rec_row or {}).get("amount")) if rec_row else (amount if row.get("payment_received_date") else 0)
+        agg["invoice_total"] += amount
+        agg["received_total"] += received_amount
+        paid_d = _pa._parse_date((rec_row or {}).get("payment_date")) or _pa._parse_date(row.get("payment_received_date"))
+        if paid_d and paid_d >= inv_d:
+            ageing_qkey = _pa.fy_quarter_key(paid_d)
+            payment_quarter_key_set.add(ageing_qkey)
+            agg["quarter_days"][ageing_qkey].append((paid_d - inv_d).days)
+
+    all_quarter_keys = invoice_quarter_key_set | payment_quarter_key_set
+    current_key = _pa.fy_quarter_key(today)
+    if all_quarter_keys:
+        start_key = min(all_quarter_keys, key=_fiscal_quarter_ordinal)
+        end_key = max(max(all_quarter_keys, key=_fiscal_quarter_ordinal), current_key, key=_fiscal_quarter_ordinal)
+    else:
+        start_key = end_key = current_key
+
+    qroll: list[tuple[int, int, str]] = []
+    cursor = start_key
+    while _fiscal_quarter_ordinal(cursor) <= _fiscal_quarter_ordinal(end_key):
+        qroll.append((cursor[0], cursor[1], _pa.quarter_label_from_key(cursor[0], cursor[1])))
+        cursor = _next_fiscal_quarter_key(cursor[0], cursor[1])
+    hidden_quarter_labels = {"Q4 FY 25-26"}
+    qroll = [q for q in qroll if q[2] not in hidden_quarter_labels]
+    quarter_labels = [x[2] for x in qroll]
+    quarter_keys = [{"fy": x[0], "q": x[1]} for x in qroll]
+    _nq = len(qroll)
+
+    out_rows: list[dict] = []
+    for nm, agg in by_name.items():
+        qdays: list[int | None] = []
+        for fy, q, _label in qroll:
+            qdays.append(_pa.median_int_or_none(agg["quarter_days"].get((fy, q), [])))
+        day_values = [d for d in qdays if d is not None]
+        median_value = _median_value_or_none(day_values, min_count=2)
+        out_rows.append(
+            {
+                "company_id": None,
+                "company_name": agg.get("display_name") or nm,
+                "amount_incl_gst": int(agg.get("invoice_total") or 0),
+                "quarter_days": qdays,
+                "median_value": median_value,
+                "last_quarter_days": qdays[-1] if qdays else None,
+                "received_amount": int(agg.get("received_total") or 0),
+                "first_invoice_date": agg["first_date"].isoformat() if agg.get("first_date") else None,
+            }
+        )
+    out_rows = _dedupe_ageing_display_rows(out_rows, _nq)
+    out_rows.sort(key=lambda r: (r.get("company_name") or "").lower())
+
+    qkey_to_idx = {(fy, q): i for i, (fy, q, _label) in enumerate(qroll)}
+
+    def weighted_fy24_amount(amount: int, qdays: list[int | None], target_q: int) -> int:
+        fy24_indices = [qkey_to_idx.get((2024, q)) for q in (1, 2, 3, 4)]
+        present_indices = [i for i in fy24_indices if i is not None and i < len(qdays)]
+        total_days = sum(int(qdays[i] or 0) for i in present_indices if qdays[i] is not None)
+        target_idx = qkey_to_idx.get((2024, target_q))
+        if amount <= 0 or total_days <= 0 or target_idx is None or target_idx >= len(qdays) or qdays[target_idx] is None:
+            return 0
+        return int(round(amount * int(qdays[target_idx]) / total_days))
+
+    nb = len(_pa.DAY_BUCKETS)
+    bucket_median_sums = [0] * nb
+    bucket_received_sums = [0] * nb
+    bucket_fy_q4_to_be = [0] * nb
+    bucket_fy_q1 = [0] * nb
+    bucket_fy_q2 = [0] * nb
+    bucket_fy_q3 = [0] * nb
+    bucket_fy_q4_received = [0] * nb
+    for r in out_rows:
+        med_raw = r.get("median_value")
+        if med_raw is None:
+            continue
+        amt = int(r.get("amount_incl_gst") or 0)
+        rec = int(r.get("received_amount") or 0)
+        med = float(med_raw)
+        bi = _pa.bucket_for_median_days(med)
+        qdays = _pa.normalize_quarter_days(r.get("quarter_days"), _nq)
+        bucket_median_sums[bi] += amt
+        bucket_received_sums[bi] += rec
+        bucket_fy_q4_to_be[bi] += weighted_fy24_amount(amt, qdays, 4)
+        bucket_fy_q1[bi] += weighted_fy24_amount(amt, qdays, 1)
+        bucket_fy_q2[bi] += weighted_fy24_amount(amt, qdays, 2)
+        bucket_fy_q3[bi] += weighted_fy24_amount(amt, qdays, 3)
+        bucket_fy_q4_received[bi] += weighted_fy24_amount(rec, qdays, 4)
+
+    total_median = sum(bucket_median_sums)
+    total_received = sum(bucket_received_sums)
+    summary_rows = []
+    for i, (label, _lo, _hi) in enumerate(_pa.DAY_BUCKETS):
+        med_sum = bucket_median_sums[i]
+        rec_sum = bucket_received_sums[i]
+        summary_rows.append(
+            {
+                "days": label,
+                "median": med_sum,
+                "received": rec_sum,
+                "due_excs_for_wk": rec_sum - med_sum,
+                "fy_24_25_q4_to_be": bucket_fy_q4_to_be[i],
+                "to_be_pct": round((med_sum / total_median * 100) if total_median > 0 else 0.0, 2),
+                "received_pct": round((rec_sum / total_received * 100) if total_received > 0 else 0.0, 2),
+                "fy_24_25_q1": bucket_fy_q1[i],
+                "fy_24_25_q2": bucket_fy_q2[i],
+                "fy_24_25_q4_received": bucket_fy_q4_received[i],
+                "fy_24_25_q3": bucket_fy_q3[i],
+            }
+        )
+    totals = {
+        "median": total_median,
+        "received": total_received,
+        "due_excs_for_wk": sum(r["due_excs_for_wk"] for r in summary_rows),
+        "fy_24_25_q4_to_be": sum(bucket_fy_q4_to_be),
+        "to_be_pct": round(sum(r["to_be_pct"] for r in summary_rows), 2),
+        "received_pct": round(sum(r["received_pct"] for r in summary_rows), 2),
+        "fy_24_25_q1": sum(bucket_fy_q1),
+        "fy_24_25_q2": sum(bucket_fy_q2),
+        "fy_24_25_q4_received": sum(bucket_fy_q4_received),
+        "fy_24_25_q3": sum(bucket_fy_q3),
+    }
+    kpis = _compute_payment_ageing_kpis(pay_rows, None, receive_by_cp_id)
+    kpis["current_quarter_received_company_count"] = 0
+    kpis["current_quarter_received_companies"] = []
+    return {
+        "quarter_labels": quarter_labels,
+        "quarter_keys": quarter_keys,
+        "rows": out_rows,
+        "summary": {"rows": summary_rows, "totals": totals},
+        "summary_uploaded": [],
         "kpis": kpis,
     }
 

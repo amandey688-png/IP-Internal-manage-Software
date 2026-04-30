@@ -7,6 +7,7 @@ pip install fastapi
 pip install "uvicorn[standard]"
 pip install python-dotenv
 pip install "pydantic[email]"
+pip install aiosmtplib
 
 echo.
 echo Step 2: Installing Supabase packages (skipping storage to avoid C++ build tools)...

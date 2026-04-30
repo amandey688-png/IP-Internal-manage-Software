@@ -6,6 +6,7 @@ pip install fastapi
 pip install "uvicorn[standard]"
 pip install python-dotenv
 pip install "pydantic[email]"
+pip install aiosmtplib
 
 Write-Host ""
 Write-Host "Step 2: Installing Supabase Auth packages..." -ForegroundColor Yellow
