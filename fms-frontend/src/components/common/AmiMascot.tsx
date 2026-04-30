@@ -4,7 +4,6 @@ import './AmiMascot.css'
 
 type AmiMascotProps = {
   userName?: string | null
-  storageKey?: string
   durationMs?: number
 }
 
@@ -47,21 +46,19 @@ export function GreetingText() {
 
 export function AmiMascot({
   userName,
-  storageKey = 'hasSeenMascotV2',
   durationMs = 60_000,
 }: AmiMascotProps) {
   const [visible, setVisible] = useState(false)
 
   useEffect(() => {
-    if (!userName) return
-    const seen = window.localStorage.getItem(storageKey) === 'true'
-    if (seen) return
-
+    if (!userName) {
+      setVisible(false)
+      return
+    }
     setVisible(true)
-    window.localStorage.setItem(storageKey, 'true')
     const timer = window.setTimeout(() => setVisible(false), durationMs)
     return () => window.clearTimeout(timer)
-  }, [durationMs, storageKey, userName])
+  }, [durationMs, userName])
 
   return (
     <AnimatePresence>
