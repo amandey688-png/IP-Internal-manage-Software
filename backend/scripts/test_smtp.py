@@ -49,7 +49,7 @@ def main() -> None:
         print(f"SUCCESS — test email sent to {to!r}. Check inbox/spam.")
     else:
         print("FAILED — send_email returned False. Read stderr for [email] / SMTP errors.")
-        print("Tip: For Brevo SMTP only, leave SENDGRID_API_KEY unset.")
+        print("Tip: For SMTP providers like Postmark/Brevo, leave SENDGRID_API_KEY unset.")
     sys.exit(0 if ok else 1)
 
 

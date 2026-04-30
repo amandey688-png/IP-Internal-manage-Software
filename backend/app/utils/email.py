@@ -1,7 +1,7 @@
 """
 Async email sender.
 - SendGrid HTTP API: set SENDGRID_API_KEY + SENDGRID_FROM_EMAIL (works on Render without SMTP ports).
-- SMTP: Brevo, Gmail, etc. (SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL).
+- SMTP: Postmark, Brevo, Gmail, etc. (SMTP_HOST, SMTP_USER, SMTP_PASSWORD, SMTP_FROM_EMAIL).
 
 Supported SMTP ports (via SMTP_PORT env):
   587  - default, STARTTLS
@@ -56,15 +56,16 @@ async def send_email(to_email: str, subject: str, html_content: str, plain_fallb
             _log(f"SendGrid API error: {e}")
         return False
 
-    # 2. SMTP (Brevo, Gmail, etc.)
+    # 2. SMTP (Postmark, Brevo, Gmail, etc.)
     import aiosmtplib
     from email.message import EmailMessage
 
-    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
+    postmark_token = (os.getenv("POSTMARK_SERVER_TOKEN") or "").strip()
+    smtp_host = (os.getenv("SMTP_HOST") or ("smtp.postmarkapp.com" if postmark_token else "")).strip()
     smtp_port = int(os.getenv("SMTP_PORT") or "587")
-    smtp_user = (os.getenv("SMTP_USER") or "").strip()
-    smtp_pass = (os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_PASS") or "").strip()
-    smtp_from = (os.getenv("SMTP_FROM_EMAIL") or "").strip()
+    smtp_user = (os.getenv("SMTP_USER") or postmark_token).strip()
+    smtp_pass = (os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_PASS") or postmark_token).strip()
+    smtp_from = (os.getenv("SMTP_FROM_EMAIL") or os.getenv("POSTMARK_FROM_EMAIL") or "").strip()
 
     if not all([smtp_host, smtp_user, smtp_pass, smtp_from]):
         missing = [
