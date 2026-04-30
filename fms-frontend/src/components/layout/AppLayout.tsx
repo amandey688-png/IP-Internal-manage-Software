@@ -4,6 +4,7 @@ import { Layout } from 'antd'
 import { Sidebar } from './Sidebar'
 import { Header } from './Header'
 import { SupportFormModal } from '../forms/SupportFormModal'
+import { AmiMascot } from '../common/AmiMascot'
 import { ROUTES, canViewDbClientDbDash, canViewPendingPaymentDetails } from '../../utils/constants'
 import { useRole } from '../../hooks/useRole'
 import { useAuth } from '../../hooks/useAuth'
@@ -110,6 +111,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
         onClose={() => setSupportModalOpen(false)}
         onSuccess={() => setSupportModalOpen(false)}
       />
+      <AmiMascot userName={user?.full_name || user?.email} />
     </Layout>
   )
 }
