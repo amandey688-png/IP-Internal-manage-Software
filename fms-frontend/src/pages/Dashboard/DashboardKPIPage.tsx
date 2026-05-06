@@ -20,6 +20,7 @@ import {
   InputNumber,
   DatePicker,
   Checkbox,
+  Tooltip,
 } from 'antd'
 import {
   DashboardOutlined,
@@ -38,7 +39,6 @@ import {
   dashboardKpiApi,
   DASHBOARD_KPI_NAMES,
   MONTHS,
-  WEEKS,
   YEARS,
   type DashboardKpiPerson,
   type DashboardKpiResponse,
@@ -50,7 +50,13 @@ import {
 import { useAuth } from '../../hooks/useAuth'
 import { ROUTES } from '../../utils/constants'
 import { DashboardBlockSkeleton } from '../../components/common/skeletons'
-import { getDefaultPreviousWeekFilter, maxWeekOfMonth, weekOfMonth } from './kpiWeekUtils'
+import {
+  getDefaultPreviousWeekFilter,
+  getKpiCalendarWeekBounds,
+  isKpiMergedWeekAcrossMonths,
+  maxWeekOfMonth,
+  weekOfMonth,
+} from './kpiWeekUtils'
 
 function kpiDailyLogErrorDetail(err: unknown, fallback: string): string {
   const ax = err as AxiosError<{ detail?: string | Array<{ msg?: string }> }>
@@ -543,6 +549,47 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
     selectedPerson === 'Adrija' &&
     ADRIJA_SOCIAL_KPI_EDITOR_EMAILS.has((user?.email || '').trim().toLowerCase())
 
+  const monthIndexSel = MONTHS.findIndex((m) => m === month)
+  const maxWeekSelectable =
+    data?.meta?.maxWeekIndex ??
+    (monthIndexSel >= 0 ? maxWeekOfMonth(dayjs().year(Number(year)).month(monthIndexSel).date(1)) : 5)
+  const weekOptions = Array.from({ length: maxWeekSelectable }, (_, i) => ({
+    label: `week ${i + 1}`,
+    value: `week ${i + 1}`,
+  }))
+  const weekMerge = data?.meta?.weekCalendar
+  const weekMergeAny = weekMerge as Record<string, unknown> | undefined
+  const spansPrev =
+    !!(weekMerge?.spansPreviousMonth ?? weekMergeAny?.spans_previous_month)
+  const spansNext = !!(weekMerge?.spansNextMonth ?? weekMergeAny?.spans_next_month)
+  const weekNumDisplay = Number((week || '').replace(/[^\d]/g, '')) || 1
+  const yearNum = Number(year)
+  const mergedFromApi =
+    !!(weekMerge?.mergeBadge && String(weekMerge.mergeBadge).trim()) || spansPrev || spansNext
+  const mergedFromLocal =
+    monthIndexSel >= 0 &&
+    Number.isFinite(yearNum) &&
+    isKpiMergedWeekAcrossMonths(yearNum, monthIndexSel, weekNumDisplay)
+  const showMergedWeekLabel = mergedFromApi || mergedFromLocal
+  const localBounds =
+    monthIndexSel >= 0 && Number.isFinite(yearNum)
+      ? getKpiCalendarWeekBounds(yearNum, monthIndexSel, weekNumDisplay)
+      : null
+  const mergeRangeText =
+    weekMerge?.startDate && weekMerge?.endDate
+      ? `${weekMerge.startDate} → ${weekMerge.endDate}`
+      : localBounds
+        ? `${localBounds.start.format('D MMM')} – ${localBounds.end.format('D MMM YYYY')}`
+        : ''
+  const mergeTooltip = [
+    weekMerge?.mergeBadge,
+    weekMerge?.tooltip,
+    mergeRangeText ? `Range: ${mergeRangeText}` : '',
+  ]
+    .map((s) => (typeof s === 'string' ? s.trim() : ''))
+    .filter(Boolean)
+    .join(' · ')
+
   return (
     <div className="dashboard-kpi-page">
       <Space direction="vertical" size="middle" style={{ width: '100%' }}>
@@ -609,11 +656,29 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
             <Select
               value={week}
               onChange={setWeek}
-              options={WEEKS.map((w) => ({ label: w, value: w }))}
-              style={{ width: 120, marginLeft: 8 }}
+              options={weekOptions}
+              style={{ width: 128, marginLeft: 8 }}
+              title={
+                weekMerge?.tooltip?.trim()
+                  ? weekMerge.tooltip
+                  : 'Monday–Sunday calendar week shared across neighbouring months where the week overlaps two months.'
+              }
             />
+            {showMergedWeekLabel ? (
+              <Tooltip title={mergeTooltip || 'This KPI week spans two calendar months; numbers match the same real week under the other month filter.'}>
+                <span style={{ marginLeft: 8, display: 'inline-block' }}>
+                  <Tag color="processing">Week {weekNumDisplay} (Merged)</Tag>
+                </span>
+              </Tooltip>
+            ) : null}
           </span>
         </Space>
+
+        {selectedPerson && showMergedWeekLabel && mergeRangeText ? (
+          <Text type="secondary" style={{ display: 'block', fontSize: 13 }}>
+            Merged calendar week: {mergeRangeText}
+          </Text>
+        ) : null}
 
         {loading && <DashboardBlockSkeleton />}
 
@@ -1301,7 +1366,6 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                       dataSource={(successKpi.trainingFollowUp.details?.companies ?? []).map((company, i) => ({
                         key: `fu-${i}`,
                         company,
-                        callDate: successKpi.trainingFollowUp.details.followupDates?.[i] ?? '',
                         before: successKpi.trainingFollowUp.details.beforePercentages?.[i] ?? null,
                         after: successKpi.trainingFollowUp.details.afterPercentages?.[i] ?? null,
                         feature: successKpi.trainingFollowUp.details.features?.[i]?.[0] ?? '',
@@ -1309,7 +1373,6 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                       columns={[
                         { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
                         { title: 'Feature', dataIndex: 'feature', key: 'feature', width: 120, ellipsis: true },
-                        { title: 'Call Date', dataIndex: 'callDate', key: 'callDate', width: 130 },
                         { title: 'Before %', dataIndex: 'before', key: 'before', width: 100 },
                         { title: 'After %', dataIndex: 'after', key: 'after', width: 100 },
                       ]}
@@ -1351,13 +1414,13 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
                     dataSource={(successKpi.successIncrease.details?.companies ?? []).map((company, i) => ({
                       key: i,
                       company,
-                      callDate: successKpi.successIncrease.details.followupDates?.[i] ?? '',
+                      feature: successKpi.successIncrease.details.features?.[i]?.[0] ?? '',
                       before: successKpi.successIncrease.details.beforePercentages?.[i] ?? null,
                       after: successKpi.successIncrease.details.afterPercentages?.[i] ?? null,
                     }))}
                     columns={[
                       { title: 'Company', dataIndex: 'company', key: 'company', width: 160, ellipsis: false, render: (v: string) => <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word', display: 'block' }}>{v ?? '—'}</span> },
-                      { title: 'Call Date', dataIndex: 'callDate', key: 'callDate', width: 130 },
+                      { title: 'Feature', dataIndex: 'feature', key: 'feature', width: 140, ellipsis: true, render: (v: string) => v || '—' },
                       { title: 'Before %', dataIndex: 'before', key: 'before', width: 100 },
                       { title: 'After %', dataIndex: 'after', key: 'after', width: 100 },
                     ]}
@@ -1863,7 +1926,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
             <Modal
               title={
                 akashCsModal
-                  ? `Customer Support – Week ${akashCsModal.meta?.dataWeekNum ?? '—'} (${akashCsModal.meta?.dataRangeLabel ?? ''})`
+                  ? `Customer Support – Prior arrivals: ${akashCsModal.meta?.dataRangeLabel ?? '—'} · Selected week: ${akashCsModal.meta?.selectedWeekRangeLabel ?? '—'}`
                   : ''
               }
               open={!!akashCsModal}

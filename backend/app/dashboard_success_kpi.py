@@ -7,6 +7,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
+from app.kpi_calendar_week import get_kpi_calendar_week_range, kpi_max_week_index_in_month
 from app.supabase_client import supabase
 
 SUCCESS_KPI_POC_TARGET = 16
@@ -19,7 +20,7 @@ _WD_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
 def _format_dashboard_week_label(week_start: date, week_end: date) -> str:
-    """Human-readable KPI week label (Monday–Sunday range, capped at month end)."""
+    """Human-readable KPI week label (full Monday–Sunday calendar week)."""
     sm, em = _MONTH_ABBR[week_start.month - 1], _MONTH_ABBR[week_end.month - 1]
     return (
         f"{_WD_SHORT[week_start.weekday()]} {week_start.day} {sm} – "
@@ -53,27 +54,6 @@ def _company_key(company_id: Any, company_name: str | None) -> str | None:
     if nm:
         return f"name:{nm}"
     return None
-
-
-def _kpi_week_range_in_month(year: int, month_num: int, week_idx: int) -> tuple[date, date] | None:
-    """Month-scoped KPI week range: Monday–Sunday (week 1 from month start, capped at month end)."""
-    import calendar
-
-    if week_idx < 1 or week_idx > 5:
-        return None
-    first = date(year, month_num, 1)
-    last = calendar.monthrange(year, month_num)[1]
-    month_end = date(year, month_num, last)
-    if week_idx == 1:
-        ws = first if first.weekday() != 6 else (first + timedelta(days=1))
-        we = min(ws + timedelta(days=(6 - ws.weekday()) % 7), month_end)
-        return ws, we
-    first_monday = first + timedelta(days=(7 - first.weekday()) % 7)
-    ws = first_monday + timedelta(days=(week_idx - 2) * 7)
-    if ws.month != month_num:
-        return None
-    we = min(ws + timedelta(days=6), month_end)
-    return ws, we
 
 
 def compute_success_kpi_for_dashboard(
@@ -384,9 +364,10 @@ def compute_success_kpi_for_dashboard(
         pct_values = [poc_pct, train_pct, fu_pct, success_pct]
         overall_pct = round(sum(pct_values) / len(pct_values), 2) if pct_values else 0
 
-        # Weekly graph: KPI weeks (Mon–Sun, month-scoped)
-        for w in range(1, 6):
-            rng = _kpi_week_range_in_month(y, month_num, w)
+        # Weekly graph: KPI weeks (full Mon–Sun; merged across month boundaries where applicable)
+        max_wm = kpi_max_week_index_in_month(y, month_num)
+        for w in range(1, max_wm + 1):
+            rng = get_kpi_calendar_week_range(y, month_num, w)
             if not rng:
                 weekly_success_pct.append(0)
                 continue
