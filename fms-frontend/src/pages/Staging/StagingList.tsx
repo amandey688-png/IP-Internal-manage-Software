@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { Table, Card, Typography, Tag, Select, Space, Input } from 'antd'
 import { PhoneOutlined, MailOutlined, MessageOutlined, LinkOutlined } from '@ant-design/icons'
 import { ticketsApi } from '../../api/tickets'
@@ -278,13 +277,11 @@ const stagingTicketColumns = [
 
 export const StagingList = () => {
   const { isUser, isMasterAdmin } = useRole()
-  const [searchParams, setSearchParams] = useSearchParams()
-  const openId = searchParams.get('open')
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [tickets, setTickets] = useState<Ticket[]>([])
   const [total, setTotal] = useState(0)
-  const [drawerTicketId, setDrawerTicketId] = useState<string | null>(openId || null)
+  const [drawerTicketId, setDrawerTicketId] = useState<string | null>(null)
   /** Stage filter: applies to table, Export and Print */
   const [stageFilter, setStageFilter] = useState<string>('')
   const [referenceFilter, setReferenceFilter] = useState('')
@@ -299,10 +296,6 @@ export const StagingList = () => {
   const loadingMoreRef = useRef(false)
   const tableContainerRef = useRef<HTMLDivElement>(null)
   const tableSentinelRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (openId) setDrawerTicketId(openId)
-  }, [openId])
 
   useEffect(() => {
     ticketsRef.current = tickets
@@ -370,7 +363,7 @@ export const StagingList = () => {
   }, [loading, referenceFilter])
 
   /** Fetches all staging tickets across pages (section: staging, fixed sort). Used for stage filter and export. */
-  const fetchAllStagingPages = async (): Promise<Ticket[]> => {
+  const fetchAllStagingPages = useCallback(async (): Promise<Ticket[]> => {
     const allTickets: Ticket[] = []
     let currentPage = 1
     const limit = 100
@@ -391,7 +384,7 @@ export const StagingList = () => {
       currentPage++
     }
     return allTickets
-  }
+  }, [referenceFilter])
 
   const fetchAllStagingTicketsForStageFilter = useCallback(async () => {
     const gen = ++listFetchGeneration.current
@@ -415,13 +408,11 @@ export const StagingList = () => {
   useEffect(() => {
     if (stageFilter) {
       void fetchAllStagingTicketsForStageFilter()
-    } else {
-      if (allStagingTicketsForStageFilter.length > 0) {
-        setAllStagingTicketsForStageFilter([])
-      }
-      void fetchStagingTickets()
+      return
     }
-  }, [stageFilter, referenceFilter, fetchAllStagingTicketsForStageFilter, fetchStagingTickets, allStagingTicketsForStageFilter.length])
+    setAllStagingTicketsForStageFilter([])
+    void fetchStagingTickets()
+  }, [stageFilter, referenceFilter, fetchAllStagingTicketsForStageFilter, fetchStagingTickets])
 
   const tryLoadMoreTickets = useCallback(() => {
     if (loading) return
@@ -457,6 +448,10 @@ export const StagingList = () => {
 
   const stagingStageLabels = ['Stage 1: Staging Planned', 'Stage 2: Live Planned', 'Stage 3: Review Planned']
   const ticketsForDisplay = tickets
+  const stagedFilteredCount = useMemo(() => {
+    if (!stageFilter) return total
+    return allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter).length
+  }, [allStagingTicketsForStageFilter, stageFilter, total])
   const getStageForExport = (t: Record<string, unknown>) => getStagingCurrentStage(t as Parameters<typeof getStagingCurrentStage>[0])
   const exportColumns = [...TICKET_EXPORT_COLUMNS]
   const exportRows = (exportTickets.length > 0 ? exportTickets : ticketsForDisplay).map((t) => buildTicketExportRow(t as unknown as Record<string, unknown>, getStageForExport))
@@ -516,7 +511,10 @@ export const StagingList = () => {
               loading={false}
               scroll={{ x: 'max-content' }}
               onRow={(record) => ({
-                onClick: () => record?.id && setDrawerTicketId(record.id),
+                onClick: () => {
+                  if (!record?.id) return
+                  setDrawerTicketId(record.id)
+                },
                 style: { cursor: 'pointer' },
               })}
               pagination={false}
@@ -526,8 +524,8 @@ export const StagingList = () => {
                     <Table.Summary.Cell index={0} colSpan={stagingTicketColumns.length}>
                       <div ref={tableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
                       <Typography.Text type="secondary">
-                        Showing {ticketsForDisplay.length} of {stageFilter ? allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter).length : total} tickets
-                        {ticketsForDisplay.length < (stageFilter ? allStagingTicketsForStageFilter.filter((t) => getStagingCurrentStage(t).stageLabel === stageFilter).length : total) ? ' · scroll to load more' : ''}
+                        Showing {ticketsForDisplay.length} of {stagedFilteredCount} tickets
+                        {ticketsForDisplay.length < stagedFilteredCount ? ' · scroll to load more' : ''}
                       </Typography.Text>
                       {loadingMore ? <span style={{ marginLeft: 8 }}>Loading...</span> : null}
                     </Table.Summary.Cell>
@@ -543,11 +541,9 @@ export const StagingList = () => {
         open={!!drawerTicketId}
         onClose={() => {
           setDrawerTicketId(null)
-          if (openId) setSearchParams({})
         }}
         onUpdate={() => {
           setDrawerTicketId(null)
-          if (openId) setSearchParams({})
           void fetchStagingTickets()
         }}
         readOnly={isUser && !isMasterAdmin}
