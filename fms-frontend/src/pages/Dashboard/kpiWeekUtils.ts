@@ -8,30 +8,71 @@ export function dayjsFromIstNow(): Dayjs {
 }
 
 /**
- * KPI week-of-month (1–5), matching backend `_week_of_month_kpi_date`:
- * - calendar ranges for each week are Mon–Sun (see API); week-1 bucketing uses first Saturday + Mon-before-first-Monday rule
+ * KPI week index (1-based) aligned with backend `week_of_month_for_date`:
+ * anchor = Monday of the ISO week containing the 1st of the month → full Mon–Sun weeks (may overlap adjacent months).
  */
 export function weekOfMonth(d: Dayjs): number {
-  const first = d.startOf('month')
-  const firstDayJs = first.day() // 0 Sun … 6 Sat
-  const pyWeekday = (firstDayJs + 6) % 7 // Mon=0 … Sun=6
-  const firstSaturday = ((5 - pyWeekday) % 7) + 1 // day-of-month for first Saturday
-  const day = d.date()
-  if (day <= firstSaturday) return 1
-  const firstMonday = ((7 - pyWeekday) % 7) + 1 // day-of-month for first Monday on/after 1st
-  if (day < firstMonday) return 1
-  const weekNum = Math.floor((day - firstMonday) / 7) + 2
-  return Math.max(1, Math.min(5, weekNum))
+  const ref = d.startOf('day')
+  const first = ref.startOf('month')
+  const jsDow = first.day()
+  const pyWd = (jsDow + 6) % 7
+  const anchor = first.subtract(pyWd, 'day')
+  const diffDays = ref.diff(anchor.startOf('day'), 'day')
+  return Math.max(1, Math.floor(diffDays / 7) + 1)
 }
 
 export function maxWeekOfMonth(reference: Dayjs): number {
-  const end = reference.endOf('month').date()
+  const end = reference.daysInMonth()
   let maxWeek = 1
   for (let day = 1; day <= end; day += 1) {
     const d = reference.date(day)
     maxWeek = Math.max(maxWeek, weekOfMonth(d))
   }
   return maxWeek
+}
+
+/** Monday-start / Sunday-end KPI week bounds for filters (aligned with backend). */
+export function getKpiCalendarWeekBounds(
+  year: number,
+  monthIndexZero: number,
+  weekIndexOne: number,
+): { start: Dayjs; end: Dayjs } | null {
+  if (
+    !Number.isFinite(year) ||
+    monthIndexZero < 0 ||
+    monthIndexZero > 11 ||
+    weekIndexOne < 1
+  )
+    return null
+  const ref = dayjs().year(year).month(monthIndexZero).date(1)
+  const maxW = maxWeekOfMonth(ref)
+  if (weekIndexOne > maxW) return null
+  const first = ref.startOf('month').startOf('day')
+  const pyWd = (first.day() + 6) % 7
+  const anchor = first.subtract(pyWd, 'day')
+  const start = anchor.add((weekIndexOne - 1) * 7, 'day')
+  const end = start.add(6, 'day').endOf('day')
+  return { start: start.startOf('day'), end }
+}
+
+/** True when selected month filter’s KPI week overlaps a different calendar month (merged week UX). */
+export function isKpiMergedWeekAcrossMonths(
+  year: number,
+  monthIndexZero: number,
+  weekIndexOne: number,
+): boolean {
+  const b = getKpiCalendarWeekBounds(year, monthIndexZero, weekIndexOne)
+  if (!b) return false
+  const ym = refMonthYear(year, monthIndexZero)
+  return monthYearOf(b.start) !== ym || monthYearOf(b.end) !== ym
+}
+
+function refMonthYear(year: number, monthIndexZero: number): string {
+  return `${year}-${monthIndexZero}`
+}
+
+function monthYearOf(d: Dayjs): string {
+  return `${d.year()}-${d.month()}`
 }
 
 export function getDefaultPreviousWeekFilter() {

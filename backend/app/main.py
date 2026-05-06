@@ -31,6 +31,14 @@ import httpx
 from app.supabase_client import SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL, supabase, supabase_auth
 from app.auth_middleware import get_current_user, get_current_user_optional
 from app import payment_ageing as _pa
+from app.kpi_calendar_week import (
+    build_week_merge_meta,
+    get_kpi_calendar_week_range,
+    kpi_max_week_index_in_month,
+    merged_week_key_from_range,
+    prior_kpi_calendar_week_range,
+    week_of_month_for_date,
+)
 
 # Role-based access: master_admin, admin (Super Admin), approver (Approver), user (Operator)
 def _normalize_role(name: str | None) -> str:
@@ -2462,61 +2470,32 @@ def _parse_kpi_week_num(week_str: str | None, default: int = 2) -> int:
                 week_num = int(m.group(1))
             except Exception:
                 week_num = default
-    return max(1, min(5, week_num))
+    return max(1, min(8, week_num))
 
 
 def _week_of_month(dt: datetime) -> int:
-    """Week of month (1-5), KPI rule: week starts Monday and ends Sunday (full week)."""
+    """Week of calendar month bucket (Monday–Sunday merge across boundaries). Matches KPI Dashboard."""
     return _week_of_month_kpi_date(dt.date())
 
 
 def _week_of_month_kpi_date(d: date) -> int:
-    """KPI week number (1-5) for a date in its month: week-1 includes month-start until first Sunday."""
-    first = date(d.year, d.month, 1)
-    first_sat = first + timedelta(days=(5 - first.weekday()) % 7)
-    if d <= first_sat:
-        return 1
-    first_monday = first + timedelta(days=(7 - first.weekday()) % 7)
-    if d < first_monday:
-        return 1
-    week_num = ((d - first_monday).days // 7) + 2
-    return max(1, min(5, week_num))
+    """KPI week index (Monday–Sunday slot) relative to calendar month boundary merge rules."""
+    return week_of_month_for_date(d)
 
 
 def _dashboard_kpi_week_range(year: int, month_num: int, week_str: str) -> tuple[date, date] | None:
-    """Return month-scoped KPI week range (Monday–Sunday, capped at month end)."""
+    """Full Monday–Sunday KPI week range; same range for bridged adjacent-month week slots."""
     try:
-        import calendar
-
-        week_num = _parse_kpi_week_num(week_str, default=2)
-        first = date(year, month_num, 1)
-        last_day = calendar.monthrange(year, month_num)[1]
-        month_end = date(year, month_num, last_day)
-
-        if week_num == 1:
-            # Week starts Monday; if month opens on Sunday, week 1 starts on Monday 2nd.
-            start = first if first.weekday() != 6 else (first + timedelta(days=1))
-            end = start + timedelta(days=(6 - start.weekday()) % 7)  # first Sunday on/after start
-            end = min(end, month_end)
-            return start, end
-
-        first_monday = first + timedelta(days=(7 - first.weekday()) % 7)
-        start = first_monday + timedelta(days=(week_num - 2) * 7)
-        if start.month != month_num:
-            return None
-        end = min(start + timedelta(days=6), month_end)  # through Sunday (7-day span)
-        return start, end
+        wn = max(
+            1,
+            min(
+                _parse_kpi_week_num(week_str, default=2),
+                kpi_max_week_index_in_month(year, month_num),
+            ),
+        )
+        return get_kpi_calendar_week_range(year, month_num, wn)
     except Exception:
         return None
-
-
-def _date_in_dashboard_kpi_week(d: date | None, year: int, month_num: int, week_num: int) -> bool:
-    """True if date belongs to selected KPI month+week (Monday–Sunday)."""
-    if d is None:
-        return False
-    if d.year != year or d.month != month_num:
-        return False
-    return _week_of_month_kpi_date(d) == max(1, min(5, week_num))
 
 
 def _normalize_query_arrival_iso(ts) -> str:
@@ -2592,26 +2571,12 @@ def _fetch_adrija_social_kpi_day_map(d_start: date, d_end: date) -> dict[date, d
     return out
 
 
-def _akash_customer_support_data_week(sel_week: int, year: int, month_num: int) -> tuple[int, int, int]:
-    """Support-style week **before** the selected KPI week (e.g. Week 2 selected → use Week 1 in same month)."""
-    if sel_week > 1:
-        return sel_week - 1, year, month_num
-    if month_num > 1:
-        py, pm = year, month_num - 1
-    else:
-        py, pm = year - 1, 12
-    for wn in range(5, 0, -1):
-        if _dashboard_kpi_week_range(py, pm, f"week {wn}"):
-            return wn, py, pm
-    return 1, py, pm
-
-
-def _akash_support_tickets_in_week(tickets: list, data_week: int, data_year: int, data_month: int) -> list:
-    """Same week bucketing as Support Dashboard weekly-details (`_get_ticket_week`)."""
-    out = []
+def _tickets_arrival_within_range(tickets: list, rs: date, re: date) -> list:
+    """Tickets whose query_arrival (or created_at) date falls in ``[rs, re]`` (inclusive)."""
+    out: list = []
     for t in tickets:
-        tw, tm, ty = _get_ticket_week(t)
-        if tw == data_week and ty == data_year and tm == data_month:
+        da = _parse_iso_to_date(t.get("query_arrival_at") or t.get("created_at"))
+        if da is not None and rs <= da <= re:
             out.append(t)
     return out
 
@@ -2945,14 +2910,19 @@ def dashboard_kpi(
         except Exception:
             y = datetime.now().year
 
+        max_week_index = kpi_max_week_index_in_month(y, month_num)
         range_week = _dashboard_kpi_week_range(y, month_num, week or "week 2")
         if not range_week:
-            range_start = date(y, month_num, 1)
             import calendar
+
+            range_start = date(y, month_num, 1)
             _, last = calendar.monthrange(y, month_num)
             range_end = date(y, month_num, last)
         else:
             range_start, range_end = range_week
+
+        week_calendar_meta = build_week_merge_meta(y, month_num, range_start, range_end)
+        merged_week_key = merged_week_key_from_range(range_start, range_end)
 
         # Month range for monthly percentages
         import calendar
@@ -3105,15 +3075,13 @@ def dashboard_kpi(
                     except Exception as e2:
                         _log(f"dashboard/kpi tickets fetch: {e2}")
 
-                week_num_selected = _parse_kpi_week_num(week, default=2)
-
                 # Enrich all chores/bugs once (company names) — used for weekly slice and Stage 2 completion week
                 _enrich_tickets_with_lookups(tickets)
 
                 week_tickets = []
                 for t in tickets:
                     d_arrival = _parse_iso_to_date(t.get("query_arrival_at") or t.get("created_at"))
-                    if _date_in_dashboard_kpi_week(d_arrival, y, month_num, week_num_selected):
+                    if d_arrival is not None and range_start <= d_arrival <= range_end:
                         week_tickets.append(t)
 
                 def _support_fms_row_item(ticket: dict) -> dict:
@@ -3160,7 +3128,7 @@ def dashboard_kpi(
                     if not (str(t.get("actual_2") or "").strip()):
                         continue
                     d2 = _parse_iso_to_date(t.get("actual_2"))
-                    if _date_in_dashboard_kpi_week(d2, y, month_num, week_num_selected):
+                    if d2 is not None and range_start <= d2 <= range_end:
                         stage2_completed_tickets.append(t)
                 stage2_completed_in_week = len(stage2_completed_tickets)
 
@@ -3236,7 +3204,7 @@ def dashboard_kpi(
         try:
             from app.checklist_utils import get_occurrence_dates_in_range
             task_ids = [t["id"] for t in tasks] if tasks else []
-            for w in range(1, 6):
+            for w in range(1, max_week_index + 1):
                 weekly_progress_weeks.append(f"week {w}")
                 rng = _dashboard_kpi_week_range(y, month_num, f"week {w}")
                 if not rng:
@@ -3285,7 +3253,7 @@ def dashboard_kpi(
                 week_tickets_w = []
                 for t in tickets:
                     d_arrival_w = _parse_iso_to_date(t.get("query_arrival_at") or t.get("created_at"))
-                    if _date_in_dashboard_kpi_week(d_arrival_w, y, month_num, w):
+                    if d_arrival_w is not None and rs <= d_arrival_w <= re:
                         week_tickets_w.append(t)
                 total_cb_w = len(week_tickets_w)
                 pending_w = 0
@@ -3317,10 +3285,17 @@ def dashboard_kpi(
             except Exception as e:
                 _log(f"dashboard/kpi akash support tickets: {e}")
                 ak_tickets = []
-            sel_w = _parse_kpi_week_num(week, default=2)
-            dw, dy, dm = _akash_customer_support_data_week(sel_w, y, month_num)
-            data_month_label = _MONTH_NAMES[dm - 1]
-            week_slice = _akash_support_tickets_in_week(ak_tickets, dw, dy, dm)
+            sel_w = max(1, min(_parse_kpi_week_num(week, default=2), max_week_index))
+            filt = get_kpi_calendar_week_range(y, month_num, sel_w)
+            filter_rs, filter_re = filt if filt else (range_start, range_end)
+            prev_rs, prev_re = prior_kpi_calendar_week_range(filter_rs)
+
+            prior_month_label = (
+                _MONTH_NAMES[prev_rs.month - 1]
+                if prev_rs.month == prev_re.month and prev_rs.year == prev_re.year
+                else f"{_MONTH_NAMES[prev_rs.month - 1]}-{_MONTH_NAMES[prev_re.month - 1]}"
+            )
+            week_slice = _tickets_arrival_within_range(ak_tickets, prev_rs, prev_re)
             total_cs = len(week_slice)
             pending_cs = sum(
                 1
@@ -3328,8 +3303,7 @@ def dashboard_kpi(
                 if _is_pending(t.get("status") or "") and not _is_resolved(t.get("status"), t.get("status_4"))
             )
             cs_score = round(((total_cs - pending_cs) / total_cs) * 100) if total_cs else 0
-            # Same formula for the **filter week** (aligns checklist + support in headline overall)
-            week_slice_filter = _akash_support_tickets_in_week(ak_tickets, sel_w, y, month_num)
+            week_slice_filter = _tickets_arrival_within_range(ak_tickets, filter_rs, filter_re)
             total_cf = len(week_slice_filter)
             pending_cf = sum(
                 1
@@ -3342,11 +3316,13 @@ def dashboard_kpi(
                 resp_disp = "—"
             else:
                 resp_disp = str(round(avg_m))
-            range_lbl = _week_date_range(dw, dm, dy)
+            range_lbl = f"{prev_rs.strftime('%d %b %Y')} – {prev_re.strftime('%d %b %Y')}"
+            filter_range_lbl = f"{filter_rs.strftime('%d %b %Y')} – {filter_re.strftime('%d %b %Y')}"
             help_note = (
-                f"Support (chores & bugs): same week rules as Support Dashboard. "
-                f"UI week {sel_w} → data week {dw} ({data_month_label} {dy})."
+                f"Mon–Sun calendar weeks. KPI cards use arrivals in prior week ({range_lbl}). "
+                f"Overall blend uses arrivals in selected week ({filter_range_lbl}), matching checklist/delegation."
             )
+            data_month_label = prior_month_label
             details_resp: list = []
             details_comp: list = []
             details_pend: list = []
@@ -3380,10 +3356,11 @@ def dashboard_kpi(
                 "response_time_display": resp_disp,
                 "meta": {
                     "selectedWeekNum": sel_w,
-                    "dataWeekNum": dw,
+                    "dataWeekNum": None,
                     "dataMonth": data_month_label,
-                    "dataYear": str(dy),
+                    "dataYear": str(prev_rs.year),
                     "dataRangeLabel": range_lbl,
+                    "selectedWeekRangeLabel": filter_range_lbl,
                     "helpNote": help_note,
                 },
                 "details_response_delay": details_resp,
@@ -3546,8 +3523,11 @@ def dashboard_kpi(
             "meta": {
                 "applied": applied,
                 "availableMonths": list(_MONTH_NAMES),
-                "availableWeeks": ["week 1", "week 2", "week 3", "week 4", "week 5"],
+                "availableWeeks": [f"week {i}" for i in range(1, max_week_index + 1)],
                 "availableYears": ["2024", "2025", "2026", "2027"],
+                "maxWeekIndex": max_week_index,
+                "mergedWeekKey": merged_week_key,
+                "weekCalendar": week_calendar_meta,
             },
             "checklist": {
                 "rows": checklist_rows,
@@ -3649,11 +3629,6 @@ def dashboard_success_kpi_till_date(
 
 
 # ---------- Support Dashboard Stats (FMS-style: weekly, pending grouped, top companies, features) ----------
-def _week_of_month(dt: datetime) -> int:
-    """Week of month (1-5), KPI rule: week starts Monday and ends Sunday (full week)."""
-    return _week_of_month_kpi_date(dt.date())
-
-
 def _days_pending(created_iso: str | None, resolved_iso: str | None) -> int:
     """Days from created (or query_arrival) to now if pending, else 0.
     Uses timezone-aware UTC for comparisons (Supabase returns aware datetimes)."""

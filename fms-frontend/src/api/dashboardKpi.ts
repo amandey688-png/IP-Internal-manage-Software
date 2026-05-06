@@ -105,10 +105,12 @@ export interface AkashKpiPillar {
 
 export interface AkashCustomerSupportMeta {
   selectedWeekNum?: number
-  dataWeekNum?: number
+  dataWeekNum?: number | null
   dataMonth?: string
   dataYear?: string
   dataRangeLabel?: string
+  /** Mon–Sun range for arrivals used in headline blend vs checklist week */
+  selectedWeekRangeLabel?: string
   helpNote?: string
 }
 
@@ -208,6 +210,17 @@ export interface SuccessKpiResponse {
   }
 }
 
+/** Calendar week envelope for KPI filters (merged month boundaries share one key). */
+export interface KpiWeekCalendarMeta {
+  mergedWeekKey?: string
+  startDate?: string
+  endDate?: string
+  spansPreviousMonth?: boolean
+  spansNextMonth?: boolean
+  mergeBadge?: string
+  tooltip?: string
+}
+
 export interface DashboardKpiResponse {
   success: boolean
   error?: string
@@ -216,6 +229,9 @@ export interface DashboardKpiResponse {
     availableMonths: string[]
     availableWeeks: string[]
     availableYears: string[]
+    maxWeekIndex?: number
+    mergedWeekKey?: string
+    weekCalendar?: KpiWeekCalendarMeta
   }
   checklist?: {
     rows: ChecklistRow[]
