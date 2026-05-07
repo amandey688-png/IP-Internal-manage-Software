@@ -1,4 +1,4 @@
-import { Typography, Row, Col, Card, Button, Modal, Table, Alert } from 'antd'
+import { Typography, Row, Col, Card, Button, Modal, Table, Alert, Skeleton } from 'antd'
 import { TextCellTooltip, tableCellEllipsisStyle } from '../../components/common/TextCellTooltip'
 import {
   CalendarOutlined,
@@ -8,10 +8,10 @@ import {
   RocketOutlined,
   FileTextOutlined,
 } from '@ant-design/icons'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import { supportDashboardApi, type SupportDashboardStats, type WeekData } from '../../api/supportDashboard'
-import { LoadingSpinner } from '../../components/common/LoadingSpinner'
 import { ModalContentSkeleton } from '../../components/common/skeletons'
 import { formatDateWeekly, truncateTitleDescCell } from '../../utils/helpers'
 import { ROUTES } from '../../utils/constants'
@@ -50,9 +50,6 @@ const weekBoxColors = [
 
 export const SupportDashboard = () => {
   const navigate = useNavigate()
-  const [loading, setLoading] = useState(true)
-  const [data, setData] = useState<SupportDashboardStats | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [filteredModalOpen, setFilteredModalOpen] = useState(false)
   const [weeklyModalOpen, setWeeklyModalOpen] = useState(false)
   const [filteredLoading, setFilteredLoading] = useState(false)
@@ -66,33 +63,32 @@ export const SupportDashboard = () => {
   const [featureData, setFeatureData] = useState<{ data: unknown[]; filterType: string; totalRecords: number } | null>(null)
   const [featureLoading, setFeatureLoading] = useState(false)
 
-  const fetchData = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await supportDashboardApi.getStats()
-      setData(res)
-    } catch (err: unknown) {
-      console.error('Support Dashboard fetch error:', err)
-      const ax = err as { response?: { data?: { detail?: string }; status?: number }; request?: unknown; message?: string }
-      const backendMsg = ax?.response?.data?.detail
-      const isNetworkError = !ax?.response && (ax?.request || ax?.message?.toLowerCase().includes('network'))
-      const msg = backendMsg
-        ? String(backendMsg)
-        : isNetworkError
-          ? isLocalBackend
-            ? `Backend not reachable. ${getLocalUvicornStartCommand()}`
-            : 'Backend not reachable. Check your connection or API URL.'
-          : ax?.message ? String(ax.message) : 'Unknown error'
-      setError(`Failed to load Support Dashboard: ${msg}`)
-    } finally {
-      setLoading(false)
-    }
-  }
+  const {
+    data,
+    isLoading: loading,
+    error,
+    refetch,
+  } = useQuery<SupportDashboardStats>({
+    queryKey: ['support-dashboard', 'stats'],
+    queryFn: () => supportDashboardApi.getStats(),
+  })
 
-  useEffect(() => {
-    fetchData()
-  }, [])
+  const errorMessage = (() => {
+    if (!error) return null
+    const ax = error as { response?: { data?: { detail?: string } }; request?: unknown; message?: string }
+    const backendMsg = ax?.response?.data?.detail
+    const isNetworkError = !ax?.response && (ax?.request || ax?.message?.toLowerCase().includes('network'))
+    const msg = backendMsg
+      ? String(backendMsg)
+      : isNetworkError
+        ? isLocalBackend
+          ? `Backend not reachable. ${getLocalUvicornStartCommand()}`
+          : 'Backend not reachable. Check your connection or API URL.'
+        : ax?.message
+          ? String(ax.message)
+          : 'Unknown error'
+    return `Failed to load Support Dashboard: ${msg}`
+  })()
 
   const showFilteredData = async (filterType: string, category: string) => {
     setCurrentFilter({ type: filterType, category })
@@ -165,7 +161,13 @@ export const SupportDashboard = () => {
     }
   }
 
-  if (loading) return <LoadingSpinner fullPage />
+  if (loading) {
+    return (
+      <div style={{ maxWidth: 1400, margin: '0 auto', padding: 16 }}>
+        <Skeleton active paragraph={{ rows: 8 }} />
+      </div>
+    )
+  }
 
   const weeks = data?.weeksData ?? []
   const countsChores = data?.counts?.chores ?? { '1-2': 0, '2-7': 0, '7+': 0, hold: 0 }
@@ -214,7 +216,7 @@ export const SupportDashboard = () => {
           </div>
           <Button
             icon={<ReloadOutlined />}
-            onClick={fetchData}
+            onClick={() => void refetch()}
             style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.3)', color: '#fff' }}
           >
             Refresh
@@ -222,12 +224,12 @@ export const SupportDashboard = () => {
         </div>
       </div>
 
-      {error && (
+      {errorMessage && (
         <Alert
           type="error"
-          message={error}
+          message={errorMessage}
           showIcon
-          action={<Button size="small" onClick={fetchData}>Retry</Button>}
+          action={<Button size="small" onClick={() => void refetch()}>Retry</Button>}
           style={{ marginBottom: 24, borderRadius: 12 }}
         />
       )}

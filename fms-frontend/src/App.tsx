@@ -1,6 +1,6 @@
 import { useEffect, lazy, Suspense } from "react"
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom"
-import { ConfigProvider } from "antd"
+import { ConfigProvider, Spin } from "antd"
 import { AuthProvider } from "./contexts/AuthProvider"
 import { AppLayout } from "./components/layout/AppLayout"
 import { ProtectedRoute } from "./components/layout/ProtectedRoute"
@@ -12,7 +12,6 @@ import { OTPVerification } from "./pages/auth/OTPVerification"
 import { ConfirmationSuccess } from "./pages/auth/ConfirmationSuccess"
 
 import { ErrorBoundary } from "./components/common/ErrorBoundary"
-import { LoadingSpinner } from "./components/common/LoadingSpinner"
 
 const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })))
 const DashboardKPIPage = lazy(() => import("./pages/Dashboard/DashboardKPIPage").then((m) => ({ default: m.DashboardKPIPage })))
@@ -120,7 +119,7 @@ function App() {
       <AuthProvider>
         <BrowserRouter>
           <AppTitle />
-          <Suspense fallback={<LoadingSpinner fullPage />}>
+          <Suspense fallback={<div style={{ minHeight: "40vh", display: "flex", alignItems: "center", justifyContent: "center" }}><Spin size="large" /></div>}>
           <Routes>
             {/* ================= PUBLIC ROUTES ================= */}
             <Route path={ROUTES.REGISTER} element={<Register />} />

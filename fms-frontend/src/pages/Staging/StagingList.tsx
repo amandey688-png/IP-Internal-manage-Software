@@ -508,8 +508,9 @@ export const StagingList = () => {
               columns={stagingTicketColumns}
               dataSource={ticketsForDisplay}
               rowKey="id"
+              virtual
               loading={false}
-              scroll={{ x: 'max-content' }}
+              scroll={{ x: 2600, y: 600 }}
               onRow={(record) => ({
                 onClick: () => {
                   if (!record?.id) return

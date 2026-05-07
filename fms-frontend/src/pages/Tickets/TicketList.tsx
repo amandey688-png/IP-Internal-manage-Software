@@ -1227,9 +1227,10 @@ export const TicketList = () => {
               columns={columns}
               dataSource={ticketsForDisplay}
               rowKey="id"
+              virtual
               loading={false}
               locale={{ emptyText: 'No tickets yet.' }}
-              scroll={{ x: 2400, y: 'calc(100vh - 320px)' }}
+              scroll={{ x: 2400, y: 600 }}
               pagination={false}
               summary={() => (
                 <Table.Summary>

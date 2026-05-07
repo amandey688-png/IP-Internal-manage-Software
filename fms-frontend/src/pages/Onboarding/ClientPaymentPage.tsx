@@ -929,8 +929,9 @@ export function ClientPaymentPage() {
               dataSource={visibleFilteredRecords}
               columns={columns}
               rowKey="id"
+              virtual
               loading={false}
-              scroll={{ x: 900 }}
+              scroll={{ x: 900, y: 600 }}
               pagination={false}
               summary={() => (
                 <Table.Summary>
