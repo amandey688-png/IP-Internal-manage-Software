@@ -1,5 +1,6 @@
-import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Skeleton } from 'antd'
 import { Table, Card, Typography, Tag } from 'antd'
 import { solutionsApi } from '../../api/solutions'
 import { PrintExport } from '../../components/common/PrintExport'
@@ -11,29 +12,16 @@ const { Title } = Typography
 
 export const SolutionList = () => {
   const { ticketId } = useParams<{ ticketId: string }>()
-  const [loading, setLoading] = useState(true)
-  const [solutions, setSolutions] = useState<Solution[]>([])
-
-  useEffect(() => {
-    if (ticketId) {
-      fetchSolutions()
-    }
-  }, [ticketId])
-
-  const fetchSolutions = async () => {
-    if (!ticketId) return
-    setLoading(true)
-    try {
+  const { data: solutions = [], isLoading: loading } = useQuery<Solution[]>({
+    queryKey: ['solutions', ticketId],
+    queryFn: async () => {
+      if (!ticketId) return []
       const response = await solutionsApi.list(ticketId)
-      if (Array.isArray(response)) {
-        setSolutions(response)
-      }
-    } catch (error) {
-      console.error('Failed to fetch solutions:', error)
-    } finally {
-      setLoading(false)
-    }
-  }
+      return Array.isArray(response) ? response : []
+    },
+    enabled: !!ticketId,
+    placeholderData: (prev) => prev,
+  })
 
   const columns = [
     {
@@ -93,9 +81,13 @@ export const SolutionList = () => {
         <PrintExport pageTitle="Solutions" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="solutions" />
       </div>
       <Card>
-        <TableWithSkeletonLoading loading={loading} columns={5} rows={8}>
+        {loading ? (
+          <Skeleton active paragraph={{ rows: 8 }} />
+        ) : (
+        <TableWithSkeletonLoading loading={false} columns={5} rows={8}>
           <Table columns={columns} dataSource={solutions} rowKey="id" loading={false} pagination={false} />
         </TableWithSkeletonLoading>
+        )}
       </Card>
     </div>
   )

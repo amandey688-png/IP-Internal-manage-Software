@@ -19,6 +19,78 @@ _MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "O
 _WD_SHORT = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 
+def _live_dashboard_kpi_fallback() -> dict[str, Any]:
+    """Live fallback aggregation when mv_dashboard_kpi is unavailable/empty."""
+    try:
+        rows = (
+            supabase.table("onboarding_client_payment")
+            .select("invoice_amount,invoice_date,payment_received_date")
+            .limit(20000)
+            .execute()
+            .data
+            or []
+        )
+        now_utc = datetime.now(timezone.utc)
+        month_start = date(now_utc.year, now_utc.month, 1)
+        total_orders = len(rows)
+        pending_orders = 0
+        completed_orders = 0
+        revenue_total = 0.0
+        revenue_mtd = 0.0
+        for row in rows:
+            paid = row.get("payment_received_date")
+            if paid:
+                completed_orders += 1
+            else:
+                pending_orders += 1
+            try:
+                raw = str(row.get("invoice_amount") or "").strip().replace(",", "")
+                amount = float(raw) if raw else 0.0
+            except Exception:
+                amount = 0.0
+            revenue_total += amount
+            inv_d = _parse_iso_to_date(row.get("invoice_date"))
+            if inv_d and inv_d >= month_start:
+                revenue_mtd += amount
+        return {
+            "snapshot_at": now_utc.isoformat(),
+            "total_orders": int(total_orders),
+            "pending_orders": int(pending_orders),
+            "completed_orders": int(completed_orders),
+            "revenue_total": float(round(revenue_total, 2)),
+            "revenue_mtd": float(round(revenue_mtd, 2)),
+            "source": "live_fallback",
+        }
+    except Exception:
+        return {
+            "snapshot_at": datetime.now(timezone.utc).isoformat(),
+            "total_orders": 0,
+            "pending_orders": 0,
+            "completed_orders": 0,
+            "revenue_total": 0.0,
+            "revenue_mtd": 0.0,
+            "source": "live_fallback_error",
+        }
+
+
+def _get_dashboard_kpi_snapshot() -> dict[str, Any]:
+    """Prefer mv_dashboard_kpi, fallback to live aggregation when no row is available."""
+    try:
+        mv = (
+            supabase.table("mv_dashboard_kpi")
+            .select("snapshot_at,total_orders,pending_orders,completed_orders,revenue_total,revenue_mtd")
+            .limit(1)
+            .execute()
+        )
+        row = (mv.data or [None])[0] if (mv.data and len(mv.data) > 0) else None
+        if row:
+            row["source"] = "mv_dashboard_kpi"
+            return row
+    except Exception:
+        pass
+    return _live_dashboard_kpi_fallback()
+
+
 def _format_dashboard_week_label(week_start: date, week_end: date) -> str:
     """Human-readable KPI week label (full Monday–Sunday calendar week)."""
     sm, em = _MONTH_ABBR[week_start.month - 1], _MONTH_ABBR[week_end.month - 1]
@@ -67,6 +139,7 @@ def compute_success_kpi_for_dashboard(
     """
     weekly_success_pct: list[float] = []
     try:
+        dashboard_kpi_snapshot = _get_dashboard_kpi_snapshot()
         pm_rows: list[dict] = []
         try:
             pr = (
@@ -473,6 +546,7 @@ def compute_success_kpi_for_dashboard(
             "overallPercentage": overall_pct,
             "meta": {
                 "weekLabel": _format_dashboard_week_label(week_start, week_end),
+                "dashboardKpiSnapshot": dashboard_kpi_snapshot,
                 "targets": {
                     "poc": SUCCESS_KPI_POC_TARGET,
                     "training": SUCCESS_KPI_TRAIN_TARGET,

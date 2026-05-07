@@ -9,8 +9,14 @@ import os
 import sys
 import threading
 import time
+import asyncio
+import json
+import hashlib
+import inspect
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from collections import defaultdict, deque
+from functools import wraps
 # Fix Windows console encoding for emoji/special chars
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     try:
@@ -20,14 +26,16 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
         pass
 
 from datetime import datetime, date, timedelta, timezone
-from typing import Optional
-from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request, UploadFile, File, Query, BackgroundTasks
+from typing import Optional, Any, Callable, Awaitable
+from fastapi import FastAPI, HTTPException, Depends, APIRouter, Request, UploadFile, File, Query, BackgroundTasks, Response
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 import uuid
 import re
 import httpx
+from cachetools import TTLCache
 from app.supabase_client import SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL, supabase, supabase_auth
 from app.auth_middleware import get_current_user, get_current_user_optional
 from app import payment_ageing as _pa
@@ -182,7 +190,75 @@ def _sanitize_ilike_input(value: str | None, max_len: int = 120) -> str:
     return "".join(allowed).strip()[:max_len]
 
 
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
+request_logger = logging.getLogger("support_fms.request")
+FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "*").strip() or "*"
+
 app = FastAPI(title="IP Internal manage Software Backend")
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+_cache_default = TTLCache(maxsize=512, ttl=60)
+_cache_by_ttl: dict[int, TTLCache] = {}
+_cache_lock = threading.Lock()
+
+
+def _build_cache_key(args: tuple[Any, ...], kwargs: dict[str, Any], key_prefix: str) -> str:
+    payload = {"args": args, "kwargs": kwargs}
+    raw = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    digest = hashlib.md5(raw.encode("utf-8")).hexdigest()
+    return f"{key_prefix}{digest}"
+
+
+def _get_cache_for_ttl(ttl: int) -> TTLCache:
+    if ttl == 60:
+        return _cache_default
+    with _cache_lock:
+        cache = _cache_by_ttl.get(ttl)
+        if cache is None:
+            cache = TTLCache(maxsize=512, ttl=ttl)
+            _cache_by_ttl[ttl] = cache
+        return cache
+
+
+def cached(ttl: int, key_prefix: str = ""):
+    def _decorator(func: Callable[..., Any]):
+        cache = _get_cache_for_ttl(ttl)
+
+        if inspect.iscoroutinefunction(func):
+            @wraps(func)
+            async def _async_wrapper(*args: Any, **kwargs: Any) -> Any:
+                cache_key = _build_cache_key(args, kwargs, key_prefix)
+                try:
+                    return cache[cache_key]
+                except KeyError:
+                    result = await func(*args, **kwargs)
+                    cache[cache_key] = result
+                    return result
+
+            return _async_wrapper
+
+        @wraps(func)
+        def _sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+            cache_key = _build_cache_key(args, kwargs, key_prefix)
+            try:
+                return cache[cache_key]
+            except KeyError:
+                result = func(*args, **kwargs)
+                cache[cache_key] = result
+                return result
+
+        return _sync_wrapper
+
+    return _decorator
+
+
+def _etag_json(payload: Any, max_age: int = 300) -> JSONResponse:
+    raw = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    etag = hashlib.md5(raw.encode("utf-8")).hexdigest()
+    response = JSONResponse(content=payload)
+    response.headers["ETag"] = etag
+    response.headers["Cache-Control"] = f"public, max-age={max_age}, stale-while-revalidate=600"
+    return response
 
 # Basic in-memory rate limiting for sensitive endpoints.
 _RATE_LIMIT_WINDOW_SEC = int(os.getenv("RATE_LIMIT_WINDOW_SEC", "60"))
@@ -228,12 +304,21 @@ async def log_requests(request: Request, call_next):
             headers={"Cache-Control": "no-store"},
         )
     _log(f"--> {request.method} {request.url.path}")
+    start = time.perf_counter()
     try:
         response = await call_next(request)
         # Authenticated JSON API: never allow shared caches to treat responses as reusable.
-        if request.method != "OPTIONS":
+        if request.method != "OPTIONS" and "Cache-Control" not in response.headers:
             response.headers["Cache-Control"] = "no-store"
         _log(f"<-- {request.method} {request.url.path} -> {response.status_code}")
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        request_logger.info(
+            "%s %s %s %sms",
+            request.method,
+            request.url.path,
+            response.status_code,
+            duration_ms,
+        )
         return response
     except Exception as ex:
         try:
@@ -249,6 +334,8 @@ async def log_requests(request: Request, call_next):
                 detail = err_str[:300].encode("ascii", errors="replace").decode("ascii")
             except Exception:
                 detail = "Internal server error"
+        duration_ms = round((time.perf_counter() - start) * 1000, 2)
+        request_logger.info("%s %s %s %sms", request.method, request.url.path, 500, duration_ms)
         return JSONResponse(status_code=500, content={"detail": detail})
 
 # Global exception handler - keep 5xx as 5xx for security observability
@@ -300,7 +387,7 @@ def _collect_cors_origins() -> list[str]:
 _cors_origins_list = _collect_cors_origins()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins_list,
+    allow_origins=[FRONTEND_ORIGIN],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type", "X-Cron-Secret"],
@@ -384,7 +471,7 @@ def health():
         ping_snitch()
     except Exception:
         pass
-    return {"status": "ok", "message": "Backend is running"}
+    return {"ok": True, "ts": int(time.time())}
 
 
 @app.post("/auth/register-simple")
@@ -1347,6 +1434,7 @@ def _enrich_tickets_with_lookups(rows: list) -> list:
 
 
 @api_router.get("/tickets")
+@cached(ttl=30, key_prefix="tickets:list:")
 def list_tickets(
     status: str | None = None,
     type: str | None = None,
@@ -1361,7 +1449,7 @@ def list_tickets(
     sort_by: str = "created_at",
     sort_order: str = "desc",
     page: int = 1,
-    limit: int = 50,
+    page_size: int = Query(50, le=200),
     section: str | None = None,
     approval_filter: str | None = None,  # For section=approval-status: pending | unapproved | all
     status_2_filter: str | None = None,  # For section=chores-bugs: pending | completed | staging | hold (Stage 2 status)
@@ -1370,7 +1458,7 @@ def list_tickets(
     auth: dict = Depends(get_current_user),
 ):
     page = max(1, int(page or 1))
-    limit = max(1, min(int(limit or 50), 100))
+    page_size = max(1, min(int(page_size or 50), 200))
     # Approval Status section: only admin, master_admin and approver
     if section == "approval-status":
         role = _get_role_from_profile(auth["id"])
@@ -1479,10 +1567,10 @@ def list_tickets(
             q = q.ilike("reference_no", f"%{safe_ref}%")
     order_col = sort_by if sort_by in ("created_at", "updated_at", "query_arrival_at", "query_response_at", "title", "status", "priority") else "created_at"
     q = q.order(order_col, desc=(sort_order.lower() == "desc"))
-    q = q.range((page - 1) * limit, page * limit - 1)
+    q = q.range((page - 1) * page_size, page * page_size - 1)
     r = q.execute()
     rows = _enrich_tickets_with_lookups(r.data or [])
-    return {"data": rows, "total": r.count or 0, "page": page, "limit": limit}
+    return {"data": rows, "total": r.count or 0, "page": page, "page_size": page_size}
 
 
 def _level3_used_for_ticket(ticket_id: str, user_id: str) -> bool:
@@ -2885,6 +2973,7 @@ def _build_akash_kpi_payload(
 
 
 @api_router.get("/dashboard/kpi")
+@cached(ttl=30, key_prefix="dash:")
 def dashboard_kpi(
     name: str = Query(..., description="Person name: Shreyasi, Rimpa, Akash, Adrija, etc."),
     month: str = Query("Feb", description="Month: Jan..Dec"),
@@ -4463,33 +4552,91 @@ def dashboard_trends(auth: dict = Depends(get_current_user)):
 
 # ---------- Support Form Lookups ----------
 @api_router.get("/companies")
-def list_companies(auth: dict = Depends(get_current_user)):
+@cached(ttl=30, key_prefix="companies:")
+def list_companies(
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    auth: dict = Depends(get_current_user),
+):
     try:
-        r = supabase.table("companies").select("id, name").order("name").execute()
-        return r.data or []
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        offset = (page - 1) * page_size
+        r = (
+            supabase.table("companies")
+            .select("id, name", count="exact")
+            .order("name")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        payload = {"data": r.data or [], "total": r.count or 0, "page": page, "page_size": page_size}
+        return _etag_json(payload)
     except Exception:
-        return [{"id": "1", "name": "Company A"}, {"id": "2", "name": "Company B"}]
+        payload = {
+            "data": [{"id": "1", "name": "Company A"}, {"id": "2", "name": "Company B"}],
+            "total": 2,
+            "page": 1,
+            "page_size": 50,
+        }
+        return _etag_json(payload)
 
 
 @api_router.get("/pages")
-def list_pages(auth: dict = Depends(get_current_user)):
+@cached(ttl=30, key_prefix="pages:")
+def list_pages(
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    auth: dict = Depends(get_current_user),
+):
     try:
-        r = supabase.table("pages").select("id, name").order("name").execute()
-        return r.data or []
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        offset = (page - 1) * page_size
+        r = (
+            supabase.table("pages")
+            .select("id, name", count="exact")
+            .order("name")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        payload = {"data": r.data or [], "total": r.count or 0, "page": page, "page_size": page_size}
+        return _etag_json(payload)
     except Exception:
-        return [{"id": "1", "name": "Dashboard"}, {"id": "2", "name": "Support"}]
+        payload = {
+            "data": [{"id": "1", "name": "Dashboard"}, {"id": "2", "name": "Support"}],
+            "total": 2,
+            "page": 1,
+            "page_size": 50,
+        }
+        return _etag_json(payload)
 
 
 @api_router.get("/divisions")
-def list_divisions(company_id: str | None = None, auth: dict = Depends(get_current_user)):
+@cached(ttl=30, key_prefix="divisions:")
+def list_divisions(
+    company_id: str | None = None,
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    auth: dict = Depends(get_current_user),
+):
     try:
-        q = supabase.table("divisions").select("id, name, company_id")
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        offset = (page - 1) * page_size
+        q = supabase.table("divisions").select("id, name, company_id", count="exact")
         if company_id:
             q = q.eq("company_id", company_id)
-        r = q.order("name").execute()
-        return r.data or []
+        r = q.order("name").range(offset, offset + page_size - 1).execute()
+        payload = {"data": r.data or [], "total": r.count or 0, "page": page, "page_size": page_size}
+        return _etag_json(payload)
     except Exception:
-        return [{"id": "1", "name": "Sales"}, {"id": "2", "name": "Support"}]
+        payload = {
+            "data": [{"id": "1", "name": "Sales"}, {"id": "2", "name": "Support"}],
+            "total": 2,
+            "page": 1,
+            "page_size": 50,
+        }
+        return _etag_json(payload)
 
 
 # ---------- Onboarding > Payment Status ----------
@@ -4559,10 +4706,27 @@ def _get_onboarding_stage_status(payment_status_ids: list) -> dict:
 
 
 @api_router.get("/onboarding/payment-status")
-def list_onboarding_payment_status(auth: dict = Depends(get_current_user)):
+@cached(ttl=30, key_prefix="onboarding:payment-status:")
+def list_onboarding_payment_status(
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    auth: dict = Depends(get_current_user),
+):
     """List all onboarding payment status records, newest first. Each item includes 'status' = last completed stage and 'fi_do' = Done if Final step submitted else Not Done."""
     try:
-        r = supabase.table("onboarding_payment_status").select("*").order("timestamp", desc=True).execute()
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        offset = (page - 1) * page_size
+        r = (
+            supabase.table("onboarding_payment_status")
+            .select(
+                "id,timestamp,reference_no,company_name,payment_status,payment_received_date,poc_name,poc_contact,accounts_remarks",
+                count="exact",
+            )
+            .order("timestamp", desc=True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
         rows = r.data or []
         ids = [row.get("id") for row in rows if row.get("id")]
         status_map = _get_onboarding_stage_status(ids)
@@ -4579,10 +4743,10 @@ def list_onboarding_payment_status(auth: dict = Depends(get_current_user)):
         for row in rows:
             row["status"] = status_map.get(row.get("id")) or "—"
             row["fi_do"] = "Done" if row.get("id") in final_setup_ids else "Not Done"
-        return {"items": rows}
+        return {"data": rows, "total": r.count or 0, "page": page, "page_size": page_size}
     except Exception as e:
         _log(f"onboarding payment status list: {e}")
-        return {"items": []}
+        return {"data": [], "total": 0, "page": 1, "page_size": 50}
 
 
 @api_router.post("/onboarding/payment-status")
@@ -4779,10 +4943,27 @@ def _client_onb_strip(s: str | None) -> str | None:
 
 
 @api_router.get("/db-client/client-onb")
-def list_db_client_client_onb(auth: dict = Depends(get_current_user)):
+@cached(ttl=30, key_prefix="db-client:onb:")
+def list_db_client_client_onb(
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    auth: dict = Depends(get_current_user),
+):
     """List Client ONB rows, newest first."""
     try:
-        r = supabase.table("db_client_client_onb").select("*").order("timestamp", desc=True).execute()
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        offset = (page - 1) * page_size
+        r = (
+            supabase.table("db_client_client_onb")
+            .select(
+                "id,timestamp,reference_no,organization_name,company_name,contact_person,mobile_no,email_id,client_since,client_till,client_duration,status,last_contacted_on,remarks_2,follow_up_needed",
+                count="exact",
+            )
+            .order("timestamp", desc=True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
         rows = r.data or []
         for row in rows:
             st = row.get("status")
@@ -4799,10 +4980,10 @@ def list_db_client_client_onb(auth: dict = Depends(get_current_user)):
                         row["client_duration"] = _format_client_duration_days(d1, d2)
                     except Exception:
                         pass
-        return {"items": rows}
+        return {"data": rows, "total": r.count or 0, "page": page, "page_size": page_size}
     except Exception as e:
         _log(f"db client onb list: {e}")
-        return {"items": []}
+        return {"data": [], "total": 0, "page": 1, "page_size": 50}
 
 
 @api_router.get("/db-client/client-onb/status-column-check")
@@ -5130,10 +5311,20 @@ _LIST_CLIENT_PAYMENT_LIMIT = 500
 
 
 @api_router.get("/onboarding/client-payment")
-def list_client_payment(auth: dict = Depends(get_current_user), status: str = None, section: str = None):
+@cached(ttl=30, key_prefix="onboarding:client-payment:")
+def list_client_payment(
+    auth: dict = Depends(get_current_user),
+    status: str = None,
+    section: str = None,
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+):
     """List Raised Invoices. status=open (default): Payment Management (no payment received). status=completed&section=Gener|Q-Comp|M-Comp|HF-Comp: completed by genre."""
     try:
-        q = supabase.table("onboarding_client_payment").select(_OCP_LIST_COLUMNS).order("timestamp", desc=True)
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        offset = (page - 1) * page_size
+        q = supabase.table("onboarding_client_payment").select(_OCP_LIST_COLUMNS, count="exact").order("timestamp", desc=True)
         if status == "completed" and section:
             q = q.not_.is_("payment_received_date", "null")
             if section == "Q-Comp":
@@ -5146,16 +5337,16 @@ def list_client_payment(auth: dict = Depends(get_current_user), status: str = No
         else:
             # Open / Payment Management: unpaid only (payment_received_date IS NULL).
             q = q.is_("payment_received_date", "null")
-        q = q.limit(_LIST_CLIENT_PAYMENT_LIMIT)
+        q = q.range(offset, offset + page_size - 1)
         r = q.execute()
         items = r.data or []
         if status == "completed" and section and section == "Gener":
             items = [x for x in items if (x.get("genre") == "Y" or x.get("genre") not in ("M", "Q", "HY"))]
         _enrich_client_payment_list_items(items)
-        return {"items": items}
+        return {"data": items, "total": r.count or 0, "page": page, "page_size": page_size}
     except Exception as e:
         _log(f"client payment list: {e}")
-        return {"items": []}
+        return {"data": [], "total": 0, "page": 1, "page_size": 50}
 
 
 def _norm_name_company(s: str | None) -> str:
@@ -6963,20 +7154,38 @@ def save_client_payment_intercept(client_payment_id: str, payload: dict, auth: d
 
 
 @api_router.get("/users/options")
-def list_user_options(auth: dict = Depends(get_current_user)):
+@cached(ttl=30, key_prefix="users:options:")
+def list_user_options(
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    auth: dict = Depends(get_current_user),
+):
     """Lightweight list of registered users for dropdowns (id, full_name, email). Any authenticated user."""
     try:
-        r = supabase.table("users_view").select("id, full_name, email, is_active, created_at").order("created_at", desc=True).execute()
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        offset = (page - 1) * page_size
+        r = (
+            supabase.table("users_view")
+            .select("id, full_name, email, is_active, created_at", count="exact")
+            .order("created_at", desc=True)
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
         rows = [x for x in (r.data or []) if x and x.get("id") and x.get("is_active", True)]
-        return {
-            "items": [
+        payload = {
+            "data": [
                 {"id": str(x["id"]), "full_name": x.get("full_name") or "", "email": x.get("email") or ""}
                 for x in rows
-            ]
+            ],
+            "total": r.count or 0,
+            "page": page,
+            "page_size": page_size,
         }
+        return _etag_json(payload)
     except Exception as e:
         _log(f"list user options: {e}")
-        return {"items": []}
+        return _etag_json({"data": [], "total": 0, "page": 1, "page_size": 50})
 
 
 class PaymentActionSubmitRequest(BaseModel):
@@ -7093,7 +7302,12 @@ def dashboard_payment_action_submit(payload: PaymentActionSubmitRequest, current
 
 
 @api_router.get("/dashboard/payment-actions")
-def dashboard_payment_actions(current: dict = Depends(get_current_user_with_role)):
+@cached(ttl=30, key_prefix="dashboard:payment-actions:")
+def dashboard_payment_actions(
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    current: dict = Depends(get_current_user_with_role),
+):
     """Tagged intercept rows with pending Payment Action only (T1 and/or T2).
     Rows disappear after the last required submit (T1 only if no T2; else T1 then T2).
     Master Admin / Admin / SK: all pending rows; others: only where they are tagged for that pending step."""
@@ -7105,12 +7319,14 @@ def dashboard_payment_actions(current: dict = Depends(get_current_user_with_role
         is_full_list = role in ("master_admin", "admin") or email == "sk@industryprime.com"
         # Use select("*") so missing optional columns (e.g. T2 / payment_action_2_*) in DB do not break the query.
         # Naming columns explicitly caused empty dashboard when payment_action_2_* was not migrated yet.
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
         r = (
             supabase.table("onboarding_client_payment_intercept")
             .select("*")
             .not_.is_("tagged_user_id", "null")
             .order("created_at", desc=True)
-            .limit(500)
+            .limit(1000)
             .execute()
         )
         raw_rows = [x for x in (r.data or []) if x.get("tagged_user_id")]
@@ -7164,7 +7380,7 @@ def dashboard_payment_actions(current: dict = Depends(get_current_user_with_role
 
         ids = list({p["client_payment_id"] for p in queue})
         if not ids:
-            return {"items": []}
+            return {"data": [], "total": 0, "page": page, "page_size": page_size}
         p = (
             supabase.table("onboarding_client_payment")
             .select("id, company_name, invoice_number, reference_no, invoice_date, invoice_amount, genre")
@@ -7203,14 +7419,17 @@ def dashboard_payment_actions(current: dict = Depends(get_current_user_with_role
                     "pending_payment_tag": pitem["pending_payment_tag"],
                 }
             )
-        return {"items": out}
+        total = len(out)
+        offset = (page - 1) * page_size
+        paged = out[offset: offset + page_size]
+        return {"data": paged, "total": total, "page": page, "page_size": page_size}
     except Exception as e:
         err = str(e).lower()
         if "payment_action_2" in err and ("column" in err or "does not exist" in err):
             _log(f"dashboard payment actions (missing T2 columns): {e}")
         else:
             _log(f"dashboard payment actions: {e}")
-        return {"items": []}
+        return {"data": [], "total": 0, "page": 1, "page_size": 50}
 
 
 @api_router.get("/onboarding/client-payment/{client_payment_id}/discontinuation")
@@ -7506,7 +7725,12 @@ def _format_duration_short(seconds: float) -> str:
 
 # ---------- Training: Clients (only when Payment Status Fi-DO = Done / Final Setup submitted) ----------
 @api_router.get("/training/clients")
-def list_training_clients(auth: dict = Depends(get_current_user)):
+@cached(ttl=30, key_prefix="training:clients:")
+def list_training_clients(
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    auth: dict = Depends(get_current_user),
+):
     """List clients: only companies where Onboarding > Payment Status has Fi-DO = Done (Final Setup submitted).
     For each such company, Company name, POC, and Old reference number are pulled from Payment Status and shown in Client Training in the relevant columns."""
     try:
@@ -7711,16 +7935,25 @@ def list_training_clients(auth: dict = Depends(get_current_user)):
                 "feedback_submitted_at": stages.get("feedback") or "",
             })
         items.reverse()
-        return {"items": items}
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        total = len(items)
+        offset = (page - 1) * page_size
+        return {"data": items[offset: offset + page_size], "total": total, "page": page, "page_size": page_size}
     except Exception as e:
         _log(f"training clients list: {e}")
         import traceback
         _log(traceback.format_exc())
-        return {"items": []}
+        return {"data": [], "total": 0, "page": 1, "page_size": 50}
 
 
 @api_router.get("/training/clients/available-for-manual")
-def list_available_for_manual(auth: dict = Depends(get_current_user)):
+@cached(ttl=30, key_prefix="training:available-for-manual:")
+def list_available_for_manual(
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    auth: dict = Depends(get_current_user),
+):
     """List onboarding payment status records that are not yet in the training list (for 'Add client manually' dropdown)."""
     try:
         r = supabase.table("onboarding_final_setup").select("payment_status_id, data").execute()
@@ -7746,10 +7979,14 @@ def list_available_for_manual(auth: dict = Depends(get_current_user)):
                     "reference_no": p.get("reference_no") or "",
                     "timestamp": p.get("timestamp"),
                 })
-        return {"items": out}
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        total = len(out)
+        offset = (page - 1) * page_size
+        return {"data": out[offset: offset + page_size], "total": total, "page": page, "page_size": page_size}
     except Exception as e:
         _log(f"training available-for-manual: {e}")
-        return {"items": []}
+        return {"data": [], "total": 0, "page": 1, "page_size": 50}
 
 
 class TrainingManualAddPayload(BaseModel):
@@ -7781,17 +8018,43 @@ def add_training_client_manual(payload: TrainingManualAddPayload, auth: dict = D
 
 
 @api_router.get("/training/users")
-def list_training_users(auth: dict = Depends(get_current_user)):
+@cached(ttl=30, key_prefix="training:users:")
+def list_training_users(
+    page: int = 1,
+    page_size: int = Query(50, le=200),
+    auth: dict = Depends(get_current_user),
+):
     """List users for Trainer dropdown in Client Training. All users who use the software (from user_profiles)."""
     try:
-        r = supabase.table("user_profiles").select("id, full_name").eq("is_active", True).order("full_name").execute()
-        return {"users": r.data or []}
+        page = max(1, int(page or 1))
+        page_size = max(1, min(int(page_size or 50), 200))
+        offset = (page - 1) * page_size
+        r = (
+            supabase.table("user_profiles")
+            .select("id, full_name", count="exact")
+            .eq("is_active", True)
+            .order("full_name")
+            .range(offset, offset + page_size - 1)
+            .execute()
+        )
+        payload = {"data": r.data or [], "total": r.count or 0, "page": page, "page_size": page_size}
+        return _etag_json(payload)
     except Exception:
         try:
-            r = supabase.table("user_profiles").select("id, full_name").order("full_name").execute()
-            return {"users": r.data or []}
+            page = max(1, int(page or 1))
+            page_size = max(1, min(int(page_size or 50), 200))
+            offset = (page - 1) * page_size
+            r = (
+                supabase.table("user_profiles")
+                .select("id, full_name", count="exact")
+                .order("full_name")
+                .range(offset, offset + page_size - 1)
+                .execute()
+            )
+            payload = {"data": r.data or [], "total": r.count or 0, "page": page, "page_size": page_size}
+            return _etag_json(payload)
         except Exception:
-            return {"users": []}
+            return _etag_json({"data": [], "total": 0, "page": 1, "page_size": 50})
 
 
 class TrainingAssignmentCreate(BaseModel):

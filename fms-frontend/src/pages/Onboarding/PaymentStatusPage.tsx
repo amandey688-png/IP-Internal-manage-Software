@@ -2225,8 +2225,9 @@ export function PaymentStatusPage() {
               dataSource={visibleRecords}
               columns={columns}
               rowKey="id"
+              virtual
               loading={false}
-              scroll={{ x: 1100 }}
+              scroll={{ x: 1100, y: 600 }}
               pagination={false}
               summary={() => (
                 <Table.Summary>

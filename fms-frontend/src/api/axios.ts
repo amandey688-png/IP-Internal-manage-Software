@@ -123,8 +123,28 @@ export const apiClient = axios.create({
   timeout: 30000,
 })
 
+type TimedRequestConfig = InternalAxiosRequestConfig & {
+  metadata?: { start: number }
+}
+
+const logApiDuration = (
+  cfg: InternalAxiosRequestConfig | undefined,
+  status: number | string
+) => {
+  if (!import.meta.env.DEV || !cfg) return
+  const timed = cfg as TimedRequestConfig
+  const start = timed.metadata?.start
+  const durationMs =
+    typeof start === "number" ? Math.round((performance.now() - start) * 100) / 100 : -1
+  const method = (cfg.method || "get").toUpperCase()
+  const url = cfg.url || ""
+  console.debug("[api]", method, url, status, durationMs >= 0 ? durationMs : "n/a")
+}
+
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
+    const timed = config as TimedRequestConfig
+    timed.metadata = { start: performance.now() }
     const token = storage.getToken()
     // Do not overwrite explicit Authorization (e.g. Supabase recovery JWT on PATCH /auth/recovery-password)
     if (token && config.headers && !config.headers.Authorization) {
@@ -151,7 +171,10 @@ const addRefreshSubscriber = (cb: (token: string) => void) => {
 }
 
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    logApiDuration(response.config, response.status)
+    return response
+  },
   async (error: AxiosError) => {
     const originalRequest = error.config as InternalAxiosRequestConfig & {
       _retry?: boolean
@@ -241,6 +264,7 @@ apiClient.interceptors.response.use(
       console.error("❌ Network error: backend not reachable at", API_BASE_URL)
     }
 
+    logApiDuration(error.config as InternalAxiosRequestConfig | undefined, error.response?.status ?? "ERR")
     return Promise.reject(error)
   }
 )
