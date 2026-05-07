@@ -144,10 +144,15 @@ export function ClientPaymentPage() {
     setLoading(true)
     const listUrl = completedSection ? API_ENDPOINTS.CLIENT_PAYMENT.LIST_COMPLETED(completedSection) : API_ENDPOINTS.CLIENT_PAYMENT.LIST_OPEN
     apiClient
-      .get<{ items: ClientPaymentRecord[] }>(listUrl)
+      .get<{ items?: ClientPaymentRecord[]; data?: ClientPaymentRecord[] }>(listUrl)
       .then((r) => r.data)
       .then((payments) => {
-        setRecords((payments.items || []) as ClientPaymentRecord[])
+        const rows = Array.isArray(payments?.data)
+          ? payments.data
+          : Array.isArray(payments?.items)
+            ? payments.items
+            : []
+        setRecords(rows as ClientPaymentRecord[])
       })
       .catch(() => {
         setRecords([])
@@ -164,10 +169,17 @@ export function ClientPaymentPage() {
     if ((!modalOpen && !editInvoiceModalOpen) || companies.length > 0) return
     setCompaniesLoading(true)
     apiClient
-      .get<{ id: string; name: string }[]>('/companies')
+      .get<{ id: string; name: string }[] | { data?: { id: string; name: string }[]; items?: { id: string; name: string }[] }>('/companies')
       .then((r) => r.data)
       .then((companiesList) => {
-        setCompanies((companiesList || []).filter((c: { id?: string; name?: string }) => c && c.id && c.name))
+        const rows = Array.isArray(companiesList)
+          ? companiesList
+          : Array.isArray(companiesList?.data)
+            ? companiesList.data
+            : Array.isArray(companiesList?.items)
+              ? companiesList.items
+              : []
+        setCompanies((rows || []).filter((c: { id?: string; name?: string }) => c && c.id && c.name))
       })
       .catch(() => setCompanies([]))
       .finally(() => setCompaniesLoading(false))
@@ -552,8 +564,15 @@ export function ClientPaymentPage() {
     if (tagUsers.length > 0) return
     setTagLoading(true)
     apiClient
-      .get<{ items: { id: string; full_name: string; email: string }[] }>('/users/options')
-      .then((res) => setTagUsers(res.data?.items || []))
+      .get<{ items?: { id: string; full_name: string; email: string }[]; data?: { id: string; full_name: string; email: string }[] }>('/users/options')
+      .then((res) => {
+        const rows = Array.isArray(res.data?.data)
+          ? res.data.data
+          : Array.isArray(res.data?.items)
+            ? res.data.items
+            : []
+        setTagUsers(rows)
+      })
       .catch(() => setTagUsers([]))
       .finally(() => setTagLoading(false))
   }
@@ -596,8 +615,15 @@ export function ClientPaymentPage() {
     if (tagUsers.length > 0) return
     setTagLoading(true)
     apiClient
-      .get<{ items: { id: string; full_name: string; email: string }[] }>('/users/options')
-      .then((res) => setTagUsers(res.data?.items || []))
+      .get<{ items?: { id: string; full_name: string; email: string }[]; data?: { id: string; full_name: string; email: string }[] }>('/users/options')
+      .then((res) => {
+        const rows = Array.isArray(res.data?.data)
+          ? res.data.data
+          : Array.isArray(res.data?.items)
+            ? res.data.items
+            : []
+        setTagUsers(rows)
+      })
       .catch(() => setTagUsers([]))
       .finally(() => setTagLoading(false))
   }
