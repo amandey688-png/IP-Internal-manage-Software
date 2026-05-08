@@ -726,18 +726,6 @@ export function ClientPaymentPage() {
 
   const columns = [
     {
-      title: 'Timestamp',
-      dataIndex: 'timestamp',
-      key: 'timestamp',
-      width: 170,
-      render: (v: string) => (v ? dayjs(v).format('DD-MMM-YYYY HH:mm') : '—'),
-      filters: buildColumnFilters(records.map((r) => (r.timestamp ? dayjs(r.timestamp).format('DD-MMM-YYYY HH:mm') : '—'))),
-      filterSearch: true,
-      filterMultiple: true,
-      onFilter: (value: string | number | boolean, record: ClientPaymentRecord) =>
-        (record.timestamp ? dayjs(record.timestamp).format('DD-MMM-YYYY HH:mm') : '—') === String(value),
-    },
-    {
       title: 'Reference',
       dataIndex: 'reference_no',
       key: 'reference_no',

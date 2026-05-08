@@ -256,7 +256,6 @@ export function ClientTrainingPage() {
   }
 
   const columns = [
-    { title: 'Timestamp', dataIndex: 'timestamp', key: 'timestamp', width: 130, fixed: 'left' as const, render: (v: string) => (v ? dayjs(v).format('DD-MMM-YYYY HH:mm') : '—') },
     { title: 'Reference No', dataIndex: 'client_reference_no', key: 'client_reference_no', width: 100, fixed: 'left' as const },
     { title: 'Company Name', dataIndex: 'company_name', key: 'company_name', width: 140, fixed: 'left' as const, render: (v: string) => v || '—' },
     { title: 'Point of Contact', dataIndex: 'poc_name', key: 'poc_name', width: 120, render: (v: string) => v || '—' },

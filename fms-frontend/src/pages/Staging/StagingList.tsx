@@ -40,13 +40,6 @@ const wrapStyle = { whiteSpace: 'normal' as const, wordBreak: 'break-word' as co
 /** Columns up to and including Reference No (tickets with Stage 2 Status = Staging) */
 const stagingTicketColumns = [
   {
-    title: 'Time Stamp',
-    dataIndex: 'created_at',
-    key: 'created_at',
-    width: 140,
-    render: (_: string, r: Ticket) => formatDateTable((r as Ticket & { timestamp?: string }).created_at || (r as Ticket & { timestamp?: string }).timestamp || ''),
-  },
-  {
     title: 'Reference No',
     dataIndex: 'reference_no',
     key: 'reference_no',

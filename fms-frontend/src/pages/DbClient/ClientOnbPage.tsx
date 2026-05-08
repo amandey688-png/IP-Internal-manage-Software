@@ -301,7 +301,6 @@ export function ClientOnbPage({ mode = 'active' }: { mode?: ClientOnbPageMode })
 
   const columns: ColumnsType<ClientOnbRecord> = useMemo(
     () => [
-      { title: 'Timestamp', dataIndex: 'timestamp', key: 'timestamp', width: 150, fixed: 'left', render: (v) => formatTs(v) },
       { title: 'Reference', dataIndex: 'reference_no', key: 'reference_no', width: 100, fixed: 'left' },
       {
         title: 'Status',

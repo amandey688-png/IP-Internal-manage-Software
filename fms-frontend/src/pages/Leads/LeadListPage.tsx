@@ -192,13 +192,6 @@ export const LeadListPage = () => {
             })}
             columns={[
               {
-                title: 'Timestamp',
-                dataIndex: 'created_at',
-                key: 'created_at',
-                width: 160,
-                render: (v: string) => (v ? dayjs(v).format('DD MMM YYYY HH:mm') : '—'),
-              },
-              {
                 title: 'Reference No',
                 dataIndex: 'reference_no',
                 key: 'reference_no',
