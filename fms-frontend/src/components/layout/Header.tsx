@@ -64,7 +64,19 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
     },
   ]
 
-  const sectionLabel = viewApproval ? 'Approval Status' : section === 'chores-bugs' ? 'Chores & Bugs' : section === 'completed-chores-bugs' ? 'Completed Chores & Bugs' : section === 'completed-feature' ? 'Completed Feature' : section === 'solutions' ? 'Solution' : ''
+  const sectionLabel = viewApproval
+    ? 'Approval Status'
+    : section === 'chores-bugs'
+      ? 'Chores & Bugs'
+      : section === 'completed-chores-bugs'
+        ? 'Completed Chores & Bugs'
+        : section === 'completed-feature'
+          ? 'Completed Feature'
+          : section === 'register-of-tickets'
+            ? 'Register of Tickets'
+            : section === 'solutions'
+              ? 'Solution'
+              : ''
   const breadcrumb = location.pathname === ROUTES.DASHBOARD
     ? ''
     : location.pathname === ROUTES.DASHBOARD_KPI

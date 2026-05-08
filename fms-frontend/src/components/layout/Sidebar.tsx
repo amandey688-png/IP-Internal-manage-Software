@@ -110,14 +110,30 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
     { key: ROUTES.STAGING, icon: <RocketOutlined />, label: prefetchedLabel(ROUTES.STAGING, ROUTES.STAGING, 'Staging'), sectionKey: 'staging' },
     { key: `${ROUTES.TICKETS}?type=feature`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?type=feature`, `${ROUTES.TICKETS}?type=feature`, 'Feature'), sectionKey: 'feature' },
     { key: `${ROUTES.TICKETS}?type=feature&view=approval`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?type=feature&view=approval`, `${ROUTES.TICKETS}?type=feature&view=approval`, 'Approval Status'), sectionKey: 'approval_status' },
-    { key: `${ROUTES.TICKETS}?section=completed-chores-bugs`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?section=completed-chores-bugs`, `${ROUTES.TICKETS}?section=completed-chores-bugs`, 'Completed Chores & Bugs'), sectionKey: 'completed_chores_bugs' },
-    { key: `${ROUTES.TICKETS}?section=rejected-tickets`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?section=rejected-tickets`, `${ROUTES.TICKETS}?section=rejected-tickets`, 'Rejected Tickets'), sectionKey: 'rejected_tickets' },
-    { key: `${ROUTES.TICKETS}?section=completed-feature`, icon: <FileTextOutlined />, label: prefetchedLabel(`${ROUTES.TICKETS}?section=completed-feature`, `${ROUTES.TICKETS}?section=completed-feature`, 'Completed Feature'), sectionKey: 'completed_feature' },
+    {
+      key: `${ROUTES.TICKETS}?section=register-of-tickets`,
+      icon: <FileTextOutlined />,
+      label: prefetchedLabel(
+        `${ROUTES.TICKETS}?section=register-of-tickets`,
+        `${ROUTES.TICKETS}?section=register-of-tickets`,
+        'Register of Tickets',
+      ),
+    },
   ]
   const supportItems: MenuProps['items'] = allSupportItems?.filter((item) => {
     const key = item?.key as string
     const sectionKey = (item as { sectionKey?: string })?.sectionKey
     if (sectionKey && !canViewSectionByKey(sectionKey)) return false
+    if (
+      key === `${ROUTES.TICKETS}?section=register-of-tickets` &&
+      !(
+        canViewSectionByKey('completed_chores_bugs') ||
+        canViewSectionByKey('rejected_tickets') ||
+        canViewSectionByKey('completed_feature')
+      )
+    ) {
+      return false
+    }
     if (key?.includes('view=approval')) return canAccessApproval
     return true
   }) ?? []

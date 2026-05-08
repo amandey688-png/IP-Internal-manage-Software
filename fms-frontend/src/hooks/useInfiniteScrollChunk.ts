@@ -31,9 +31,18 @@ export function useInfiniteScrollChunk<T>({
   useEffect(() => {
     if (loading) return
     if (!hasMore) return
-    const root = containerRef.current?.querySelector('.ant-table-body') as HTMLElement | null
+    const tableBodyRoot = containerRef.current?.querySelector('.ant-table-body') as HTMLElement | null
     const sentinel = sentinelRef.current
     if (!sentinel) return
+    // If sentinel is rendered outside table scroll body, fallback to viewport observer.
+    const root = tableBodyRoot && tableBodyRoot.contains(sentinel) ? tableBodyRoot : null
+
+    // Fast path: if sentinel is already visible when observer mounts, load immediately.
+    const sentinelRect = sentinel.getBoundingClientRect()
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+    if (sentinelRect.top <= viewportHeight + 160) {
+      loadMore()
+    }
 
     const observer = new IntersectionObserver(
       (entries) => {
