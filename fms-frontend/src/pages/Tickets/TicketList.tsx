@@ -63,6 +63,15 @@ const truncate = (text: string | undefined, len = 40) => {
   return text.length > len ? `${text.slice(0, len)}...` : text
 }
 
+function getRegisterStatusLabel(ticket: Ticket): 'Completed' | 'Rejected' {
+  const status2 = String((ticket as { status_2?: string }).status_2 || '').toLowerCase()
+  const live = String((ticket as { live_review_status?: string }).live_review_status || '').toLowerCase()
+  const status = String(ticket.status || '').toLowerCase()
+  if (status2 === 'rejected' || status === 'rejected') return 'Rejected'
+  if (live === 'rejected') return 'Rejected'
+  return 'Completed'
+}
+
 /** Rows per scroll chunk (API uses same limit; server allows up to 100 per request). */
 const TICKETS_CHUNK = 15
 
@@ -89,14 +98,10 @@ export const TicketList = () => {
   const sectionFromUrl = searchParams.get('section') || new URLSearchParams(location.search).get('section') || ''
   const viewFromUrl = searchParams.get('view') === 'approval'
   const isApprovalSection = viewFromUrl || sectionFromUrl === 'approval-status'
+  const isRegisterSection = sectionFromUrl === 'register-of-tickets'
   const showStageFilter = sectionFromUrl === 'chores-bugs'
   const showStageFilterForFeature = typeFromUrl === 'feature' && !isApprovalSection
   const isChoresBugsSection = sectionFromUrl === 'chores-bugs'
-  const isChoresBugs =
-    sectionFromUrl === 'chores-bugs' ||
-    sectionFromUrl === 'completed-chores-bugs' ||
-    sectionFromUrl === 'rejected-tickets' ||
-    sectionFromUrl === 'solutions'
 
   useEffect(() => {
     if (isApprovalSection && !canAccessApproval) {
@@ -127,8 +132,18 @@ export const TicketList = () => {
   const [approvalFilter, setApprovalFilter] = useState<string>('pending')
   /** Chores & Bugs only: filter by Stage 2 status (pending | completed | staging | hold) */
   const [status2Filter, setStatus2Filter] = useState<string>('')
-  /** Chores & Bugs only: filter by Type of Request (chore | bug) */
+  /** Register of Tickets: mandatory status filter */
+  const [registerStatusFilter, setRegisterStatusFilter] = useState<'completed' | 'rejected' | 'all'>('completed')
+  /** Chores & Bugs/Register: filter by Type of Request */
   const [typeOfRequestFilter, setTypeOfRequestFilter] = useState<string>('')
+  const isRegisterChoresBugsMode =
+    isRegisterSection && (typeOfRequestFilter === 'chore' || typeOfRequestFilter === 'bug')
+  const isChoresBugs =
+    sectionFromUrl === 'chores-bugs' ||
+    sectionFromUrl === 'completed-chores-bugs' ||
+    sectionFromUrl === 'rejected-tickets' ||
+    sectionFromUrl === 'solutions' ||
+    isRegisterChoresBugsMode
 
   /** Safety guard: Chores & Bugs sections must never show Feature rows. */
   const keepOnlyChoresAndBugs = (list: Ticket[]): Ticket[] =>
@@ -138,7 +153,9 @@ export const TicketList = () => {
     if (sectionFromUrl !== 'chores-bugs') setStatus2Filter('')
   }, [sectionFromUrl])
   useEffect(() => {
-    if (sectionFromUrl !== 'chores-bugs') setTypeOfRequestFilter('')
+    if (sectionFromUrl !== 'chores-bugs' && sectionFromUrl !== 'register-of-tickets') {
+      setTypeOfRequestFilter('')
+    }
   }, [sectionFromUrl])
 
   /** Open drawer when navigated from Support Dashboard (Reference click in Weekly Details, Pending Chores/Bugs, or Pending Feature) */
@@ -198,6 +215,14 @@ export const TicketList = () => {
         next.status = ''
         next.date_from = ''
         next.date_to = ''
+      } else if (s === 'register-of-tickets') {
+        next.type = ''
+        next.types_in = ''
+        next.status = ''
+        next.date_from = ''
+        next.date_to = ''
+        setTypeOfRequestFilter((prev) => prev || 'chore')
+        setRegisterStatusFilter('completed')
       } else if (s === 'solutions') {
         next.type = ''
         next.types_in = ''
@@ -231,16 +256,19 @@ export const TicketList = () => {
         sectionFromUrl !== 'rejected-tickets' &&
         sectionFromUrl !== 'solutions' &&
         sectionFromUrl !== 'completed-feature' &&
+        sectionFromUrl !== 'register-of-tickets' &&
         filters.status && { status: filters.status }),
       ...(sectionFromUrl !== 'completed-chores-bugs' &&
         sectionFromUrl !== 'rejected-tickets' &&
         sectionFromUrl !== 'solutions' &&
         sectionFromUrl !== 'completed-feature' &&
+        sectionFromUrl !== 'register-of-tickets' &&
         filters.types_in && { types_in: filters.types_in }),
       ...(sectionFromUrl !== 'completed-chores-bugs' &&
         sectionFromUrl !== 'rejected-tickets' &&
         sectionFromUrl !== 'solutions' &&
         sectionFromUrl !== 'completed-feature' &&
+        sectionFromUrl !== 'register-of-tickets' &&
         !filters.types_in &&
         filters.type && { type: filters.type }),
       ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
@@ -248,6 +276,27 @@ export const TicketList = () => {
       ...(sectionFromUrl === 'rejected-tickets' && { section: 'rejected-tickets' }),
       ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
       ...(sectionFromUrl === 'solutions' && { section: 'solutions' }),
+      ...(isRegisterSection &&
+        typeOfRequestFilter === 'feature' &&
+        registerStatusFilter === 'completed' && { section: 'completed-feature' }),
+      ...(isRegisterSection &&
+        (typeOfRequestFilter === 'chore' || typeOfRequestFilter === 'bug') &&
+        registerStatusFilter === 'completed' && { section: 'completed-chores-bugs', type_filter: typeOfRequestFilter }),
+      ...(isRegisterSection &&
+        (typeOfRequestFilter === 'chore' || typeOfRequestFilter === 'bug') &&
+        registerStatusFilter === 'rejected' && { section: 'rejected-tickets', type_filter: typeOfRequestFilter }),
+      ...(isRegisterSection &&
+        registerStatusFilter === 'all' &&
+        typeOfRequestFilter === 'feature' && { type: 'feature' }),
+      ...(isRegisterSection &&
+        registerStatusFilter === 'all' &&
+        (typeOfRequestFilter === 'chore' || typeOfRequestFilter === 'bug') && {
+          section: 'chores-bugs',
+          type_filter: typeOfRequestFilter,
+        }),
+      ...(isRegisterSection &&
+        registerStatusFilter === 'rejected' &&
+        typeOfRequestFilter === 'feature' && { type: 'feature', status: 'rejected' }),
       ...(isApprovalSection && { section: 'approval-status', approval_filter: approvalFilter }),
       ...(filters.company_ids?.length ? { company_ids: filters.company_ids } : {}),
       ...(!isChoresBugsSection && filters.priority && { priority: filters.priority }),
@@ -261,6 +310,8 @@ export const TicketList = () => {
       isChoresBugsSection,
       sectionFromUrl,
       isApprovalSection,
+      isRegisterSection,
+      registerStatusFilter,
       approvalFilter,
       status2Filter,
       typeOfRequestFilter,
@@ -539,13 +590,14 @@ export const TicketList = () => {
 
   const baseColumns = [
     {
-      title: 'Timestamp',
+      title: 'Time Stamp',
       dataIndex: 'created_at',
       key: 'created_at',
       width: 140,
       fixed: 'left' as const,
       sorter: true,
-      render: (v: string) => formatDateTable(v),
+      render: (_: string, r: Ticket) =>
+        formatDateTable((r as Ticket & { timestamp?: string }).created_at || (r as Ticket & { timestamp?: string }).timestamp || ''),
     },
     {
       title: 'Reference No',
@@ -845,7 +897,7 @@ export const TicketList = () => {
       : []),
   ]
 
-  const choresBugsSlaColumns = sectionFromUrl === 'chores-bugs'
+  const choresBugsSlaColumns = sectionFromUrl === 'chores-bugs' || isRegisterSection
     ? [
         {
           title: 'Current Stage',
@@ -884,7 +936,8 @@ export const TicketList = () => {
           ellipsis: false,
           render: (_: unknown, r: Ticket) => {
             const stage = getChoresBugsCurrentStage(r)
-            const status = (stage.status || '').toLowerCase()
+            const displayStatus = isRegisterSection ? getRegisterStatusLabel(r) : stage.status || '-'
+            const status = String(displayStatus).toLowerCase()
             const statusColors: Record<string, string> = {
               pending: 'orange',
               completed: 'green',
@@ -896,7 +949,7 @@ export const TicketList = () => {
             const color = statusColors[status] ?? 'default'
             return (
               <Tag color={color} style={{ margin: 0 }}>
-                {stage.status || '-'}
+                {displayStatus}
               </Tag>
             )
           },
@@ -931,11 +984,12 @@ export const TicketList = () => {
 
   const solutionColumns = [
     {
-      title: 'Timestamp',
+      title: 'Time Stamp',
       dataIndex: 'created_at',
       key: 'created_at',
       width: 160,
-      render: (v: string) => formatDateTable(v),
+      render: (_: string, r: Ticket) =>
+        formatDateTable((r as Ticket & { timestamp?: string }).created_at || (r as Ticket & { timestamp?: string }).timestamp || ''),
     },
     {
       title: 'Reference No',
@@ -1032,6 +1086,8 @@ export const TicketList = () => {
             ? 'Rejected Tickets'
             : sectionFromUrl === 'completed-feature'
               ? 'Completed Feature'
+              : sectionFromUrl === 'register-of-tickets'
+                ? 'Register of Tickets'
               : sectionFromUrl === 'solutions'
                 ? 'Solution'
                 : typeFromUrl === 'feature'
@@ -1115,23 +1171,37 @@ export const TicketList = () => {
             getPopupContainer={() => document.body}
             options={companies.map((c) => ({ value: c.id, label: c.name }))}
           />
-          {isChoresBugsSection ? (
+          {isChoresBugsSection || isRegisterSection ? (
             <Select
               placeholder="Status"
               style={{ width: 130 }}
-              value={status2Filter || undefined}
+              value={isRegisterSection ? registerStatusFilter : status2Filter || undefined}
               onChange={(v) => {
-                setStatus2Filter(v ?? '')
+                if (isRegisterSection) {
+                  setRegisterStatusFilter((v || 'completed') as 'completed' | 'rejected' | 'all')
+                } else {
+                  setStatus2Filter(v ?? '')
+                }
               }}
-              allowClear
+              allowClear={!isRegisterSection}
               getPopupContainer={() => document.body}
             >
-              <Option value="pending">Pending</Option>
-              <Option value="completed">Completed</Option>
-              <Option value="staging">Staging</Option>
-              <Option value="hold">Hold</Option>
-              <Option value="na">NA</Option>
-              <Option value="rejected">Rejected</Option>
+              {isRegisterSection ? (
+                <>
+                  <Option value="completed">Completed</Option>
+                  <Option value="rejected">Rejected</Option>
+                  <Option value="all">All</Option>
+                </>
+              ) : (
+                <>
+                  <Option value="pending">Pending</Option>
+                  <Option value="completed">Completed</Option>
+                  <Option value="staging">Staging</Option>
+                  <Option value="hold">Hold</Option>
+                  <Option value="na">NA</Option>
+                  <Option value="rejected">Rejected</Option>
+                </>
+              )}
             </Select>
           ) : (
             <Select
@@ -1150,19 +1220,20 @@ export const TicketList = () => {
               <Option value="on_hold">On Hold</Option>
             </Select>
           )}
-          {isChoresBugsSection ? (
+          {isChoresBugsSection || isRegisterSection ? (
             <Select
               placeholder="Type of Request"
               style={{ width: 150 }}
-              value={typeOfRequestFilter || undefined}
+              value={typeOfRequestFilter || (isRegisterSection ? 'chore' : undefined)}
               onChange={(v) => {
-                setTypeOfRequestFilter(v ?? '')
+                setTypeOfRequestFilter(v ?? (isRegisterSection ? 'chore' : ''))
               }}
-              allowClear
+              allowClear={!isRegisterSection}
               getPopupContainer={() => document.body}
             >
               <Option value="chore">Chores</Option>
               <Option value="bug">Bug</Option>
+              {isRegisterSection && <Option value="feature">Feature</Option>}
             </Select>
           ) : (
             <Select
@@ -1297,7 +1368,11 @@ export const TicketList = () => {
             refetchList()
           }}
           onUpdate={refetchList}
-          readOnly={sectionFromUrl === 'completed-chores-bugs' || sectionFromUrl === 'solutions'}
+          readOnly={
+            sectionFromUrl === 'completed-chores-bugs' ||
+            sectionFromUrl === 'solutions' ||
+            sectionFromUrl === 'register-of-tickets'
+          }
         />
       ) : (
         <TicketDetailDrawer
@@ -1309,7 +1384,11 @@ export const TicketList = () => {
             refetchList()
           }}
           onUpdate={refetchList}
-          readOnly={sectionFromUrl === 'completed-feature' || (isApprovalSection && isUser && !isMasterAdmin)}
+          readOnly={
+            sectionFromUrl === 'completed-feature' ||
+            sectionFromUrl === 'register-of-tickets' ||
+            (isApprovalSection && isUser && !isMasterAdmin)
+          }
           approvalMode={isApprovalSection}
         />
       )}

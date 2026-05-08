@@ -20,8 +20,8 @@ import { PlusOutlined, LineChartOutlined, EditOutlined, FormOutlined } from '@an
 import { API_BASE_URL } from '../../api/axios'
 import { storage } from '../../utils/storage'
 import { sortPerformanceRefOptions } from '../../utils/performanceRefs'
-import { PerformanceTablePaginationBar } from '../../components/success/PerformanceTablePaginationBar'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
+import { DEFAULT_INFINITE_CHUNK, useInfiniteScrollChunk } from '../../hooks/useInfiniteScrollChunk'
 
 const { Title, Text } = Typography
 
@@ -38,6 +38,7 @@ interface FeatureOption {
   name: string
   display_order?: number
 }
+type ListPayload<T> = T[] | { data?: T[]; items?: T[] }
 
 interface POCItem {
   id: string
@@ -118,18 +119,12 @@ export const PerformanceMonitoringPage = () => {
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [filterRef, setFilterRef] = useState<string>('')
   const [filterCompany, setFilterCompany] = useState<string>('')
-  const [tablePage, setTablePage] = useState(1)
-  const [tablePageSize, setTablePageSize] = useState(20)
 
   useEffect(() => {
     loadCompanies()
     loadItems()
     loadFeatures()
   }, [])
-
-  useEffect(() => {
-    setTablePage(1)
-  }, [filterRef, filterCompany])
 
   const fetchWithTimeout = (url: string, options: RequestInit = {}) => {
     const controller = new AbortController()
@@ -191,8 +186,21 @@ export const PerformanceMonitoringPage = () => {
   const loadCompanies = async () => {
     try {
       const res = await fetchWithTimeout(`${API_BASE_URL}/companies`, { headers: getAuthHeaders() })
-      if (res.ok) setCompanies((await res.json()) || [])
+      if (res.ok) {
+        const payload = (await res.json()) as ListPayload<Company>
+        const rows = Array.isArray(payload)
+          ? payload
+          : Array.isArray(payload?.data)
+            ? payload.data
+            : Array.isArray(payload?.items)
+              ? payload.items
+              : []
+        setCompanies(rows)
+      } else {
+        setCompanies([])
+      }
     } catch {
+      setCompanies([])
       message.error('Failed to load companies')
     }
   }
@@ -537,21 +545,27 @@ export const PerformanceMonitoringPage = () => {
     },
   ]
 
-  const displayItems = items.filter((i) => {
-    if (filterRef && !String(i.reference_no || '').toLowerCase().includes(filterRef.toLowerCase())) return false
-    if (filterCompany && !String(i.company_name || '').toLowerCase().includes(filterCompany.toLowerCase())) return false
-    return true
+  const displayItems = useMemo(
+    () =>
+      items.filter((i) => {
+        if (filterRef && !String(i.reference_no || '').toLowerCase().includes(filterRef.toLowerCase())) return false
+        if (filterCompany && !String(i.company_name || '').toLowerCase().includes(filterCompany.toLowerCase())) return false
+        return true
+      }),
+    [items, filterRef, filterCompany],
+  )
+  const {
+    visibleItems: visibleDisplayItems,
+    containerRef: tableContainerRef,
+    sentinelRef: tableSentinelRef,
+    total: totalDisplayItems,
+    visibleCount: visibleDisplayCount,
+    hasMore: hasMoreDisplayItems,
+  } = useInfiniteScrollChunk({
+    items: displayItems,
+    chunkSize: DEFAULT_INFINITE_CHUNK,
+    loading,
   })
-
-  const totalTablePages = Math.max(1, Math.ceil(displayItems.length / tablePageSize) || 1)
-  useEffect(() => {
-    if (tablePage > totalTablePages) setTablePage(totalTablePages)
-  }, [tablePage, totalTablePages])
-
-  const pagedDisplayItems = useMemo(() => {
-    const start = (tablePage - 1) * tablePageSize
-    return displayItems.slice(start, start + tablePageSize)
-  }, [displayItems, tablePage, tablePageSize])
 
   return (
     <div>
@@ -596,31 +610,39 @@ export const PerformanceMonitoringPage = () => {
             options={[...new Set(items.map((i) => i.company_name).filter(Boolean))].sort().map((c) => ({ value: c, label: c }))}
           />
         </div>
-        <TableWithSkeletonLoading loading={loading} columns={9} rows={12}>
-          <Table
-            dataSource={pagedDisplayItems}
-            rowKey="id"
-            loading={false}
-            onRow={(record) => ({
-              onClick: () => openViewDetails(record),
-              style: { cursor: 'pointer' },
-            })}
-            columns={tableColumns}
-            pagination={false}
-            locale={{
-              emptyText: !loading && !setupError
-                ? 'No active companies. Use "Add POC Details" above to add one, or see Comp-Perform for completed companies.'
-                : undefined,
-            }}
-          />
-        </TableWithSkeletonLoading>
-        <PerformanceTablePaginationBar
-          page={tablePage}
-          pageSize={tablePageSize}
-          total={displayItems.length}
-          onPageChange={setTablePage}
-          onPageSizeChange={setTablePageSize}
-        />
+        <div ref={tableContainerRef}>
+          <TableWithSkeletonLoading loading={loading} columns={9} rows={12}>
+            <Table
+              dataSource={visibleDisplayItems}
+              rowKey="id"
+              loading={false}
+              onRow={(record) => ({
+                onClick: () => openViewDetails(record),
+                style: { cursor: 'pointer' },
+              })}
+              columns={tableColumns}
+              pagination={false}
+              locale={{
+                emptyText: !loading && !setupError
+                  ? 'No active companies. Use "Add POC Details" above to add one, or see Comp-Perform for completed companies.'
+                  : undefined,
+              }}
+            />
+          </TableWithSkeletonLoading>
+          {totalDisplayItems > 0 && (
+            <div style={{ marginTop: 12, color: '#8c8c8c', fontSize: 13 }}>
+              Showing {visibleDisplayCount} of {totalDisplayItems}
+            </div>
+          )}
+          {hasMoreDisplayItems && (
+            <div
+              ref={tableSentinelRef}
+              style={{ padding: '10px 0', textAlign: 'center', color: '#8c8c8c', fontSize: 13 }}
+            >
+              Loading next {DEFAULT_INFINITE_CHUNK}...
+            </div>
+          )}
+        </div>
       </Card>
 
       <Modal
