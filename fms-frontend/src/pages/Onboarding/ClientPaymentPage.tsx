@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useSearchParams } from 'react-router-dom'
 import { Button, Card, Checkbox, DatePicker, Descriptions, Divider, Drawer, Form, Input, InputNumber, Modal, Select, Space, Table, Tooltip, Typography, message } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import { CheckCircleOutlined, EditOutlined, FormOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { API_ENDPOINTS } from '../../utils/constants'
@@ -11,6 +12,9 @@ import { DEFAULT_INFINITE_CHUNK, useInfiniteScrollChunk } from '../../hooks/useI
 import { exportRowsToCsv, type ExportColumn } from '../../utils/exportCsv'
 
 const { Title, Text } = Typography
+
+/** Edit submitted Client Payment responses within this many days of submit (must match backend). */
+const CLIENT_PAYMENT_EDIT_DAYS = 150
 
 interface ClientPaymentRecord {
   id: string
@@ -24,6 +28,8 @@ interface ClientPaymentRecord {
   stage?: string | null
   status?: string
   aging_days?: number
+  /** From list API: Invoice Sent form has been saved (Payment Received form can be submitted). */
+  invoice_sent_submitted?: boolean
 }
 
 const GENRE_OPTIONS = [
@@ -32,6 +38,9 @@ const GENRE_OPTIONS = [
   { label: "HY – Half yearly", value: 'HY' },
   { label: "Y – Yearly", value: 'Y' },
 ]
+
+const COMP_REGISTER_SECTION = 'Comp-Register'
+const COMPLETED_REGISTER_PAGE_SIZE = 10
 
 export function ClientPaymentPage() {
   const { user } = useAuth()
@@ -69,13 +78,13 @@ export function ClientPaymentPage() {
   const [followupModalOpen, setFollowupModalOpen] = useState(false)
   const [followupLoading, setFollowupLoading] = useState(false)
   const [followupEditable, setFollowupEditable] = useState(true)
-  const [followupSubmitted, setFollowupSubmitted] = useState(false)
-  const [followupSummary, setFollowupSummary] = useState<{
+  const [, setFollowupSubmitted] = useState(false)
+  const [, setFollowupSummary] = useState<{
     contact_person?: string | null
     mail_sent?: boolean
     whatsapp_sent?: boolean
   } | null>(null)
-  const [followupDetails, setFollowupDetails] = useState<{
+  const [, setFollowupDetails] = useState<{
     remarks?: string | null
   } | null>(null)
   const [followupForm] = Form.useForm()
@@ -135,35 +144,140 @@ export function ClientPaymentPage() {
   const [companyNameFilter, setCompanyNameFilter] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
   const [selectedExportColumns, setSelectedExportColumns] = useState<string[]>([])
+  /** Open list only: show rows where Invoice Sent is saved but payment is not yet received. */
+  const [awaitingPaymentReceiveOnly, setAwaitingPaymentReceiveOnly] = useState(false)
+  /** Comp _ Register: total completed rows (server) for infinite scroll. */
+  const [completedRegisterTotal, setCompletedRegisterTotal] = useState(0)
+  const [loadingMoreCompleted, setLoadingMoreCompleted] = useState(false)
 
   const location = useLocation()
-  const completedSection = location.pathname.includes('/completed/') ? location.pathname.split('/completed/')[1]?.split('/')[0] || null : null
+  const [searchParams, setSearchParams] = useSearchParams()
+  const compRegisterNextPageRef = useRef(1)
+  const completedSection = location.pathname.includes('/completed/')
+    ? location.pathname.split('/completed/')[1]?.split('/')[0] || null
+    : null
+  const isCompRegister = completedSection === COMP_REGISTER_SECTION
+  const compRegisterGenre = useMemo(() => {
+    const raw = (searchParams.get('genre') || '').trim().toUpperCase()
+    if (raw === 'M' || raw === 'Q' || raw === 'HY' || raw === 'Y') return raw as 'M' | 'Q' | 'HY' | 'Y'
+    return ''
+  }, [searchParams])
   const isOpenList = !completedSection
 
-  const loadData = () => {
+  const listBasePath = API_ENDPOINTS.CLIENT_PAYMENT.LIST.split('?')[0] || '/onboarding/client-payment'
+
+  const loadOpenListAllPages = useCallback(async () => {
     setLoading(true)
-    const listUrl = completedSection ? API_ENDPOINTS.CLIENT_PAYMENT.LIST_COMPLETED(completedSection) : API_ENDPOINTS.CLIENT_PAYMENT.LIST_OPEN
-    apiClient
-      .get<{ items?: ClientPaymentRecord[]; data?: ClientPaymentRecord[] }>(listUrl)
-      .then((r) => r.data)
-      .then((payments) => {
-        const rows = Array.isArray(payments?.data)
-          ? payments.data
-          : Array.isArray(payments?.items)
-            ? payments.items
-            : []
-        setRecords(rows as ClientPaymentRecord[])
-      })
-      .catch(() => {
-        setRecords([])
-        message.warning('Could not load list. Ensure the database tables exist.')
-      })
-      .finally(() => setLoading(false))
-  }
+    setCompletedRegisterTotal(0)
+    const pageSize = 200
+    const rows: ClientPaymentRecord[] = []
+    try {
+      for (let page = 1; page <= 100; page += 1) {
+        const r = await apiClient.get<{ items?: ClientPaymentRecord[]; data?: ClientPaymentRecord[]; total?: number }>(
+          listBasePath,
+          { params: { status: 'open', page_size: pageSize, page } },
+        )
+        const body = r.data
+        const chunk = Array.isArray(body?.data) ? body.data : Array.isArray(body?.items) ? body.items : []
+        rows.push(...(chunk as ClientPaymentRecord[]))
+        const total = typeof body?.total === 'number' ? body.total : undefined
+        if (chunk.length < pageSize) break
+        if (total != null && rows.length >= total) break
+      }
+      setRecords(rows)
+    } catch {
+      setRecords([])
+      message.warning('Could not load list. Ensure the database tables exist.')
+    } finally {
+      setLoading(false)
+    }
+  }, [listBasePath])
+
+  const fetchCompRegisterFirstPage = useCallback(async () => {
+    setLoading(true)
+    setLoadingMoreCompleted(false)
+    setRecords([])
+    setCompletedRegisterTotal(0)
+    compRegisterNextPageRef.current = 2
+    try {
+      const params: Record<string, string | number> = {
+        status: 'completed',
+        section: COMP_REGISTER_SECTION,
+        page: 1,
+        page_size: COMPLETED_REGISTER_PAGE_SIZE,
+      }
+      if (compRegisterGenre) params.genre = compRegisterGenre
+      const r = await apiClient.get<{ items?: ClientPaymentRecord[]; data?: ClientPaymentRecord[]; total?: number }>(
+        listBasePath,
+        { params },
+      )
+      const body = r.data
+      const chunk = Array.isArray(body?.data) ? body.data : Array.isArray(body?.items) ? body.items : []
+      const total = typeof body?.total === 'number' ? body.total : chunk.length
+      setRecords(chunk as ClientPaymentRecord[])
+      setCompletedRegisterTotal(total)
+    } catch {
+      setRecords([])
+      setCompletedRegisterTotal(0)
+      message.warning('Could not load list. Ensure the database tables exist.')
+    } finally {
+      setLoading(false)
+    }
+  }, [listBasePath, compRegisterGenre])
+
+  const loadMoreCompRegisterPage = useCallback(async () => {
+    if (!isCompRegister) return
+    if (loading || loadingMoreCompleted) return
+    if (completedRegisterTotal > 0 && records.length >= completedRegisterTotal) return
+    const nextPage = compRegisterNextPageRef.current
+    if (nextPage < 2) return
+    setLoadingMoreCompleted(true)
+    try {
+      const params: Record<string, string | number> = {
+        status: 'completed',
+        section: COMP_REGISTER_SECTION,
+        page: nextPage,
+        page_size: COMPLETED_REGISTER_PAGE_SIZE,
+      }
+      if (compRegisterGenre) params.genre = compRegisterGenre
+      const r = await apiClient.get<{ items?: ClientPaymentRecord[]; data?: ClientPaymentRecord[]; total?: number }>(
+        listBasePath,
+        { params },
+      )
+      const body = r.data
+      const chunk = Array.isArray(body?.data) ? body.data : Array.isArray(body?.items) ? body.items : []
+      if (typeof body?.total === 'number') setCompletedRegisterTotal(body.total)
+      if (chunk.length > 0) {
+        setRecords((prev) => [...prev, ...(chunk as ClientPaymentRecord[])])
+        compRegisterNextPageRef.current = nextPage + 1
+      }
+    } catch {
+      message.error('Could not load more rows')
+    } finally {
+      setLoadingMoreCompleted(false)
+    }
+  }, [
+    isCompRegister,
+    loading,
+    loadingMoreCompleted,
+    completedRegisterTotal,
+    records.length,
+    compRegisterGenre,
+    listBasePath,
+  ])
+
+  const reloadCurrentList = useCallback(() => {
+    if (isCompRegister) void fetchCompRegisterFirstPage()
+    else void loadOpenListAllPages()
+  }, [isCompRegister, fetchCompRegisterFirstPage, loadOpenListAllPages])
 
   useEffect(() => {
-    loadData()
-  }, [location.pathname])
+    if (isCompRegister) {
+      void fetchCompRegisterFirstPage()
+      return
+    }
+    void loadOpenListAllPages()
+  }, [location.pathname, compRegisterGenre, isCompRegister, fetchCompRegisterFirstPage, loadOpenListAllPages])
 
   useEffect(() => {
     if ((!modalOpen && !editInvoiceModalOpen) || companies.length > 0) return
@@ -206,7 +320,7 @@ export function ClientPaymentPage() {
           message.success('Raised Invoice saved')
           setModalOpen(false)
           form.resetFields()
-          loadData()
+          reloadCurrentList()
         })
         .catch((err) => {
           const status = err?.response?.status
@@ -263,7 +377,7 @@ export function ClientPaymentPage() {
           const merged: ClientPaymentRecord = { ...selectedRecord, ...updated }
           setSelectedRecord(merged)
           loadDrawerData(merged)
-          loadData()
+          reloadCurrentList()
         })
         .catch((err) => {
           const raw = err?.response?.data?.detail
@@ -447,7 +561,7 @@ export function ClientPaymentPage() {
             })
             setSentSubmitted(true)
             setSentModalOpen(false)
-            loadData()
+            reloadCurrentList()
           })
           .catch((err) => {
             const detail = err?.response?.data?.detail || 'Failed to save Invoice Sent details'
@@ -503,7 +617,7 @@ export function ClientPaymentPage() {
           message.success(`Follow up ${currentFollowupNo} saved`)
           setFollowupModalOpen(false)
           loadDrawerData(selectedRecord)
-          loadData()
+          reloadCurrentList()
           if (sentModalOpen) loadSentDetails(false, { silent: true })
         })
         .catch((err) => message.error(err?.response?.data?.detail || 'Failed to save'))
@@ -521,7 +635,7 @@ export function ClientPaymentPage() {
         .then(() => {
           message.success(`Follow up ${nextFollowupNo} saved`)
           loadDrawerData(selectedRecord)
-          loadData()
+          reloadCurrentList()
           loadSentDetails(false, { silent: true })
         })
         .catch((err) => message.error(err?.response?.data?.detail || 'Failed to save'))
@@ -703,7 +817,7 @@ export function ClientPaymentPage() {
         setPaymRecModalOpen(false)
         setDetailOpen(false)
         setSelectedRecord(null)
-        loadData()
+        reloadCurrentList()
       }).catch((e) => message.error(e?.response?.data?.detail || 'Failed to save'))
     }).catch(() => {})
   }
@@ -729,7 +843,8 @@ export function ClientPaymentPage() {
       title: 'Reference',
       dataIndex: 'reference_no',
       key: 'reference_no',
-      width: 130,
+      width: 150,
+      ellipsis: true,
       render: (v: string | null | undefined) => v || '—',
       filters: buildColumnFilters(records.map((r) => r.reference_no || '—')),
       filterSearch: true,
@@ -740,7 +855,8 @@ export function ClientPaymentPage() {
       title: 'Company Name',
       dataIndex: 'company_name',
       key: 'company_name',
-      width: 200,
+      width: 280,
+      ellipsis: true,
       filters: buildColumnFilters(records.map((r) => r.company_name || '—')),
       filterSearch: true,
       filterMultiple: true,
@@ -750,7 +866,8 @@ export function ClientPaymentPage() {
       title: 'Invoice Date',
       dataIndex: 'invoice_date',
       key: 'invoice_date',
-      width: 130,
+      width: 128,
+      ellipsis: true,
       render: (v: string | null) => (v ? dayjs(v).format('DD-MMM-YYYY') : '—'),
       filters: buildColumnFilters(records.map((r) => (r.invoice_date ? dayjs(r.invoice_date).format('DD-MMM-YYYY') : '—'))),
       filterSearch: true,
@@ -762,7 +879,8 @@ export function ClientPaymentPage() {
       title: 'Invoice Amount',
       dataIndex: 'invoice_amount',
       key: 'invoice_amount',
-      width: 130,
+      width: 128,
+      ellipsis: true,
       filters: buildColumnFilters(records.map((r) => r.invoice_amount || '—')),
       filterSearch: true,
       filterMultiple: true,
@@ -772,7 +890,8 @@ export function ClientPaymentPage() {
       title: 'Invoice Number',
       dataIndex: 'invoice_number',
       key: 'invoice_number',
-      width: 130,
+      width: 200,
+      ellipsis: true,
       filters: buildColumnFilters(records.map((r) => r.invoice_number || '—')),
       filterSearch: true,
       filterMultiple: true,
@@ -782,7 +901,8 @@ export function ClientPaymentPage() {
       title: 'Stage',
       dataIndex: 'stage',
       key: 'stage',
-      width: 160,
+      width: 220,
+      ellipsis: true,
       render: (v: string | null | undefined) => v || '—',
       filters: buildColumnFilters(records.map((r) => r.stage || '—')),
       filterSearch: true,
@@ -793,7 +913,8 @@ export function ClientPaymentPage() {
       title: 'Status',
       dataIndex: 'status',
       key: 'status',
-      width: 110,
+      width: 108,
+      ellipsis: true,
       render: (v: string | null | undefined) => v || 'Pending',
       filters: buildColumnFilters(records.map((r) => r.status || 'Pending')),
       filterSearch: true,
@@ -804,7 +925,7 @@ export function ClientPaymentPage() {
       title: 'Aging (days)',
       dataIndex: 'aging_days',
       key: 'aging_days',
-      width: 120,
+      width: 112,
       render: (v: number | null | undefined) => (typeof v === 'number' ? v : 0),
       filters: buildColumnFilters(records.map((r) => (typeof r.aging_days === 'number' ? r.aging_days : 0))),
       filterSearch: true,
@@ -817,13 +938,14 @@ export function ClientPaymentPage() {
       dataIndex: 'genre',
       key: 'genre',
       width: 120,
+      ellipsis: true,
       render: (v: string) => genreLabel(v),
       filters: buildColumnFilters(records.map((r) => genreLabel(r.genre))),
       filterSearch: true,
       filterMultiple: true,
       onFilter: (value: string | number | boolean, record: ClientPaymentRecord) => genreLabel(record.genre) === String(value),
     },
-  ]
+  ] as ColumnsType<ClientPaymentRecord>
 
   const exportColumns: ExportColumn<ClientPaymentRecord>[] = [
     { key: 'timestamp', label: 'Timestamp', getValue: (r) => (r.timestamp ? dayjs(r.timestamp).format('DD-MMM-YYYY HH:mm') : '—') },
@@ -860,7 +982,7 @@ export function ClientPaymentPage() {
     message.success('Export started')
   }
 
-  const pageTitle = completedSection ? `Client Payment – ${completedSection}` : 'Raised Invoices'
+  const pageTitle = isCompRegister ? 'Comp _ Register' : completedSection ? `Client Payment – ${completedSection}` : 'Raised Invoices'
   const dayOfMonth = new Date().getDate()
   const showInterceptByDate = dayOfMonth >= 20
 
@@ -882,16 +1004,33 @@ export function ClientPaymentPage() {
     !interceptHasTaggedUser2
   const showDiscontinuationByDate = dayOfMonth >= 25
   const isCompleted = selectedRecord?.status === 'Completed'
-  /** Core "Add Invoice" fields: editable within 30 days of row Timestamp (Payment Management / open list only). */
+  /** Core "Add Invoice" fields: editable within 150 days of row Timestamp (Payment Management / open list only). */
   const daysSinceCreated = selectedRecord?.timestamp ? dayjs().diff(dayjs(selectedRecord.timestamp), 'day') : 999
   const canEditRaisedInvoiceCore =
-    isOpenList && !!selectedRecord && !isCompleted && daysSinceCreated >= 0 && daysSinceCreated <= 30
+    isOpenList &&
+    !!selectedRecord &&
+    !isCompleted &&
+    daysSinceCreated >= 0 &&
+    daysSinceCreated <= CLIENT_PAYMENT_EDIT_DAYS
 
   const companyFilterNorm = companyNameFilter.trim().toLowerCase()
   const filteredRecords = useMemo(() => {
-    if (!companyFilterNorm) return records
-    return records.filter((r) => (r.company_name || '').toLowerCase().includes(companyFilterNorm))
-  }, [records, companyFilterNorm])
+    let list = records
+    if (companyFilterNorm) {
+      list = list.filter((r) => (r.company_name || '').toLowerCase().includes(companyFilterNorm))
+    }
+    if (awaitingPaymentReceiveOnly && isOpenList) {
+      list = list.filter((r) => r.invoice_sent_submitted && r.status !== 'Completed')
+    }
+    return list
+  }, [records, companyFilterNorm, awaitingPaymentReceiveOnly, isOpenList])
+
+  const awaitingPaymentReceiveCount = useMemo(
+    () => records.filter((r) => r.invoice_sent_submitted && r.status !== 'Completed').length,
+    [records],
+  )
+
+  const clientPaymentChunkSize = isCompRegister ? Math.max(filteredRecords.length, 1) : DEFAULT_INFINITE_CHUNK
 
   const {
     visibleItems: visibleFilteredRecords,
@@ -900,7 +1039,44 @@ export function ClientPaymentPage() {
     total: totalFilteredRecords,
     visibleCount: visibleFilteredRecordCount,
     hasMore: filteredRecordsHasMore,
-  } = useInfiniteScrollChunk({ items: filteredRecords, chunkSize: DEFAULT_INFINITE_CHUNK, loading })
+  } = useInfiniteScrollChunk({
+    items: filteredRecords,
+    chunkSize: clientPaymentChunkSize,
+    loading: isCompRegister ? false : loading,
+  })
+
+  const tableRows = isCompRegister ? filteredRecords : visibleFilteredRecords
+
+  useEffect(() => {
+    if (!isCompRegister) return
+    if (loading) return
+    const sentinel = clientPaymentTableSentinelRef.current
+    if (!sentinel) return
+    if (completedRegisterTotal > 0 && records.length >= completedRegisterTotal) return
+    const tableBodyRoot = clientPaymentTableContainerRef.current?.querySelector('.ant-table-body') as HTMLElement | null
+    const root = tableBodyRoot && tableBodyRoot.contains(sentinel) ? tableBodyRoot : null
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return
+        void loadMoreCompRegisterPage()
+      },
+      { root, rootMargin: '200px', threshold: 0 },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [
+    isCompRegister,
+    loading,
+    loadingMoreCompleted,
+    records.length,
+    completedRegisterTotal,
+    filteredRecords.length,
+    loadMoreCompRegisterPage,
+    compRegisterGenre,
+  ])
+
+  const compRegisterHasMoreServer =
+    isCompRegister && completedRegisterTotal > 0 && records.length < completedRegisterTotal
 
   return (
     <div style={{ padding: 24 }}>
@@ -913,6 +1089,34 @@ export function ClientPaymentPage() {
           {pageTitle}
         </Title>
         <Space wrap align="center" size="middle">
+          {isOpenList ? (
+            <>
+              <Checkbox checked={awaitingPaymentReceiveOnly} onChange={(e) => setAwaitingPaymentReceiveOnly(e.target.checked)}>
+                Awaiting Payment Received
+              </Checkbox>
+              <Text type="secondary" style={{ whiteSpace: 'nowrap' }}>
+                {awaitingPaymentReceiveCount} row{awaitingPaymentReceiveCount === 1 ? '' : 's'} need Payment Received
+              </Text>
+            </>
+          ) : null}
+          {isCompRegister ? (
+            <Select
+              aria-label="Filter completed invoices by genre"
+              style={{ width: 240 }}
+              value={compRegisterGenre || 'all'}
+              options={[
+                { value: 'all', label: 'All genres (Q + M + HY)' },
+                { value: 'Q', label: 'Quarterly (Q)' },
+                { value: 'M', label: 'Monthly (M)' },
+                { value: 'HY', label: 'Half yearly (HY)' },
+                { value: 'Y', label: 'Yearly (Y)' },
+              ]}
+              onChange={(v) => {
+                if (v === 'all') setSearchParams({}, { replace: true })
+                else setSearchParams({ genre: String(v) }, { replace: true })
+              }}
+            />
+          ) : null}
           <Input.Search
             allowClear
             placeholder="Search company name"
@@ -940,12 +1144,12 @@ export function ClientPaymentPage() {
         <TableWithSkeletonLoading loading={loading} columns={9} rows={12}>
           <div ref={clientPaymentTableContainerRef}>
             <Table
-              dataSource={visibleFilteredRecords}
+              dataSource={tableRows}
               columns={columns}
               rowKey="id"
-              virtual
               loading={false}
-              scroll={{ x: 900, y: 600 }}
+              scroll={{ x: 1460, y: 600 }}
+              tableLayout="fixed"
               pagination={false}
               summary={() => (
                 <Table.Summary>
@@ -953,7 +1157,18 @@ export function ClientPaymentPage() {
                     <Table.Summary.Cell index={0} colSpan={columns.length}>
                       <div ref={clientPaymentTableSentinelRef} style={{ height: 8, minHeight: 8 }} aria-hidden />
                       <Text type="secondary">
-                        Showing {visibleFilteredRecordCount} of {totalFilteredRecords} rows{filteredRecordsHasMore ? ' · scroll to load more' : ''}
+                        {isCompRegister ? (
+                          <>
+                            Showing {filteredRecords.length} of {completedRegisterTotal} completed
+                            {loadingMoreCompleted ? ' · loading more…' : null}
+                            {!loadingMoreCompleted && compRegisterHasMoreServer ? ' · scroll for more' : null}
+                          </>
+                        ) : (
+                          <>
+                            Showing {visibleFilteredRecordCount} of {totalFilteredRecords} rows
+                            {filteredRecordsHasMore ? ' · scroll to load more' : ''}
+                          </>
+                        )}
                       </Text>
                     </Table.Summary.Cell>
                   </Table.Summary.Row>
@@ -1008,7 +1223,7 @@ export function ClientPaymentPage() {
             )}
             {isOpenList && !canEditRaisedInvoiceCore && !isCompleted && (
               <Text type="secondary" style={{ display: 'block', marginTop: 12 }}>
-                Company and invoice fields can be edited within 30 days of Timestamp (record creation).
+                Company and invoice fields can be edited within {CLIENT_PAYMENT_EDIT_DAYS} days of Timestamp (record creation).
               </Text>
             )}
             <Divider>Invoice Sent details & Follow up</Divider>
@@ -1353,7 +1568,7 @@ export function ClientPaymentPage() {
 
         <Divider orientation="left">Follow up 1 to 10</Divider>
         <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-          Follow ups load from the same data as the drawer. After a follow up is saved, it is read-only here; within 24 hours you can still use <b>Edit</b> on the drawer for that follow up.
+          Follow ups load from the same data as the drawer. After a follow up is saved, it is read-only here; within {CLIENT_PAYMENT_EDIT_DAYS} days of submission you can still use <b>Edit</b> on the drawer for that follow up.
         </Text>
         {!sentSubmitted ? (
           <Text type="warning" style={{ display: 'block', marginBottom: 12 }}>
@@ -1591,7 +1806,7 @@ export function ClientPaymentPage() {
         width={520}
       >
         <Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-          Changes are allowed for 30 days after the original Timestamp, and only until payment is received.
+          Changes are allowed for {CLIENT_PAYMENT_EDIT_DAYS} days after the original Timestamp, and only until payment is received.
         </Text>
         <Form form={editInvoiceForm} layout="vertical" style={{ marginTop: 8 }} onFinish={handleEditInvoiceSubmit}>
           <Form.Item

@@ -120,7 +120,9 @@ export const ROUTES = {
   ONBOARDING: '/onboarding',
   ONBOARDING_PAYMENT_STATUS: '/onboarding/payment-status',
   CLIENT_PAYMENT: '/onboarding/client-payment',
-  /** Client Payment completed sections (moved from Payment Management after Paym-Rec) */
+  /** Completed Q / M / HY (merged register; optional ?genre=) */
+  CLIENT_PAYMENT_COMP_REGISTER: '/onboarding/client-payment/completed/Comp-Register',
+  /** Legacy URLs — App redirects to Comp-Register with genre */
   CLIENT_PAYMENT_Q_COMP: '/onboarding/client-payment/completed/Q-Comp',
   CLIENT_PAYMENT_M_COMP: '/onboarding/client-payment/completed/M-Comp',
   CLIENT_PAYMENT_HF_COMP: '/onboarding/client-payment/completed/HF-Comp',
@@ -218,7 +220,11 @@ export const API_ENDPOINTS = {
   CLIENT_PAYMENT: {
     LIST: '/onboarding/client-payment',
     LIST_OPEN: '/onboarding/client-payment?status=open',
-    LIST_COMPLETED: (section: string) => `/onboarding/client-payment?status=completed&section=${encodeURIComponent(section)}`,
+    LIST_COMPLETED: (section: string, genre?: string) => {
+      const sp = new URLSearchParams({ status: 'completed', section })
+      if (genre) sp.set('genre', genre)
+      return `/onboarding/client-payment?${sp.toString()}`
+    },
     CREATE: '/onboarding/client-payment',
     UPDATE: (id: string) => `/onboarding/client-payment/${id}`,
     PAYMENT_AGEING_REPORT: '/onboarding/client-payment/payment-ageing-report',

@@ -1348,8 +1348,18 @@ def create_ticket(payload: CreateTicketRequest, auth: dict = Depends(get_current
                 continue
             _log(f"Create ticket with attachment_url: {str(v)[:80]}...")
         data[k] = v
+    if data.get("company_id"):
+        try:
+            cr = supabase.table("companies").select("name").eq("id", data["company_id"]).single().execute()
+            if cr.data and cr.data.get("name"):
+                data["company_name"] = str(cr.data.get("name")).strip()
+        except Exception:
+            pass
     try:
         r = supabase.table("tickets").insert(data).execute()
+        global _REF_NO_TO_COMPANY_LOADED, _COMPANIES_BY_NAME_LOADED
+        _REF_NO_TO_COMPANY_LOADED = False
+        _COMPANIES_BY_NAME_LOADED = False
         return r.data[0] if r.data else {}
     except Exception as e:
         _log(f"Create ticket error: {e}")
@@ -1360,10 +1370,36 @@ def create_ticket(payload: CreateTicketRequest, auth: dict = Depends(get_current
         )
 
 
+# Generic / test company labels — must not override real names on tickets (bulk import used LIMIT 1 company_id).
+_PLACEHOLDER_COMPANY_NAMES = frozenset({
+    "company a",
+    "company b",
+    "company c",
+    "demo",
+    "demo_c",
+    "demo c",
+    "demo_c ",
+    "unknown",
+    "n/a",
+    "na",
+    "test",
+    "sample",
+})
+
 # Fallback: reference_no -> company_name when tickets.company_name is null (e.g. production DB not updated).
-# Loaded from tickets table (matching TICKETS_UPDATE_COMPANY_NAMES.sql); cache populated on first use.
 _REF_NO_TO_COMPANY: dict[str, str] = {}
 _REF_NO_TO_COMPANY_LOADED = False
+
+
+def _is_placeholder_company_name(name: str | None) -> bool:
+    if not name:
+        return True
+    normalized = str(name).strip().lower()
+    if not normalized or normalized in ("null", "none", "-"):
+        return True
+    return normalized in _PLACEHOLDER_COMPANY_NAMES
+
+
 def _build_ref_no_to_company() -> dict[str, str]:
     global _REF_NO_TO_COMPANY, _REF_NO_TO_COMPANY_LOADED
     if _REF_NO_TO_COMPANY_LOADED:
@@ -1372,10 +1408,58 @@ def _build_ref_no_to_company() -> dict[str, str]:
     try:
         r = supabase.table("tickets").select("reference_no, company_name").not_.is_("company_name", "null").execute()
         rows = r.data or []
-        _REF_NO_TO_COMPANY = {row["reference_no"]: row["company_name"] for row in rows if row.get("reference_no") and row.get("company_name")}
+        out: dict[str, str] = {}
+        for row in rows:
+            ref = row.get("reference_no")
+            name = (row.get("company_name") or "").strip()
+            if not ref or not name or _is_placeholder_company_name(name):
+                continue
+            # Keep first good name per reference (stable; avoids test rows overwriting production names).
+            out.setdefault(ref, name)
+        _REF_NO_TO_COMPANY = out
     except Exception as e:
         _log(f"ref_no_to_company: failed to load from DB: {e}")
     return _REF_NO_TO_COMPANY
+
+
+_COMPANIES_BY_NORMALIZED_NAME: dict[str, str] = {}
+_COMPANIES_BY_NAME_LOADED = False
+
+
+def _companies_by_normalized_name() -> dict[str, str]:
+    """Lowercase company name -> canonical name from master table."""
+    global _COMPANIES_BY_NORMALIZED_NAME, _COMPANIES_BY_NAME_LOADED
+    if _COMPANIES_BY_NAME_LOADED:
+        return _COMPANIES_BY_NORMALIZED_NAME
+    _COMPANIES_BY_NAME_LOADED = True
+    try:
+        r = supabase.table("companies").select("name").execute()
+        for row in r.data or []:
+            name = (row.get("name") or "").strip()
+            if name and not _is_placeholder_company_name(name):
+                _COMPANIES_BY_NORMALIZED_NAME[name.lower()] = name
+    except Exception as e:
+        _log(f"companies_by_name: failed to load: {e}")
+    return _COMPANIES_BY_NORMALIZED_NAME
+
+
+def _resolve_ticket_company_name(row: dict, companies_map: dict[str, str], ref_to_company: dict[str, str]) -> str | None:
+    """Pick best company display name; ignore placeholder FK targets from legacy bulk imports."""
+    cid = row.get("company_id")
+    stored = (row.get("company_name") and str(row.get("company_name")).strip()) or ""
+    from_id = (companies_map.get(cid) if cid else None) or ""
+    from_id = from_id.strip() if from_id else ""
+    from_ref = (ref_to_company.get(row.get("reference_no") or "") or "").strip()
+    by_name = _companies_by_normalized_name()
+
+    for candidate in (from_id, stored, from_ref):
+        if candidate and not _is_placeholder_company_name(candidate):
+            return candidate
+        if candidate:
+            canonical = by_name.get(candidate.lower())
+            if canonical:
+                return canonical
+    return from_id or stored or from_ref or None
 
 
 def _enrich_tickets_with_lookups(rows: list) -> list:
@@ -1414,13 +1498,7 @@ def _enrich_tickets_with_lookups(rows: list) -> list:
     except Exception:
         pass
     for row in rows:
-        # Prefer lookup by selected IDs, then existing legacy text, then reference_no fallback.
-        # This ensures edit modal changes (company_id/page_id/division_id) reflect immediately in UI.
-        row["company_name"] = (
-            (companies_map.get(row.get("company_id")) if row.get("company_id") else None)
-            or (row.get("company_name") and str(row.get("company_name")).strip())
-            or ref_to_company.get(row.get("reference_no") or "")
-        )
+        row["company_name"] = _resolve_ticket_company_name(row, companies_map, ref_to_company)
         row["page_name"] = (
             (pages_map.get(row.get("page_id")) if row.get("page_id") else None)
             or (str(row.get("page")).strip() if row.get("page") and str(row.get("page")).strip() else None)
@@ -1431,6 +1509,41 @@ def _enrich_tickets_with_lookups(rows: list) -> list:
         )
         row["approved_by_name"] = approvers_map.get(row.get("approved_by")) if row.get("approved_by") else None
     return rows
+
+
+def _apply_exclude_active_staging_filter(q):
+    """Exclude tickets still in the Staging workflow (they belong under Staging, not Chores & Bugs)."""
+    return q.or_("staging_planned.is.null,live_review_status.eq.completed")
+
+
+def _apply_chores_bugs_pending_filters(q, type_filter: str | None = None, status_2_filter: str | None = None):
+    """Chores & Bugs open queue: chore/bug, solution form not submitted, not in active Staging."""
+    types_list = ["chore", "bug"] if type_filter not in ("chore", "bug") else [type_filter]
+    q = q.in_("type", types_list)
+    q = q.is_("quality_solution", "null")
+    status_2_val = (status_2_filter or "").strip().lower()
+    if status_2_val in ("pending", "completed", "staging", "hold", "na", "rejected"):
+        q = q.eq("status_2", status_2_val)
+        if status_2_val != "staging":
+            q = _apply_exclude_active_staging_filter(q)
+    elif status_2_val:
+        q = q.eq("status_2", status_2_val)
+        q = _apply_exclude_active_staging_filter(q)
+    else:
+        q = _apply_exclude_active_staging_filter(q)
+        q = q.or_("status_2.is.null,status_2.neq.staging")
+    return q
+
+
+def _supabase_list_total(r, page: int, page_size: int) -> int:
+    """Resolve total row count; Supabase 206 responses may omit count."""
+    if r.count is not None:
+        return int(r.count)
+    n = len(r.data or [])
+    offset = (max(1, page) - 1) * page_size
+    if n < page_size:
+        return offset + n
+    return offset + n + 1
 
 
 @api_router.get("/tickets")
@@ -1490,27 +1603,17 @@ def list_tickets(
         # Tickets in Staging: (new workflow: staging_planned set OR old: status_2 = staging) AND not completed Stage 3
         q = q.or_("staging_planned.not.is.null,status_2.eq.staging")
         q = q.or_("live_review_status.is.null,live_review_status.neq.completed")
-    elif apply_section_filter and section == "chores-bugs":
-        types_list = ["chore", "bug"] if type_filter not in ("chore", "bug") else [type_filter]
-        q = q.in_("type", types_list)
-        q = q.is_("quality_solution", "null")
-        if status_2_filter and status_2_filter.strip():
-            status_2_val = status_2_filter.lower().strip()
-            # Filter by Stage 2 status: only show tickets matching selected status; no match = blank list
-            if status_2_val in ("pending", "completed", "staging", "hold", "na", "rejected"):
-                q = q.eq("status_2", status_2_val)
-                if status_2_val != "staging":
-                    q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
-                    q = q.or_("status_2.is.null,status_2.neq.staging")
-                # Rejected: only show until Stage 4 is completed; once completed, ticket moves to Rejected Tickets section
-                if status_2_val == "rejected":
-                    q = q.or_("status_4.is.null,status_4.neq.completed")
-            else:
-                q = q.eq("status_2", status_2_val)
+    elif apply_section_filter and section == "register-of-tickets":
+        # Solution form submitted — leaves Chores & Bugs open queue
+        if types_in:
+            types_list = [t.strip() for t in types_in.split(",") if t.strip()]
         else:
-            # No status filter: exclude tickets in Staging (new workflow or old status_2 = staging)
-            q = q.or_("staging_planned.is.null,live_review_status.eq.completed")
-            q = q.or_("status_2.is.null,status_2.neq.staging")
+            types_list = ["chore", "bug"]
+        if types_list:
+            q = q.in_("type", types_list)
+        q = q.not_.is_("quality_solution", "null")
+    elif apply_section_filter and section == "chores-bugs":
+        q = _apply_chores_bugs_pending_filters(q, type_filter, status_2_filter)
     elif apply_section_filter and section == "approval-status":
         # Feature requests: only Pending and Unapproved (exclude Approved)
         q = q.eq("type", "feature")
@@ -1570,7 +1673,7 @@ def list_tickets(
     q = q.range((page - 1) * page_size, page * page_size - 1)
     r = q.execute()
     rows = _enrich_tickets_with_lookups(r.data or [])
-    return {"data": rows, "total": r.count or 0, "page": page, "page_size": page_size}
+    return {"data": rows, "total": _supabase_list_total(r, page, page_size), "page": page, "page_size": page_size}
 
 
 def _level3_used_for_ticket(ticket_id: str, user_id: str) -> bool:
@@ -1675,10 +1778,10 @@ def update_ticket(ticket_id: str, payload: UpdateTicketRequest, auth: dict = Dep
     r = supabase.table("tickets").update(data).eq("id", ticket_id).execute()
     if not r.data:
         raise HTTPException(status_code=404, detail="Ticket not found")
-    # Enrichment uses a cached `reference_no -> company_name` mapping.
-    # Reset cache on writes so list/drawer never shows stale company/page/division values.
-    global _REF_NO_TO_COMPANY_LOADED
+    # Enrichment uses cached company-name maps; reset on writes so list/drawer stays fresh.
+    global _REF_NO_TO_COMPANY_LOADED, _COMPANIES_BY_NAME_LOADED
     _REF_NO_TO_COMPANY_LOADED = False
+    _COMPANIES_BY_NAME_LOADED = False
     # Log approval/rejection for audit
     if "approval_status" in data:
         try:
@@ -5316,10 +5419,11 @@ def list_client_payment(
     auth: dict = Depends(get_current_user),
     status: str = None,
     section: str = None,
+    genre: str = None,
     page: int = 1,
     page_size: int = Query(50, le=200),
 ):
-    """List Raised Invoices. status=open (default): Payment Management (no payment received). status=completed&section=Gener|Q-Comp|M-Comp|HF-Comp: completed by genre."""
+    """List Raised Invoices. status=open (default): Payment Management (no payment received). status=completed&section=Gener|Q-Comp|M-Comp|HF-Comp|Comp-Register: completed by genre. Comp-Register merges Q/M/HY; optional ``genre`` query narrows to one letter."""
     try:
         page = max(1, int(page or 1))
         page_size = max(1, min(int(page_size or 50), 200))
@@ -5327,7 +5431,13 @@ def list_client_payment(
         q = supabase.table("onboarding_client_payment").select(_OCP_LIST_COLUMNS, count="exact").order("timestamp", desc=True)
         if status == "completed" and section:
             q = q.not_.is_("payment_received_date", "null")
-            if section == "Q-Comp":
+            if section == "Comp-Register":
+                g = (genre or "").strip().upper()
+                if g in ("M", "Q", "HY", "Y"):
+                    q = q.eq("genre", g)
+                else:
+                    q = q.in_("genre", ["Q", "M", "HY"])
+            elif section == "Q-Comp":
                 q = q.eq("genre", "Q")
             elif section == "M-Comp":
                 q = q.eq("genre", "M")
@@ -5494,6 +5604,7 @@ def _enrich_client_payment_list_items(items: list[dict]) -> None:
             aging_days = 0
         row["aging_days"] = aging_days
         cp_id = str(row.get("id")) if row.get("id") else None
+        row["invoice_sent_submitted"] = bool(cp_id and cp_id in ids_with_sent)
         if paid_date:
             row["stage"] = "Completed"
         else:
@@ -5503,7 +5614,7 @@ def _enrich_client_payment_list_items(items: list[dict]) -> None:
             elif cp_id in ids_with_sent:
                 row["stage"] = "Invoice Sent details"
             else:
-                row["stage"] = "Invoice Sent details"
+                row["stage"] = "Raised — Invoice Sent not saved"
 
 
 def _compute_payment_ageing_kpis(
@@ -6340,9 +6451,46 @@ def create_client_payment(payload: dict, auth: dict = Depends(get_current_user))
         raise HTTPException(400, str(e)[:200])
 
 
+_CLIENT_PAYMENT_RESPONSE_EDIT_DAYS = 150
+
+
+def _client_payment_parse_utc(iso: str | None) -> datetime | None:
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
+def _client_payment_editable_until_dt(submitted_at_iso: str | None) -> datetime | None:
+    submitted = _client_payment_parse_utc(submitted_at_iso)
+    if not submitted:
+        return None
+    return submitted + timedelta(days=_CLIENT_PAYMENT_RESPONSE_EDIT_DAYS)
+
+
+def _client_payment_editable_until_iso(submitted_at_iso: str | None) -> str | None:
+    until = _client_payment_editable_until_dt(submitted_at_iso)
+    return until.isoformat().replace("+00:00", "Z") if until else None
+
+
+def _client_payment_response_editable(submitted_at_iso: str | None, is_admin: bool = False) -> bool:
+    """Within 150 days of first submit (created_at). Unsubmitted shells remain editable."""
+    if is_admin:
+        return True
+    if not submitted_at_iso:
+        return True
+    until = _client_payment_editable_until_dt(submitted_at_iso)
+    return bool(until and until >= datetime.now(timezone.utc))
+
+
 @api_router.put("/onboarding/client-payment/{client_payment_id}")
 def update_client_payment(client_payment_id: str, payload: dict, auth: dict = Depends(get_current_user)):
-    """Update core Raised Invoice fields (same as create). Allowed within 30 days of ``timestamp`` and only while unpaid."""
+    """Update core Raised Invoice fields. Allowed within 150 days of ``timestamp`` and only while unpaid."""
     try:
         r0 = (
             supabase.table("onboarding_client_payment")
@@ -6366,8 +6514,11 @@ def update_client_payment(client_payment_id: str, payload: dict, auth: dict = De
                 created = created.replace(tzinfo=timezone.utc)
         except Exception:
             raise HTTPException(400, "Invalid timestamp on record")
-        if (datetime.now(timezone.utc) - created).days > 30:
-            raise HTTPException(400, "Edit window expired: company / invoice fields can only be changed within 30 days of creation (Timestamp)")
+        if (datetime.now(timezone.utc) - created).days > _CLIENT_PAYMENT_RESPONSE_EDIT_DAYS:
+            raise HTTPException(
+                400,
+                f"Edit window expired: company / invoice fields can only be changed within {_CLIENT_PAYMENT_RESPONSE_EDIT_DAYS} days of creation (Timestamp)",
+            )
 
         company_name = (payload.get("company_name") or "").strip()
         if not company_name:
@@ -6423,9 +6574,10 @@ def get_client_payment_sent(client_payment_id: str, auth: dict = Depends(get_cur
             .execute()
         )
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
         if not row:
             now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            editable_until = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat().replace("+00:00", "Z")
             # Don't insert yet; treat as empty state on UI, create on first save
             return {
                 "data": {
@@ -6438,10 +6590,11 @@ def get_client_payment_sent(client_payment_id: str, auth: dict = Depends(get_cur
                     "invoice_number": None,
                 },
                 "created_at": now,
-                "editable_until": editable_until,
+                "editable_until": None,
                 "editable_24h": True,
                 "submitted": False,
             }
+        submit_at = row.get("created_at")
         return {
             "data": {
                 "email_sent": bool(row.get("email_sent")),
@@ -6452,9 +6605,9 @@ def get_client_payment_sent(client_payment_id: str, auth: dict = Depends(get_cur
                 "whatsapp_number": row.get("whatsapp_number"),
                 "invoice_number": row.get("invoice_number"),
             },
-            "created_at": row.get("created_at"),
-            "editable_until": row.get("editable_until"),
-            "editable_24h": bool(row.get("editable_until") and datetime.fromisoformat(str(row.get("editable_until")).replace("Z", "+00:00")) >= datetime.now(timezone.utc)),
+            "created_at": submit_at,
+            "editable_until": _client_payment_editable_until_iso(submit_at),
+            "editable_24h": _client_payment_response_editable(submit_at, is_admin=is_admin),
             "submitted": True,
         }
     except Exception as e:
@@ -6494,8 +6647,7 @@ def save_client_payment_sent(client_payment_id: str, payload: dict, auth: dict =
 
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
-    editable_until_dt = now_dt + timedelta(hours=48)
-    editable_until_iso = editable_until_dt.isoformat().replace("+00:00", "Z")
+    editable_until_iso = _client_payment_editable_until_iso(now_iso)
 
     try:
         existing = (
@@ -6512,19 +6664,15 @@ def save_client_payment_sent(client_payment_id: str, payload: dict, auth: dict =
 
         if row:
             created_by = row.get("created_by")
-            editable_until = row.get("editable_until")
-            can_edit = False
-            if is_admin:
-                can_edit = True
-            elif created_by == auth["id"] and editable_until:
-                try:
-                    d = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
-                    if d >= now_dt:
-                        can_edit = True
-                except Exception:
-                    can_edit = False
+            submit_at = row.get("created_at")
+            can_edit = is_admin or (
+                created_by == auth["id"] and _client_payment_response_editable(submit_at, is_admin=False)
+            )
             if not can_edit:
-                raise HTTPException(403, "Invoice Sent details are no longer editable")
+                raise HTTPException(
+                    403,
+                    f"Invoice Sent details can only be edited within {_CLIENT_PAYMENT_RESPONSE_EDIT_DAYS} days of submission",
+                )
 
             supabase.table("onboarding_client_payment_sent").update(
                 {
@@ -6538,7 +6686,12 @@ def save_client_payment_sent(client_payment_id: str, payload: dict, auth: dict =
                     "updated_at": now_iso,
                 }
             ).eq("id", row.get("id")).execute()
-            return {"data": data, "created_at": row.get("created_at"), "editable_until": editable_until, "editable_24h": True}
+            return {
+                "data": data,
+                "created_at": submit_at,
+                "editable_until": _client_payment_editable_until_iso(submit_at),
+                "editable_24h": True,
+            }
 
         # Create new
         supabase.table("onboarding_client_payment_sent").insert(
@@ -6579,8 +6732,9 @@ def get_client_payment_followup1(client_payment_id: str, auth: dict = Depends(ge
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         now_dt = datetime.now(timezone.utc)
         now_iso = now_dt.isoformat().replace("+00:00", "Z")
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
         if not row:
-            editable_until_iso = (now_dt + timedelta(hours=24)).isoformat().replace("+00:00", "Z")
             return {
                 "data": {
                     "contact_person": None,
@@ -6590,18 +6744,11 @@ def get_client_payment_followup1(client_payment_id: str, auth: dict = Depends(ge
                     "followup_timestamp": None,
                 },
                 "created_at": now_iso,
-                "editable_until": editable_until_iso,
+                "editable_until": None,
                 "editable_24h": True,
                 "submitted": False,
             }
-        editable_until = row.get("editable_until")
-        editable_24h = False
-        if editable_until:
-            try:
-                editable_dt = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
-                editable_24h = editable_dt >= now_dt
-            except Exception:
-                editable_24h = False
+        submit_at = row.get("created_at") or now_iso
         return {
             "data": {
                 "contact_person": row.get("contact_person"),
@@ -6610,9 +6757,9 @@ def get_client_payment_followup1(client_payment_id: str, auth: dict = Depends(ge
                 "whatsapp_sent": bool(row.get("whatsapp_sent")),
                 "followup_timestamp": row.get("followup_timestamp"),
             },
-            "created_at": row.get("created_at") or now_iso,
-            "editable_until": editable_until,
-            "editable_24h": editable_24h,
+            "created_at": submit_at,
+            "editable_until": _client_payment_editable_until_iso(submit_at),
+            "editable_24h": _client_payment_response_editable(submit_at, is_admin=is_admin),
             "submitted": True,
         }
     except Exception as e:
@@ -6642,8 +6789,7 @@ def save_client_payment_followup1(client_payment_id: str, payload: dict, auth: d
 
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
-    editable_until_dt = now_dt + timedelta(hours=24)
-    editable_until_iso = editable_until_dt.isoformat().replace("+00:00", "Z")
+    editable_until_iso = _client_payment_editable_until_iso(now_iso)
 
     try:
         existing = (
@@ -6659,16 +6805,12 @@ def save_client_payment_followup1(client_payment_id: str, payload: dict, auth: d
         is_admin = role in ("admin", "master_admin")
 
         if row:
-            editable_until = row.get("editable_until")
-            if not is_admin and editable_until:
-                try:
-                    editable_dt = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
-                    if editable_dt < now_dt:
-                        raise HTTPException(400, "Follow up 1 can only be edited within 24 hours")
-                except HTTPException:
-                    raise
-                except Exception:
-                    raise HTTPException(400, "Follow up 1 is no longer editable")
+            submit_at = row.get("created_at")
+            if not is_admin and not _client_payment_response_editable(submit_at, is_admin=False):
+                raise HTTPException(
+                    400,
+                    f"Follow up 1 can only be edited within {_CLIENT_PAYMENT_RESPONSE_EDIT_DAYS} days of submission",
+                )
 
             update_data = {
                 "contact_person": contact_person,
@@ -6744,16 +6886,11 @@ def list_client_payment_followups(client_payment_id: str, auth: dict = Depends(g
             .execute()
         )
         rows = r.data or []
-        now_dt = datetime.now(timezone.utc)
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
         items = []
         for row in rows:
-            editable_until = row.get("editable_until")
-            editable_24h = False
-            if editable_until:
-                try:
-                    editable_24h = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00")) >= now_dt
-                except Exception:
-                    pass
+            submit_at = row.get("created_at")
             items.append({
                 "followup_no": row.get("followup_no"),
                 "contact_person": row.get("contact_person"),
@@ -6761,8 +6898,8 @@ def list_client_payment_followups(client_payment_id: str, auth: dict = Depends(g
                 "mail_sent": bool(row.get("mail_sent")),
                 "whatsapp_sent": bool(row.get("whatsapp_sent")),
                 "followup_timestamp": row.get("followup_timestamp"),
-                "created_at": row.get("created_at"),
-                "editable_24h": editable_24h,
+                "created_at": submit_at,
+                "editable_24h": _client_payment_response_editable(submit_at, is_admin=is_admin),
             })
         # Legacy: if old followup1 table has a row, treat as followup 1
         try:
@@ -6775,12 +6912,8 @@ def list_client_payment_followups(client_payment_id: str, auth: dict = Depends(g
             )
             if r1.data and len(r1.data) > 0 and not any(x.get("followup_no") == 1 for x in rows):
                 leg = r1.data[0]
-                editable_24h = False
-                if leg.get("editable_until"):
-                    try:
-                        editable_24h = datetime.fromisoformat(str(leg["editable_until"]).replace("Z", "+00:00")) >= now_dt
-                    except Exception:
-                        pass
+                leg_submit = leg.get("created_at")
+                editable_24h = _client_payment_response_editable(leg_submit, is_admin=is_admin)
                 items.append(
                     {
                         "followup_no": 1,
@@ -6837,13 +6970,9 @@ def get_client_payment_followup(client_payment_id: str, followup_no: int, auth: 
                     "submitted": False,
                     "editable_24h": True,
                 }
-        now_dt = datetime.now(timezone.utc)
-        editable_24h = False
-        if row and row.get("editable_until"):
-            try:
-                editable_24h = datetime.fromisoformat(str(row["editable_until"]).replace("Z", "+00:00")) >= now_dt
-            except Exception:
-                pass
+        role = _get_role_from_profile(auth["id"])
+        is_admin = role in ("admin", "master_admin")
+        submit_at = row.get("created_at") if row else None
         return {
             "data": {
                 "contact_person": row.get("contact_person") if row else None,
@@ -6853,7 +6982,7 @@ def get_client_payment_followup(client_payment_id: str, followup_no: int, auth: 
                 "followup_timestamp": row.get("followup_timestamp") if row else None,
             },
             "submitted": bool(row),
-            "editable_24h": editable_24h,
+            "editable_24h": _client_payment_response_editable(submit_at, is_admin=is_admin) if row else True,
         }
     except HTTPException:
         raise
@@ -6883,8 +7012,7 @@ def save_client_payment_followup(client_payment_id: str, payload: dict, auth: di
         raise HTTPException(400, "followup_timestamp is required")
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
-    editable_until_dt = now_dt + timedelta(hours=24)
-    editable_until_iso = editable_until_dt.isoformat().replace("+00:00", "Z")
+    editable_until_iso = _client_payment_editable_until_iso(now_iso)
     try:
         existing = (
             supabase.table("onboarding_client_payment_followups")
@@ -6898,14 +7026,11 @@ def save_client_payment_followup(client_payment_id: str, payload: dict, auth: di
         role = _get_role_from_profile(auth["id"])
         is_admin = role in ("admin", "master_admin")
         if row:
-            if not is_admin and row.get("editable_until"):
-                try:
-                    if datetime.fromisoformat(str(row["editable_until"]).replace("Z", "+00:00")) < now_dt:
-                        raise HTTPException(400, "Follow-up can only be edited within 24 hours")
-                except HTTPException:
-                    raise
-                except Exception:
-                    raise HTTPException(400, "No longer editable")
+            if not is_admin and not _client_payment_response_editable(row.get("created_at"), is_admin=False):
+                raise HTTPException(
+                    400,
+                    f"Follow-up can only be edited within {_CLIENT_PAYMENT_RESPONSE_EDIT_DAYS} days of submission",
+                )
             supabase.table("onboarding_client_payment_followups").update({
                 "contact_person": contact_person,
                 "remarks": remarks,
@@ -6978,17 +7103,13 @@ def get_client_payment_intercept(client_payment_id: str, auth: dict = Depends(ge
 
         role = _get_role_from_profile(auth["id"])
         is_admin = role in ("admin", "master_admin")
-        editable_24h = True
-        try:
-            editable_until = row.get("editable_until")
-            created_by = row.get("created_by")
-            if not is_admin and editable_until and created_by == auth["id"]:
-                d = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
-                editable_24h = d >= datetime.now(timezone.utc)
-            elif not is_admin and editable_until:
-                # Non-admins can only edit their own within the window
-                editable_24h = False
-        except Exception:
+        submit_at = row.get("created_at")
+        created_by = row.get("created_by")
+        if is_admin:
+            editable_24h = True
+        elif created_by == auth["id"]:
+            editable_24h = _client_payment_response_editable(submit_at, is_admin=False)
+        else:
             editable_24h = False
         return {
             "data": {
@@ -7094,7 +7215,7 @@ def save_client_payment_intercept(client_payment_id: str, payload: dict, auth: d
 
     now_dt = datetime.now(timezone.utc)
     now_iso = now_dt.isoformat().replace("+00:00", "Z")
-    editable_until_iso = (now_dt + timedelta(hours=24)).isoformat().replace("+00:00", "Z")
+    editable_until_iso = _client_payment_editable_until_iso(now_iso)
     try:
         r = supabase.table("onboarding_client_payment_intercept").select("*").eq("client_payment_id", client_payment_id).limit(1).execute()
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
@@ -7103,20 +7224,16 @@ def save_client_payment_intercept(client_payment_id: str, payload: dict, auth: d
         is_admin = role in ("admin", "master_admin")
 
         if row:
-            editable_until = row.get("editable_until")
             created_by = row.get("created_by")
-            can_edit = False
-            if is_admin:
-                can_edit = True
-            elif created_by == auth["id"] and editable_until:
-                try:
-                    d = datetime.fromisoformat(str(editable_until).replace("Z", "+00:00"))
-                    if d >= now_dt:
-                        can_edit = True
-                except Exception:
-                    can_edit = False
+            submit_at = row.get("created_at")
+            can_edit = is_admin or (
+                created_by == auth["id"] and _client_payment_response_editable(submit_at, is_admin=False)
+            )
             if not can_edit:
-                raise HTTPException(403, "Intercept Requirements can only be edited within 24 hours")
+                raise HTTPException(
+                    403,
+                    f"Intercept Requirements can only be edited within {_CLIENT_PAYMENT_RESPONSE_EDIT_DAYS} days of submission",
+                )
 
             supabase.table("onboarding_client_payment_intercept").update({
                 "last_remark_user": last_remark_user, "usage_last_1_month": usage_last_1_month,
@@ -7458,6 +7575,8 @@ def get_client_payment_discontinuation(client_payment_id: str, auth: dict = Depe
 def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_current_user)):
     """Batch load sent, followups, intercept, discontinuation in one request (reduces 4 round-trips to 1)."""
     now_dt = datetime.now(timezone.utc)
+    role = _get_role_from_profile(auth["id"])
+    is_admin = role in ("admin", "master_admin")
     out = {"sent": None, "followups": None, "intercept": None, "discontinuation": None}
 
     # 1) Sent
@@ -7466,13 +7585,36 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
         row = (r.data or [None])[0] if (r.data and len(r.data) > 0) else None
         if not row:
             now_iso = now_dt.isoformat().replace("+00:00", "Z")
-            editable_until = (datetime.now(timezone.utc) + timedelta(hours=48)).isoformat().replace("+00:00", "Z")
-            out["sent"] = {"data": {"email_sent": False, "email": None, "courier_sent": False, "tracking_details": None, "whatsapp_sent": False, "whatsapp_number": None, "invoice_number": None}, "created_at": now_iso, "editable_until": editable_until, "editable_24h": True, "submitted": False}
-        else:
             out["sent"] = {
-                "data": {"email_sent": bool(row.get("email_sent")), "email": row.get("email"), "courier_sent": bool(row.get("courier_sent")), "tracking_details": row.get("tracking_details"), "whatsapp_sent": bool(row.get("whatsapp_sent")), "whatsapp_number": row.get("whatsapp_number"), "invoice_number": row.get("invoice_number")},
-                "created_at": row.get("created_at"), "editable_until": row.get("editable_until"),
-                "editable_24h": bool(row.get("editable_until") and datetime.fromisoformat(str(row.get("editable_until")).replace("Z", "+00:00")) >= now_dt),
+                "data": {
+                    "email_sent": False,
+                    "email": None,
+                    "courier_sent": False,
+                    "tracking_details": None,
+                    "whatsapp_sent": False,
+                    "whatsapp_number": None,
+                    "invoice_number": None,
+                },
+                "created_at": now_iso,
+                "editable_until": None,
+                "editable_24h": True,
+                "submitted": False,
+            }
+        else:
+            submit_at = row.get("created_at")
+            out["sent"] = {
+                "data": {
+                    "email_sent": bool(row.get("email_sent")),
+                    "email": row.get("email"),
+                    "courier_sent": bool(row.get("courier_sent")),
+                    "tracking_details": row.get("tracking_details"),
+                    "whatsapp_sent": bool(row.get("whatsapp_sent")),
+                    "whatsapp_number": row.get("whatsapp_number"),
+                    "invoice_number": row.get("invoice_number"),
+                },
+                "created_at": submit_at,
+                "editable_until": _client_payment_editable_until_iso(submit_at),
+                "editable_24h": _client_payment_response_editable(submit_at, is_admin=is_admin),
                 "submitted": True,
             }
     except Exception as e:
@@ -7485,12 +7627,7 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
         rows = r.data or []
         items = []
         for row in rows:
-            editable_24h = False
-            if row.get("editable_until"):
-                try:
-                    editable_24h = datetime.fromisoformat(str(row["editable_until"]).replace("Z", "+00:00")) >= now_dt
-                except Exception:
-                    pass
+            submit_at = row.get("created_at")
             items.append(
                 {
                     "followup_no": row.get("followup_no"),
@@ -7499,8 +7636,8 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
                     "mail_sent": bool(row.get("mail_sent")),
                     "whatsapp_sent": bool(row.get("whatsapp_sent")),
                     "followup_timestamp": row.get("followup_timestamp"),
-                    "created_at": row.get("created_at"),
-                    "editable_24h": editable_24h,
+                    "created_at": submit_at,
+                    "editable_24h": _client_payment_response_editable(submit_at, is_admin=is_admin),
                 }
             )
         r1 = (
@@ -7512,7 +7649,7 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
         )
         if r1.data and len(r1.data) > 0 and not any(x.get("followup_no") == 1 for x in rows):
             leg = r1.data[0]
-            editable_24h = bool(leg.get("editable_until") and datetime.fromisoformat(str(leg["editable_until"]).replace("Z", "+00:00")) >= now_dt)
+            leg_submit = leg.get("created_at")
             items.append(
                 {
                     "followup_no": 1,
@@ -7521,8 +7658,8 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
                     "mail_sent": bool(leg.get("mail_sent")),
                     "whatsapp_sent": bool(leg.get("whatsapp_sent")),
                     "followup_timestamp": leg.get("followup_timestamp"),
-                    "created_at": leg.get("created_at"),
-                    "editable_24h": editable_24h,
+                    "created_at": leg_submit,
+                    "editable_24h": _client_payment_response_editable(leg_submit, is_admin=is_admin),
                 }
             )
             items.sort(key=lambda x: x["followup_no"])
@@ -7560,15 +7697,13 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
                 "editable_24h": True,
             }
         else:
-            role = _get_role_from_profile(auth["id"])
-            is_admin = role in ("admin", "master_admin")
-            editable_24h = True
-            if not is_admin and row.get("editable_until") and row.get("created_by") == auth["id"]:
-                try:
-                    editable_24h = datetime.fromisoformat(str(row["editable_until"]).replace("Z", "+00:00")) >= now_dt
-                except Exception:
-                    editable_24h = False
-            elif not is_admin and row.get("editable_until"):
+            submit_at = row.get("created_at")
+            created_by = row.get("created_by")
+            if is_admin:
+                editable_24h = True
+            elif created_by == auth["id"]:
+                editable_24h = _client_payment_response_editable(submit_at, is_admin=False)
+            else:
                 editable_24h = False
             out["intercept"] = {
                 "data": {
@@ -7590,8 +7725,8 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
                     "payment_action_2_submitted_at": row.get("payment_action_2_submitted_at"),
                 },
                 "submitted": True,
-                "created_at": row.get("created_at"),
-                "editable_24h": True if is_admin else editable_24h,
+                "created_at": submit_at,
+                "editable_24h": editable_24h,
             }
     except Exception as e:
         _log(f"drawer intercept: {e}")

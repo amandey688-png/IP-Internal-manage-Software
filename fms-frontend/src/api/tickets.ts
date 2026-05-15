@@ -171,6 +171,7 @@ export const ticketsApi = {
   list: async (params?: {
     page?: number
     limit?: number
+    page_size?: number
     status?: string
     status_2_filter?: string  // For Chores & Bugs: pending | completed | staging | hold
     type_filter?: string  // For Chores & Bugs: chore | bug (Type of Request)
@@ -188,9 +189,15 @@ export const ticketsApi = {
     reference_filter?: string
     sort_by?: string
     sort_order?: string
+    skipCache?: boolean
   }): Promise<ApiResponse<PaginatedResponse<Ticket>>> => {
     const listKey = ticketsListLogicalKey(params as object | undefined)
-    const cached = sessionApiCacheGet<ApiResponse<PaginatedResponse<Ticket>>>(listKey)
+    const skipCache = !!(params as { skipCache?: boolean } | undefined)?.skipCache
+    const requestParams = params ? { ...params } : undefined
+    if (requestParams && 'skipCache' in requestParams) {
+      delete (requestParams as { skipCache?: boolean }).skipCache
+    }
+    const cached = skipCache ? null : sessionApiCacheGet<ApiResponse<PaginatedResponse<Ticket>>>(listKey)
     if (cached) return cached
     // Serialize arrays as repeated keys (company_ids=id1&company_ids=id2) so FastAPI receives list[str]
     const paramsSerializer = (p: Record<string, unknown>) => {
@@ -207,9 +214,11 @@ export const ticketsApi = {
     }
     const response = await apiClient.get<ApiResponse<PaginatedResponse<Ticket>>>(
       '/tickets',
-      { params, paramsSerializer }
+      { params: requestParams, paramsSerializer }
     )
-    sessionApiCacheSet(listKey, response.data, API_CACHE_TTL_MS.ticketsList)
+    if (!skipCache) {
+      sessionApiCacheSet(listKey, response.data, API_CACHE_TTL_MS.ticketsList)
+    }
     return response.data
   },
 
