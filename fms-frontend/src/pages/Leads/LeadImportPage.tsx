@@ -462,7 +462,7 @@ export const LeadImportPage = () => {
       </Space>
       <Card>
         <Space direction="vertical" size="middle" style={{ width: '100%' }}>
-          <Title level={4} style={{ margin: 0 }}>
+          <Title level={4} className="page-main-heading" style={{ margin: 0 }}>
             <FileTextOutlined /> Import from sheet – Generate SQL (full columns)
           </Title>
           <Text type="secondary">

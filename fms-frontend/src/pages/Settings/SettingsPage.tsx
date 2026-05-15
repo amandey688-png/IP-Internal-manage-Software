@@ -69,7 +69,7 @@ export const SettingsPage = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
-        <Title level={2} style={{ margin: 0 }}>Settings</Title>
+        <Title level={2} className="page-main-heading" style={{ margin: 0 }}>Settings</Title>
         <PrintExport pageTitle="Settings" />
       </div>
       <Card>

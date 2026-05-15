@@ -140,7 +140,7 @@ export function DashboardPage() {
             }}
           />
         </div>
-        <Title level={4} className="su-dash-title">
+        <Title level={4} className="su-dash-title page-main-heading">
           Customer Success Dashboard
         </Title>
         <div className="su-dash-toolbar__spacer" aria-hidden />

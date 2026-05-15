@@ -569,7 +569,7 @@ export const PerformanceMonitoringPage = () => {
 
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 24 }}>
+      <Title level={4} className="page-main-heading" style={{ marginBottom: 24 }}>
         <LineChartOutlined style={{ marginRight: 8 }} />
         Performance Monitoring
       </Title>

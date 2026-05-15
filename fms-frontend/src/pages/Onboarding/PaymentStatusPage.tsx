@@ -1160,7 +1160,7 @@ export function PaymentStatusPage() {
   return (
     <div style={{ padding: 24 }}>
       <Space style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <Title level={4} style={{ margin: 0 }}>
+        <Title level={4} className="page-main-heading" style={{ margin: 0 }}>
           Payment Status
         </Title>
         <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>

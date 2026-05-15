@@ -206,7 +206,7 @@ export const SupportDashboard = () => {
       >
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
           <div>
-            <Title level={3} style={{ margin: 0, color: '#fff', fontWeight: 700 }}>
+            <Title level={3} className="page-main-heading" style={{ margin: 0, color: '#fff', fontWeight: 700 }}>
               <CalendarOutlined style={{ marginRight: 8 }} />
               SUPPORT DASHBOARD
             </Title>

@@ -338,7 +338,7 @@ export function ClientTrainingPage() {
 
   return (
     <div style={{ padding: 24 }}>
-      <Title level={4} style={{ marginBottom: 24 }}>
+      <Title level={4} className="page-main-heading" style={{ marginBottom: 24 }}>
         Client Training
       </Title>
       <Card title="Clients">

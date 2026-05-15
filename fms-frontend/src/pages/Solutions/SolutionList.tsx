@@ -77,7 +77,7 @@ export const SolutionList = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
-        <Title level={2} style={{ margin: 0 }}>Solutions</Title>
+        <Title level={2} className="page-main-heading" style={{ margin: 0 }}>Solutions</Title>
         <PrintExport pageTitle="Solutions" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="solutions" />
       </div>
       <Card>

@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+﻿import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Button,
   Card,
   Checkbox,
   Collapse,
-  Col,
   Modal,
-  Row,
   Space,
   Table,
   Typography,
@@ -18,27 +16,9 @@ import { apiClient } from '../../api/axios'
 import { API_ENDPOINTS } from '../../utils/constants'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 import { exportRowsToCsv, type ExportColumn } from '../../utils/exportCsv'
+import { PaymentAmountKpiCards, type PaymentAmountKpis } from '../../components/onboarding/PaymentAmountKpiCards'
 
 const { Title, Text, Link } = Typography
-
-type KpiPair = { received: number; raised: number }
-
-type PaymentAgeingKpis = {
-  anchor_date: string
-  quarter_period_label: string
-  month_period_label: string
-  quarterly_genre_q: KpiPair
-  monthly_genre_m: KpiPair
-  overall_in_quarter: KpiPair
-  monthly_in_quarter: KpiPair
-  /** Half-yearly raises in the current FY quarter (from Payment Management). */
-  half_yearly_in_quarter?: KpiPair
-  current_quarter_received_company_count?: number
-  current_quarter_received_companies?: Array<{
-    company_name: string
-    days_to_payment: number
-  }>
-}
 
 /** Table-only DDL (Supabase). */
 const SQL_SETUP_HREF = '/SUPABASE_PAYMENT_AGEING_REPORT.sql'
@@ -89,41 +69,11 @@ type ReportPayload = {
       fy_24_25_q3: number
     }
   }
-  kpis?: PaymentAgeingKpis
+  kpis?: PaymentAmountKpis
 }
 
 const fmt = (n: number) => n.toLocaleString('en-IN')
 const fmtPct = (n: number) => (Number.isFinite(n) ? n.toFixed(2) : '0.00')
-
-function KpiSummaryCard({
-  heading,
-  period,
-  pair,
-  extra,
-}: {
-  heading: string
-  period: string
-  pair: KpiPair
-  extra?: ReactNode
-}) {
-  return (
-    <Card size="small" style={{ height: '100%' }}>
-      <Text strong style={{ display: 'block', marginBottom: 4 }}>
-        {heading}
-      </Text>
-      <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-        {period}
-      </Text>
-      <div style={{ fontSize: 17, fontWeight: 600, marginBottom: 4 }}>
-        {fmt(pair.received)} / {fmt(pair.raised)}
-      </div>
-      <Text type="secondary" style={{ fontSize: 11 }}>
-        Total received / Total raised (₹)
-      </Text>
-      {extra ? <div style={{ marginTop: 10 }}>{extra}</div> : null}
-    </Card>
-  )
-}
 
 function buildFilters(values: (string | number | null | undefined)[]) {
   const uniq = [...new Set(values.map((v) => (v === null || v === undefined ? '' : String(v))).filter(Boolean))]
@@ -134,7 +84,6 @@ function buildFilters(values: (string | number | null | undefined)[]) {
 export function PaymentAgeingReportPage() {
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<ReportPayload | null>(null)
-  const [receivedCompanyModalOpen, setReceivedCompanyModalOpen] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [selectedExportColumns, setSelectedExportColumns] = useState<string[]>([])
 
@@ -177,7 +126,7 @@ export function PaymentAgeingReportPage() {
     if (!data?.quarter_labels?.length) {
       return [
         { title: 'Company Name', dataIndex: 'company_name', key: 'company_name', width: 240 },
-        { title: 'Loading…', key: 'loading', render: () => '—' },
+        { title: 'Loadingâ€¦', key: 'loading', render: () => 'â€”' },
       ]
     }
 
@@ -220,10 +169,10 @@ export function PaymentAgeingReportPage() {
         width: 96,
         align: 'center',
         render: (_: unknown, record: AgeingRow) =>
-          record.quarter_days[idx] == null ? '—' : String(record.quarter_days[idx]),
-        filters: buildFilters((data?.rows || []).map((r) => (r.quarter_days[idx] == null ? '—' : String(r.quarter_days[idx])))),
+          record.quarter_days[idx] == null ? 'â€”' : String(record.quarter_days[idx]),
+        filters: buildFilters((data?.rows || []).map((r) => (r.quarter_days[idx] == null ? 'â€”' : String(r.quarter_days[idx])))),
         onFilter: (value, record) =>
-          (record.quarter_days[idx] == null ? '—' : String(record.quarter_days[idx])) === value,
+          (record.quarter_days[idx] == null ? 'â€”' : String(record.quarter_days[idx])) === value,
       })
     })
 
@@ -233,9 +182,9 @@ export function PaymentAgeingReportPage() {
       key: 'median_value',
       width: 40,
       align: 'center',
-      render: (v: number | null | undefined) => (v === null || v === undefined ? '—' : String(v)),
-      filters: buildFilters((data?.rows || []).map((r) => (r.median_value == null ? '—' : String(r.median_value)))),
-      onFilter: (value, record) => (record.median_value == null ? '—' : String(record.median_value)) === value,
+      render: (v: number | null | undefined) => (v === null || v === undefined ? 'â€”' : String(v)),
+      filters: buildFilters((data?.rows || []).map((r) => (r.median_value == null ? 'â€”' : String(r.median_value)))),
+      onFilter: (value, record) => (record.median_value == null ? 'â€”' : String(record.median_value)) === value,
     })
 
     return base
@@ -252,7 +201,6 @@ export function PaymentAgeingReportPage() {
 
   const summaryTotals = data?.summary?.totals
   const kpis = data?.kpis
-  const receivedCompanies = kpis?.current_quarter_received_companies ?? []
   const exportColumns = useMemo<ExportColumn<AgeingRow>[]>(() => {
     const cols: ExportColumn<AgeingRow>[] = [
       { key: 'company_name', label: 'Company Name', getValue: (r) => r.company_name || '' },
@@ -293,68 +241,11 @@ export function PaymentAgeingReportPage() {
   return (
     <div style={{ padding: 16 }}>
       <Space direction="vertical" size="large" style={{ width: '100%' }}>
-        <Title level={4} style={{ margin: 0 }}>
+        <Title level={4} className="page-main-heading" style={{ margin: 0 }}>
           Payment Ageing Report
         </Title>
 
-        <Row gutter={[16, 16]}>
-          <Col xs={24} md={6}>
-            <KpiSummaryCard
-              heading="Quarterly amount"
-              period={kpis ? `${kpis.quarter_period_label} · genre Q (quarterly raises)` : '—'}
-              pair={kpis?.quarterly_genre_q ?? { received: 0, raised: 0 }}
-            />
-          </Col>
-          <Col xs={24} md={6}>
-            <KpiSummaryCard
-              heading="Monthly amount"
-              period={kpis ? `${kpis.month_period_label} · genre M (monthly raises)` : '—'}
-              pair={kpis?.monthly_genre_m ?? { received: 0, raised: 0 }}
-            />
-          </Col>
-          <Col xs={24} md={6}>
-            <KpiSummaryCard
-              heading="Overall"
-              period={kpis ? `${kpis.quarter_period_label} · all genres in this FY quarter` : '—'}
-              pair={kpis?.overall_in_quarter ?? { received: 0, raised: 0 }}
-              extra={
-                kpis ? (
-                  <Text type="secondary" style={{ fontSize: 11, display: 'block' }}>
-                    Monthly raises in this quarter: {fmt(kpis.monthly_in_quarter.received)} /{' '}
-                    {fmt(kpis.monthly_in_quarter.raised)} (received / raised)
-                    {kpis.half_yearly_in_quarter ? (
-                      <>
-                        <br />
-                        Half-yearly raises in this quarter: {fmt(kpis.half_yearly_in_quarter.received)} /{' '}
-                        {fmt(kpis.half_yearly_in_quarter.raised)} (received / raised)
-                      </>
-                    ) : null}
-                  </Text>
-                ) : null
-              }
-            />
-          </Col>
-          <Col xs={24} md={6}>
-            <Card
-              size="small"
-              style={{ height: '100%', cursor: 'pointer' }}
-              onClick={() => setReceivedCompanyModalOpen(true)}
-            >
-              <Text strong style={{ display: 'block', marginBottom: 4 }}>
-                Total Payment Received This Quarter Company
-              </Text>
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
-                Current quarter company count
-              </Text>
-              <div style={{ fontSize: 24, fontWeight: 700 }}>
-                {fmt(kpis?.current_quarter_received_company_count ?? 0)}
-              </div>
-              <Text type="secondary" style={{ fontSize: 11 }}>
-                Click to view company-wise days (invoice date to payment received date)
-              </Text>
-            </Card>
-          </Col>
-        </Row>
+        <PaymentAmountKpiCards kpis={kpis ?? null} />
 
         <Space>
           <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
@@ -449,39 +340,6 @@ export function PaymentAgeingReportPage() {
           ]}
         />
       </Space>
-
-      <Modal
-        title="Payment Received This Quarter - Company Days"
-        open={receivedCompanyModalOpen}
-        onCancel={() => setReceivedCompanyModalOpen(false)}
-        footer={null}
-        width={720}
-        destroyOnClose
-      >
-        <Table
-          size="small"
-          rowKey={(r) => `${r.company_name}::${r.days_to_payment}`}
-          pagination={{ pageSize: 10, showSizeChanger: true, pageSizeOptions: ['10', '20', '50'] }}
-          dataSource={receivedCompanies}
-          columns={[
-            {
-              title: 'Company Name',
-              dataIndex: 'company_name',
-              key: 'company_name',
-            },
-            {
-              title: 'Days to Payment',
-              dataIndex: 'days_to_payment',
-              key: 'days_to_payment',
-              align: 'right',
-              render: (v: number) => fmt(v),
-            },
-          ]}
-        />
-        <Text type="secondary" style={{ fontSize: 12 }}>
-          Days to Payment = Invoice Date to Payment Received Date (only for payments received in this quarter).
-        </Text>
-      </Modal>
 
       <Modal
         title="Export Payment Ageing"

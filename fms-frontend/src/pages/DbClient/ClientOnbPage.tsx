@@ -421,7 +421,7 @@ export function ClientOnbPage({ mode = 'active' }: { mode?: ClientOnbPageMode })
       )}
       <Card>
         <Space align="center" style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between' }} wrap>
-          <Title level={4} style={{ margin: 0 }}>
+          <Title level={4} className="page-main-heading" style={{ margin: 0 }}>
             {isInactivePage ? 'Inactive clients' : 'Client ONB'}
           </Title>
           {canEdit && !isInactivePage && (

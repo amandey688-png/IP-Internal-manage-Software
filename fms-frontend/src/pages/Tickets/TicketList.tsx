@@ -1158,9 +1158,10 @@ export const TicketList = () => {
         <style>{`.completed-chores-bugs-wrap .ant-table-cell,
 .completed-chores-bugs-wrap .ant-table-thead > tr > th { white-space: normal !important; word-break: break-word !important; }`}</style>
       )}
-      <Space style={{ marginBottom: 16, width: '100%', justifyContent: 'space-between', flexWrap: 'wrap' }}>
+      <Space className="page-toolbar-row" style={{ marginBottom: 16, width: '100%', flexWrap: 'wrap' }}>
         <Title
           level={2}
+          className="page-main-heading"
           style={{
             margin: 0,
             ...(isCompletedChoresBugs ? { whiteSpace: 'normal' as const, wordBreak: 'break-word' as const } : {}),

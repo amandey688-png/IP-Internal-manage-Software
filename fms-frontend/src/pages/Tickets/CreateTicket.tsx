@@ -45,7 +45,7 @@ export const CreateTicket = () => {
 
   return (
     <div>
-      <Title level={2}>Create Ticket</Title>
+      <Title level={2} className="page-main-heading">Create Ticket</Title>
       <Card>
         <Form form={form} layout="vertical" onFinish={onFinish}>
           <Form.Item name="title" label="Title" rules={[{ required: true }]}>

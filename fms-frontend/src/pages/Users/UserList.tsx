@@ -362,7 +362,7 @@ export const UserList = () => {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
-        <Title level={2} style={{ margin: 0 }}>Users</Title>
+        <Title level={2} className="page-main-heading" style={{ margin: 0 }}>Users</Title>
         <PrintExport pageTitle="Users" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="users" />
       </div>
       <Card>
