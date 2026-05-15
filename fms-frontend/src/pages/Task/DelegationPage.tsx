@@ -372,7 +372,7 @@ export const DelegationPage = () => {
     <div style={{ padding: 24 }}>
       <Card>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16 }}>
-          <Title level={4} style={{ margin: 0 }}>
+          <Title level={4} className="page-main-heading" style={{ margin: 0 }}>
             <SendOutlined style={{ marginRight: 8 }} />
             Delegation
           </Title>

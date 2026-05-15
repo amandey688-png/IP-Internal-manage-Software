@@ -224,7 +224,7 @@ export const ChecklistPage = () => {
 
   return (
     <div style={{ padding: 24 }}>
-      <Title level={4}>
+      <Title level={4} className="page-main-heading">
         <CheckSquareOutlined style={{ marginRight: 8 }} />
         Checklist
       </Title>

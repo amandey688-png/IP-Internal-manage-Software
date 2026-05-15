@@ -28,9 +28,6 @@
   .app-header .ant-typography {
     font-size: 13px !important;
   }
-  .app-header .breadcrumb-text {
-    display: none;
-  }
   .submit-btn .submit-btn-text {
     display: none;
   }

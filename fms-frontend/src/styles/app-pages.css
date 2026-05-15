@@ -1,0 +1,10 @@
+/* Main page titles are redundant — current section is highlighted in the sidebar */
+.printable-content.app-content .page-main-heading {
+  display: none !important;
+}
+
+/* Toolbar row when title is hidden: keep actions aligned to the end */
+.printable-content.app-content .page-toolbar-row {
+  margin-bottom: 16px;
+  justify-content: flex-end !important;
+}

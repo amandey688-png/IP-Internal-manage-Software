@@ -1233,7 +1233,7 @@ export const Dashboard = () => {
               <Text type="secondary" style={{ fontSize: 13, fontWeight: 400 }}>
                 Same raised-invoice rows as{' '}
                 <Button type="link" size="small" style={{ padding: 0, height: 'auto' }} onClick={() => { setDetailModalOpen(false); navigate(ROUTES.CLIENT_PAYMENT) }}>
-                  Client Payment → Payment Management
+                  Payment Management
                 </Button>
               </Text>
             </Space>
@@ -1246,7 +1246,7 @@ export const Dashboard = () => {
         footer={
           isPaymentKpiDetail ? (
             <Button type="primary" onClick={() => { setDetailModalOpen(false); navigate(ROUTES.CLIENT_PAYMENT) }}>
-              Open Client Payment
+              Open Payment Management
             </Button>
           ) : null
         }

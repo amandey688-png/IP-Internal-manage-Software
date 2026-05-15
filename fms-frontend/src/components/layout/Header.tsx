@@ -64,39 +64,6 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
     },
   ]
 
-  const sectionLabel = viewApproval
-    ? 'Approval Status'
-    : section === 'chores-bugs'
-      ? 'Chores & Bugs'
-      : section === 'completed-chores-bugs'
-        ? 'Completed Chores & Bugs'
-        : section === 'completed-feature'
-          ? 'Completed Feature'
-          : section === 'register-of-tickets'
-            ? 'Register of Tickets'
-            : section === 'solutions'
-              ? 'Solution'
-              : ''
-  const breadcrumb = location.pathname === ROUTES.DASHBOARD
-    ? ''
-    : location.pathname === ROUTES.DASHBOARD_KPI
-      ? 'Dashboard - KPI'
-      : location.pathname.startsWith(ROUTES.TICKETS)
-      ? sectionLabel ? `Support / ${sectionLabel}` : 'Support / Tickets'
-      : location.pathname.startsWith('/solutions')
-        ? 'Support / Solutions'
-        : location.pathname === ROUTES.STAGING
-          ? 'Support / Staging'
-          : location.pathname === ROUTES.CHECKLIST
-            ? 'Task / Checklist'
-            : location.pathname === ROUTES.DELEGATION
-              ? 'Task / Delegation'
-              : (location.pathname === ROUTES.CLIENT_PAYMENT || location.pathname === `${ROUTES.CLIENT_PAYMENT}/`)
-                ? 'Client Payment / Payment Management'
-                : location.pathname === ROUTES.CLIENT_PAYMENT_COMP_REGISTER
-                  ? 'Client Payment / Comp _ Register'
-              : location.pathname
-
   return (
     <AntHeader
       className="no-print app-header"
@@ -126,14 +93,7 @@ export const Header = ({ onAddNew, onMenuClick, showMenuButton }: HeaderProps) =
             aria-label="Open menu"
           />
         )}
-        <Space size="small">
-          <img src="/logo.png" alt="Logo" style={{ height: 32, width: 'auto', objectFit: 'contain' }} />
-          {breadcrumb ? (
-            <Text className="breadcrumb-text" style={{ marginLeft: 12, color: '#343A40' }}>
-              {breadcrumb}
-            </Text>
-          ) : null}
-        </Space>
+        <img src="/logo.png" alt="Logo" style={{ height: 32, width: 'auto', objectFit: 'contain' }} />
       </Space>
       <Space size="middle">
         {canViewDashboardKpi ? (

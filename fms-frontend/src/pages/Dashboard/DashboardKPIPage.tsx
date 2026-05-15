@@ -492,7 +492,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
               <DashboardOutlined />
             </div>
             <div>
-              <Title level={3} className="dashboard-kpi-title">
+              <Title level={3} className="dashboard-kpi-title page-main-heading">
                 Dashboard - KPI
               </Title>
               <Text className="dashboard-kpi-subtitle">
@@ -615,7 +615,7 @@ export const DashboardKPIPage = ({ forceOpen = false, defaultPerson = 'Shreyasi'
             marginBottom: 0,
           }}
         >
-          <Title level={4} style={{ marginBottom: 0 }}>
+          <Title level={4} className="page-main-heading" style={{ marginBottom: 0 }}>
             {selectedPerson} Dashboard
           </Title>
           <Space wrap>

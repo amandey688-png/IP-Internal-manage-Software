@@ -459,8 +459,8 @@ export const StagingList = () => {
 
   return (
     <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
-        <Title level={2} style={{ margin: 0 }}>
+      <div className="page-toolbar-row" style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
+        <Title level={2} className="page-main-heading" style={{ margin: 0 }}>
           Staging
         </Title>
         <PrintExport pageTitle="Staging" exportData={{ columns: exportColumns, rows: exportRows }} exportFilename="staging_tickets" onExportClick={handleExportClick} />

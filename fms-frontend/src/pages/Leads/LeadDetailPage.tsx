@@ -138,7 +138,7 @@ export const LeadDetailPage = () => {
           <Text strong style={{ fontSize: 16 }}>
             {dayjs(lead.created_at).format('DD MMM YYYY HH:mm')}
           </Text>
-          <Title level={4} style={{ margin: 0 }}>
+          <Title level={4} className="page-main-heading" style={{ margin: 0 }}>
             {lead.reference_no} – {lead.company_name}
           </Title>
           <Segmented

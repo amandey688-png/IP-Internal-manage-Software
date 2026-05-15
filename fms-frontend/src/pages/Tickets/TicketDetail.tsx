@@ -71,7 +71,7 @@ export const TicketDetail = () => {
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate(ROUTES.TICKETS)}>
           Back
         </Button>
-        <Title level={2} style={{ margin: 0 }}>
+        <Title level={2} className="page-main-heading" style={{ margin: 0 }}>
           {ticket.reference_no}
         </Title>
         <PrintExport pageTitle={`Ticket ${ticket.reference_no}`} />

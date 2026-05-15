@@ -128,7 +128,7 @@ export const LeadListPage = () => {
   return (
     <div style={{ padding: 24 }}>
       <Space style={{ marginBottom: 16 }} wrap>
-        <Title level={4} style={{ margin: 0 }}>
+        <Title level={4} className="page-main-heading" style={{ margin: 0 }}>
           {isClosedLeads ? 'Closed Leads' : 'Lead'}
         </Title>
         {!isClosedLeads && (

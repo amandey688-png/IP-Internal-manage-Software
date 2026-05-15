@@ -10,6 +10,7 @@ import { useAuth } from '../../hooks/useAuth'
 import { TableWithSkeletonLoading } from '../../components/common/skeletons'
 import { DEFAULT_INFINITE_CHUNK, useInfiniteScrollChunk } from '../../hooks/useInfiniteScrollChunk'
 import { exportRowsToCsv, type ExportColumn } from '../../utils/exportCsv'
+import { PaymentAmountKpiCards } from '../../components/onboarding/PaymentAmountKpiCards'
 
 const { Title, Text } = Typography
 
@@ -326,7 +327,7 @@ export function ClientPaymentPage() {
       apiClient
         .post<ClientPaymentRecord>(API_ENDPOINTS.CLIENT_PAYMENT.CREATE, payload)
         .then(() => {
-          message.success('Raised Invoice saved')
+          message.success('Invoice saved')
           setModalOpen(false)
           form.resetFields()
           reloadCurrentList()
@@ -335,7 +336,7 @@ export function ClientPaymentPage() {
           const status = err?.response?.status
           const raw = err?.response?.data?.detail
           const detail =
-            typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0]?.msg : raw?.message || 'Failed to save Raised Invoice'
+            typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0]?.msg : raw?.message || 'Failed to save invoice'
           if (status === 404 || (typeof detail === 'string' && detail.toLowerCase().includes('not found'))) {
             message.error(
               'Server has no Client Payment API (404). Redeploy the latest backend (Render) with onboarding/client-payment routes. See docs/CLIENT_PAYMENT_PRODUCTION.md'
@@ -380,7 +381,7 @@ export function ClientPaymentPage() {
         .put<ClientPaymentRecord>(API_ENDPOINTS.CLIENT_PAYMENT.UPDATE(selectedRecord.id), payload)
         .then((res) => {
           const updated = res.data
-          message.success('Raised Invoice updated')
+          message.success('Invoice updated')
           setEditInvoiceModalOpen(false)
           editInvoiceForm.resetFields()
           const merged: ClientPaymentRecord = { ...selectedRecord, ...updated }
@@ -391,7 +392,7 @@ export function ClientPaymentPage() {
         .catch((err) => {
           const raw = err?.response?.data?.detail
           const detail =
-            typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0]?.msg : raw?.message || 'Failed to update Raised Invoice'
+            typeof raw === 'string' ? raw : Array.isArray(raw) ? raw[0]?.msg : raw?.message || 'Failed to update invoice'
           message.error(detail)
         })
         .finally(() => setEditInvoiceSubmitLoading(false))
@@ -1014,7 +1015,7 @@ export function ClientPaymentPage() {
     message.success('Export started')
   }
 
-  const pageTitle = isCompRegister ? 'Comp _ Register' : completedSection ? `Client Payment – ${completedSection}` : 'Raised Invoices'
+  const pageTitle = isCompRegister ? 'Comp _ Register' : completedSection ? completedSection.replace(/-/g, ' ') : 'Payment Management'
   const dayOfMonth = new Date().getDate()
   const showInterceptByDate = dayOfMonth >= 20
 
@@ -1113,11 +1114,12 @@ export function ClientPaymentPage() {
   return (
     <div style={{ padding: 24 }}>
       <Space
-        style={{ marginBottom: 24, width: '100%', justifyContent: 'space-between', alignItems: 'center' }}
+        className="page-toolbar-row"
+        style={{ marginBottom: 24, width: '100%', alignItems: 'center' }}
         wrap
         size="middle"
       >
-        <Title level={4} style={{ margin: 0 }}>
+        <Title level={4} className="page-main-heading" style={{ margin: 0 }}>
           {pageTitle}
         </Title>
         <Space wrap align="center" size="middle">
@@ -1156,7 +1158,7 @@ export function ClientPaymentPage() {
             value={companyNameFilter}
             onChange={(e) => setCompanyNameFilter(e.target.value)}
             onSearch={(v) => setCompanyNameFilter(v)}
-            aria-label="Filter raised invoices by company name"
+            aria-label="Filter invoices by company name"
           />
           {companyFilterNorm ? (
             <Text type="secondary">
@@ -1171,6 +1173,12 @@ export function ClientPaymentPage() {
           <Button onClick={openExport}>Export</Button>
         </Space>
       </Space>
+
+      {isOpenList ? (
+        <div style={{ marginBottom: 24 }}>
+          <PaymentAmountKpiCards loadFromApi />
+        </div>
+      ) : null}
 
       <Card>
         <TableWithSkeletonLoading loading={loading} columns={9} rows={12}>
@@ -1408,10 +1416,10 @@ export function ClientPaymentPage() {
                           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
                             <Space>
                               <CheckCircleOutlined style={{ color: '#52c41a' }} />
-                              <span>Client Payment</span>
+                              <span>Payment action</span>
                             </Space>
                             {showClientPaymentT2Button && (
-                              <Tooltip title="Assign a second user (after first Client Payment action)">
+                              <Tooltip title="Assign a second user (after first payment action)">
                                 <Button size="small" type="default" onClick={openInterceptTag2}>
                                   T 2
                                 </Button>
@@ -1480,7 +1488,7 @@ export function ClientPaymentPage() {
       </Drawer>
 
       <Modal
-        title="Export Client Payment"
+        title="Export"
         open={exportOpen}
         onCancel={() => setExportOpen(false)}
         onOk={handleExport}
@@ -1807,7 +1815,7 @@ export function ClientPaymentPage() {
       </Modal>
 
       <Modal
-        title="Tag user (T 2 — Client Payment)"
+        title="Tag user (T 2)"
         open={interceptTag2ModalOpen}
         onCancel={() => setInterceptTag2ModalOpen(false)}
         onOk={saveInterceptTag2}
@@ -1833,7 +1841,7 @@ export function ClientPaymentPage() {
           />
         </div>
         <div style={{ marginTop: 12, color: '#666', fontSize: 12 }}>
-          Available after the first <b>Client Payment</b> action (Person / Remarks). Any logged-in user can assign Tag 2.
+          Available after the first payment action (Person / Remarks). Any logged-in user can assign Tag 2.
         </div>
       </Modal>
 
@@ -1869,7 +1877,7 @@ export function ClientPaymentPage() {
       </Modal>
 
       <Modal
-        title="Edit Raised Invoice"
+        title="Edit Invoice"
         open={editInvoiceModalOpen}
         onCancel={() => {
           setEditInvoiceModalOpen(false)
@@ -1960,7 +1968,7 @@ export function ClientPaymentPage() {
       </Modal>
 
       <Modal
-        title="Add Raised Invoice"
+        title="Add Invoice"
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         footer={null}

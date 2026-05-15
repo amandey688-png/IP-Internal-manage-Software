@@ -342,7 +342,7 @@ export function DbDashPage() {
     <div className="db-dash-page">
       <Card className="db-dash-main">
         <div className="db-dash-title-bar">
-          <Title level={4} style={{ margin: 0 }}>
+          <Title level={4} className="page-main-heading" style={{ margin: 0 }}>
             ACTIVE CLIENT DATABASE
           </Title>
         </div>
