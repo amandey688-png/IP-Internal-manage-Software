@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react'
 import {
   Table,
   Input,
@@ -37,6 +37,7 @@ import { useRole } from '../../hooks/useRole'
 import type { Ticket } from '../../api/tickets'
 import type { Company } from '../../api/support'
 import { ROUTES } from '../../utils/constants'
+import { sessionApiCacheClearLogicalPrefix } from '../../utils/sessionApiCache'
 
 const { Title, Text } = Typography
 const { Option } = Select
@@ -79,8 +80,43 @@ function getRegisterStatusLabel(ticket: Ticket): 'Completed' | 'Rejected' | 'Oth
   return 'Other'
 }
 
-/** Rows per scroll chunk (API uses same limit; server allows up to 100 per request). */
+/** Rows per scroll chunk (API uses page_size; server allows up to 200 per request). */
 const TICKETS_CHUNK = 15
+
+/** When API total is missing/0 but we received a full page, assume more rows exist. */
+function resolveTicketListTotal(apiTotal: number, rowCount: number, pageSize: number): number {
+  if (apiTotal > 0) return apiTotal
+  if (rowCount < pageSize) return rowCount
+  return rowCount + 1
+}
+
+/** Backend returns { data, total } — normalize nested axios envelopes. */
+function unwrapTicketListPayload(
+  response: unknown,
+  pageSize = TICKETS_CHUNK,
+): { rows: Ticket[]; total: number } {
+  if (!response || typeof response !== 'object') return { rows: [], total: 0 }
+  const r = response as Record<string, unknown>
+  if (Array.isArray(r.data)) {
+    const rows = r.data as Ticket[]
+    const rawTotal = typeof r.total === 'number' ? r.total : 0
+    return { rows, total: resolveTicketListTotal(rawTotal, rows.length, pageSize) }
+  }
+  if (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) {
+    const inner = r.data as Record<string, unknown>
+    if (Array.isArray(inner.data)) {
+      const rows = inner.data as Ticket[]
+      const rawTotal = typeof inner.total === 'number' ? inner.total : 0
+      return { rows, total: resolveTicketListTotal(rawTotal, rows.length, pageSize) }
+    }
+  }
+  if (Array.isArray(r.items)) {
+    const rows = r.items as Ticket[]
+    const rawTotal = typeof r.total === 'number' ? r.total : 0
+    return { rows, total: resolveTicketListTotal(rawTotal, rows.length, pageSize) }
+  }
+  return { rows: [], total: 0 }
+}
 
 export const TicketList = () => {
   const navigate = useNavigate()
@@ -184,10 +220,9 @@ export const TicketList = () => {
     }
   }, [sectionFromUrl, location.state, location.pathname, location.search, navigate])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const t = searchParams.get('type') || ''
     const s = searchParams.get('section') || ''
-    const urlStatus = searchParams.get('status') || new URLSearchParams(location.search).get('status') || ''
     const urlDateFrom = searchParams.get('date_from') || new URLSearchParams(location.search).get('date_from') || ''
     const urlDateTo = searchParams.get('date_to') || new URLSearchParams(location.search).get('date_to') || ''
     const viewApproval = searchParams.get('view') === 'approval' || s === 'approval-status'
@@ -246,16 +281,17 @@ export const TicketList = () => {
       }
       return next
     })
-  }, [searchParams])
+  }, [searchParams, location.search])
 
   useEffect(() => {
     supportApi.getCompanies().then(setCompanies).catch(() => setCompanies([]))
   }, [])
 
   const getTicketsListParams = useCallback(
-    (pageNum: number, limitSize: number) => ({
+    (pageNum: number, limitSize: number, options?: { skipCache?: boolean }) => ({
       page: pageNum,
-      limit: limitSize,
+      page_size: limitSize,
+      ...(options?.skipCache ? { skipCache: true } : {}),
       ...(filters.search && { search: filters.search, search_all_sections: true }),
       ...(filters.reference_filter && { reference_filter: filters.reference_filter }),
       ...(isChoresBugsSection && status2Filter && { status_2_filter: status2Filter }),
@@ -267,20 +303,23 @@ export const TicketList = () => {
         sectionFromUrl !== 'completed-feature' &&
         sectionFromUrl !== 'register-of-tickets' &&
         filters.status && { status: filters.status }),
-      ...(sectionFromUrl !== 'completed-chores-bugs' &&
+      ...(sectionFromUrl !== 'chores-bugs' &&
+        sectionFromUrl !== 'register-of-tickets' &&
+        sectionFromUrl !== 'completed-chores-bugs' &&
         sectionFromUrl !== 'rejected-tickets' &&
         sectionFromUrl !== 'solutions' &&
         sectionFromUrl !== 'completed-feature' &&
-        sectionFromUrl !== 'register-of-tickets' &&
         filters.types_in && { types_in: filters.types_in }),
-      ...(sectionFromUrl !== 'completed-chores-bugs' &&
+      ...(sectionFromUrl !== 'chores-bugs' &&
+        sectionFromUrl !== 'register-of-tickets' &&
+        sectionFromUrl !== 'completed-chores-bugs' &&
         sectionFromUrl !== 'rejected-tickets' &&
         sectionFromUrl !== 'solutions' &&
         sectionFromUrl !== 'completed-feature' &&
-        sectionFromUrl !== 'register-of-tickets' &&
         !filters.types_in &&
         filters.type && { type: filters.type }),
       ...(sectionFromUrl === 'chores-bugs' && { section: 'chores-bugs' }),
+      ...(sectionFromUrl === 'register-of-tickets' && { section: 'register-of-tickets' }),
       ...(sectionFromUrl === 'completed-chores-bugs' && { section: 'completed-chores-bugs' }),
       ...(sectionFromUrl === 'rejected-tickets' && { section: 'rejected-tickets' }),
       ...(sectionFromUrl === 'completed-feature' && { section: 'completed-feature' }),
@@ -315,15 +354,14 @@ export const TicketList = () => {
     const limit = 100
     let hasMore = true
     while (hasMore) {
-      const response = await ticketsApi.list(getTicketsListParams(currentPage, limit))
-      const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
-      const rawTickets: Ticket[] = Array.isArray(raw) ? raw : []
+      const response = await ticketsApi.list(getTicketsListParams(currentPage, limit, { skipCache: true }))
+      const { rows: rawTickets, total: apiTotal } = unwrapTicketListPayload(response, limit)
       let pageTickets: Ticket[] = rawTickets
       if (isChoresBugs) {
         pageTickets = keepOnlyChoresAndBugs(pageTickets)
       }
       allTickets.push(...pageTickets)
-      hasMore = rawTickets.length === limit
+      hasMore = rawTickets.length === limit && allTickets.length < apiTotal
       currentPage++
     }
     return allTickets
@@ -377,17 +415,18 @@ export const TicketList = () => {
     serverListPageRef.current = 0
     setTickets([])
     try {
-      const response = await ticketsApi.list(getTicketsListParams(1, TICKETS_CHUNK))
+      const response = await ticketsApi.list(getTicketsListParams(1, TICKETS_CHUNK, { skipCache: true }))
       if (gen !== listFetchGeneration.current) return
-      const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
-      let list = Array.isArray(raw) ? raw : []
+      const { rows, total: apiTotal } = unwrapTicketListPayload(response, TICKETS_CHUNK)
+      let list = rows
       if (isChoresBugs) {
         list = keepOnlyChoresAndBugs(list)
       }
-      const apiTotal = (response as { total?: number })?.total ?? 0
       setTickets(list)
       setTotal(apiTotal)
       serverListPageRef.current = 1
+      listExhaustedRef.current =
+        (apiTotal > 0 && list.length >= apiTotal) || list.length < TICKETS_CHUNK
     } catch (error) {
       console.error('Failed to fetch tickets:', error)
     } finally {
@@ -405,18 +444,29 @@ export const TicketList = () => {
     setLoadingMore(true)
     try {
       const nextPage = serverListPageRef.current + 1
-      const response = await ticketsApi.list(getTicketsListParams(nextPage, TICKETS_CHUNK))
+      const response = await ticketsApi.list(getTicketsListParams(nextPage, TICKETS_CHUNK, { skipCache: true }))
       if (gen !== listFetchGeneration.current) return
-      const raw = response && typeof response === 'object' ? (response as { data?: Ticket[] }).data : undefined
-      let newRows = Array.isArray(raw) ? raw : []
+      const { rows, total: apiTotal } = unwrapTicketListPayload(response, TICKETS_CHUNK)
+      let newRows = rows
       if (isChoresBugs) {
         newRows = keepOnlyChoresAndBugs(newRows)
+      }
+      if (typeof apiTotal === 'number' && apiTotal >= 0) {
+        setTotal(apiTotal)
       }
       if (newRows.length === 0) {
         listExhaustedRef.current = true
         return
       }
-      setTickets((prev) => [...prev, ...newRows])
+      setTickets((prev) => {
+        const merged = [...prev, ...newRows]
+        if (typeof apiTotal === 'number' && merged.length >= apiTotal) {
+          listExhaustedRef.current = true
+        } else if (newRows.length < TICKETS_CHUNK) {
+          listExhaustedRef.current = true
+        }
+        return merged
+      })
       serverListPageRef.current = nextPage
     } catch (error) {
       console.error('Failed to load more tickets:', error)
@@ -455,6 +505,10 @@ export const TicketList = () => {
   }, [loading, stageClientInfinite, fetchTicketsAppend])
 
   useEffect(() => {
+    sessionApiCacheClearLogicalPrefix('tickets:list:')
+  }, [location.pathname, location.search])
+
+  useEffect(() => {
     if ((showStageFilter && stageFilter) || (showStageFilterForFeature && stageFilter)) {
       void fetchAllTicketsForStageFilter()
     } else {
@@ -476,19 +530,27 @@ export const TicketList = () => {
     showStageFilter,
     showStageFilterForFeature,
     location.pathname,
+    location.search,
   ])
 
   useEffect(() => {
     if (loading) return
-    const root = scrollRootRef.current?.querySelector('.ant-table-body') as HTMLElement | null
+    const tableBody = scrollRootRef.current?.querySelector('.ant-table-body') as HTMLElement | null
     const target = loadMoreSentinelRef.current
     if (!target) return
+    const scrollRoot =
+      tableBody && tableBody.contains(target) ? tableBody : null
+    const rect = target.getBoundingClientRect()
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight
+    if (rect.top <= viewportHeight + 160) {
+      tryLoadMoreTickets()
+    }
     const io = new IntersectionObserver(
       (entries) => {
         if (!entries[0]?.isIntersecting) return
         tryLoadMoreTickets()
       },
-      { root: root ?? null, rootMargin: '160px', threshold: 0 },
+      { root: scrollRoot, rootMargin: '160px', threshold: 0 },
     )
     io.observe(target)
     return () => io.disconnect()
@@ -1295,9 +1357,14 @@ export const TicketList = () => {
               columns={columns}
               dataSource={ticketsForDisplay}
               rowKey="id"
-              virtual
+              virtual={!isChoresBugsSection}
               loading={false}
-              locale={{ emptyText: 'No tickets yet.' }}
+              locale={{
+                emptyText:
+                  sectionFromUrl === 'chores-bugs'
+                    ? 'No pending chores or bugs (Stages 1–4) without a submitted Solution form.'
+                    : 'No tickets yet.',
+              }}
               scroll={{ x: 2400, y: 600 }}
               pagination={false}
               summary={() => (

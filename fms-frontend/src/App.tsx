@@ -79,6 +79,7 @@ function AppTitle() {
       [ROUTES.ONBOARDING_PAYMENT_STATUS]: "Onboarding – Payment Status",
       [ROUTES.CLIENT_PAYMENT]: "Client Payment – Payment Management",
       [ROUTES.CLIENT_PAYMENT_PENDING_DETAILS]: "Client Payment – Pending Payment Details",
+      [ROUTES.CLIENT_PAYMENT_COMP_REGISTER]: "Client Payment – Comp _ Register",
       [ROUTES.CLIENT_PAYMENT_Q_COMP]: "Client Payment – Q-Comp",
       [ROUTES.CLIENT_PAYMENT_M_COMP]: "Client Payment – M-Comp",
       [ROUTES.CLIENT_PAYMENT_HF_COMP]: "Client Payment – HF-Comp",
@@ -382,9 +383,10 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path={ROUTES.CLIENT_PAYMENT_Q_COMP} element={<ProtectedRoute sectionKeys={["client_payment"]}><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
-            <Route path={ROUTES.CLIENT_PAYMENT_M_COMP} element={<ProtectedRoute sectionKeys={["client_payment"]}><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
-            <Route path={ROUTES.CLIENT_PAYMENT_HF_COMP} element={<ProtectedRoute sectionKeys={["client_payment"]}><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
+            <Route path={ROUTES.CLIENT_PAYMENT_Q_COMP} element={<Navigate to={`${ROUTES.CLIENT_PAYMENT_COMP_REGISTER}?genre=Q`} replace />} />
+            <Route path={ROUTES.CLIENT_PAYMENT_M_COMP} element={<Navigate to={`${ROUTES.CLIENT_PAYMENT_COMP_REGISTER}?genre=M`} replace />} />
+            <Route path={ROUTES.CLIENT_PAYMENT_HF_COMP} element={<Navigate to={`${ROUTES.CLIENT_PAYMENT_COMP_REGISTER}?genre=HY`} replace />} />
+            <Route path={ROUTES.CLIENT_PAYMENT_COMP_REGISTER} element={<ProtectedRoute sectionKeys={["client_payment"]}><AppLayout><ErrorBoundary><ClientPaymentPage /></ErrorBoundary></AppLayout></ProtectedRoute>} />
             <Route
               path={ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING}
               element={

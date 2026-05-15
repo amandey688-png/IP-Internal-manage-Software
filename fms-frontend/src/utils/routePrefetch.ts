@@ -76,7 +76,7 @@ export function prefetchRouteData(routeKey: string): void {
 
   if (path === ROUTES.TICKETS) {
     fire(`prefetch:${routeKey}`, async () => {
-      const common = { page: 1, limit: 15 as const, sort_by: 'created_at', sort_order: 'desc' as const }
+      const common = { page: 1, page_size: 15 as const, sort_by: 'created_at', sort_order: 'desc' as const, skipCache: true }
       if (q.includes('section=chores-bugs')) {
         await ticketsApi.list({ ...common, section: 'chores-bugs' })
       } else if (q.includes('section=completed-chores-bugs')) {
@@ -98,7 +98,7 @@ export function prefetchRouteData(routeKey: string): void {
 
   if (path === ROUTES.STAGING) {
     fire('prefetch:staging', () =>
-      ticketsApi.list({ section: 'staging', page: 1, limit: 15, sort_by: 'created_at', sort_order: 'desc' }),
+      ticketsApi.list({ section: 'staging', page: 1, page_size: 15, sort_by: 'created_at', sort_order: 'desc', skipCache: true }),
     )
     return
   }
@@ -149,14 +149,24 @@ export function prefetchRouteData(routeKey: string): void {
     return
   }
 
+  if (path === ROUTES.CLIENT_PAYMENT_COMP_REGISTER) {
+    fire('prefetch:client-payment-comp-register', async () => {
+      await apiClient.get(API_ENDPOINTS.CLIENT_PAYMENT.LIST, {
+        params: { status: 'completed', section: 'Comp-Register', page: 1, page_size: 10 },
+      })
+    })
+    return
+  }
+
   if (
     path === ROUTES.CLIENT_PAYMENT_Q_COMP ||
     path === ROUTES.CLIENT_PAYMENT_M_COMP ||
     path === ROUTES.CLIENT_PAYMENT_HF_COMP
   ) {
-    const section = path.endsWith('/Q-Comp') ? 'Q-Comp' : path.endsWith('/M-Comp') ? 'M-Comp' : 'HF-Comp'
-    fire(`prefetch:client-payment-completed:${section}`, async () => {
-      await apiClient.get<{ items: unknown[] }>(API_ENDPOINTS.CLIENT_PAYMENT.LIST_COMPLETED(section))
+    fire('prefetch:client-payment-completed-legacy', async () => {
+      await apiClient.get(API_ENDPOINTS.CLIENT_PAYMENT.LIST, {
+        params: { status: 'completed', section: 'Comp-Register', page: 1, page_size: 10 },
+      })
     })
     return
   }

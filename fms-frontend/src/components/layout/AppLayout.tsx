@@ -67,9 +67,7 @@ export const AppLayout = ({ children }: AppLayoutProps) => {
     if (canViewSectionByKey('client_payment')) {
       routeKeys.push(
         ROUTES.CLIENT_PAYMENT,
-        ROUTES.CLIENT_PAYMENT_Q_COMP,
-        ROUTES.CLIENT_PAYMENT_M_COMP,
-        ROUTES.CLIENT_PAYMENT_HF_COMP,
+        ROUTES.CLIENT_PAYMENT_COMP_REGISTER,
         ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING,
       )
     }

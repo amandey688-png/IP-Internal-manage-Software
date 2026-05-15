@@ -155,7 +155,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
   }) ?? []
 
   const onboardingItems: MenuProps['items'] = [
-    { key: ROUTES.ONBOARDING_PAYMENT_STATUS, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.ONBOARDING_PAYMENT_STATUS, ROUTES.ONBOARDING_PAYMENT_STATUS, 'Payment Status') },
+    { key: ROUTES.ONBOARDING_PAYMENT_STATUS, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.ONBOARDING_PAYMENT_STATUS, ROUTES.ONBOARDING_PAYMENT_STATUS, 'Record of Onboarding') },
   ]
 
   const trainingItems: MenuProps['items'] = [
@@ -197,9 +197,7 @@ export const Sidebar = ({ className, open, onClose }: SidebarProps) => {
       ? [
           { key: ROUTES.CLIENT_PAYMENT, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT, ROUTES.CLIENT_PAYMENT, 'Payment Management') },
           { key: ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING, ROUTES.CLIENT_PAYMENT_PAYMENT_AGEING, 'Payment Ageing Report') },
-          { key: ROUTES.CLIENT_PAYMENT_Q_COMP, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_Q_COMP, ROUTES.CLIENT_PAYMENT_Q_COMP, 'Q-Comp') },
-          { key: ROUTES.CLIENT_PAYMENT_M_COMP, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_M_COMP, ROUTES.CLIENT_PAYMENT_M_COMP, 'M-Comp') },
-          { key: ROUTES.CLIENT_PAYMENT_HF_COMP, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_HF_COMP, ROUTES.CLIENT_PAYMENT_HF_COMP, 'HF-Comp') },
+          { key: ROUTES.CLIENT_PAYMENT_COMP_REGISTER, icon: <FileTextOutlined />, label: prefetchedLabel(ROUTES.CLIENT_PAYMENT_COMP_REGISTER, ROUTES.CLIENT_PAYMENT_COMP_REGISTER, 'Comp _ Register') },
         ]
       : []),
   ]
