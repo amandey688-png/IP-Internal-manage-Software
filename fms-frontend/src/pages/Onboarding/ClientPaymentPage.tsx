@@ -28,6 +28,7 @@ interface ClientPaymentRecord {
   stage?: string | null
   status?: string
   aging_days?: number
+  payment_received_date?: string | null
   /** From list API: Invoice Sent form has been saved (Payment Received form can be submitted). */
   invoice_sent_submitted?: boolean
 }
@@ -140,6 +141,14 @@ export function ClientPaymentPage() {
   const [tag2SelectedUserId, setTag2SelectedUserId] = useState<string | null>(null)
   const [paymRecModalOpen, setPaymRecModalOpen] = useState(false)
   const [paymRecForm] = Form.useForm()
+  const [paymentReceiveSubmitted, setPaymentReceiveSubmitted] = useState(false)
+  const [paymentReceiveDetails, setPaymentReceiveDetails] = useState<{
+    party_name?: string | null
+    invoice_number?: string | null
+    amount?: number | string | null
+    payment_date?: string | null
+  } | null>(null)
+  const [paymentReceiveCreatedAt, setPaymentReceiveCreatedAt] = useState<string | null>(null)
   const [currentFollowupNo, setCurrentFollowupNo] = useState(1)
   const [companyNameFilter, setCompanyNameFilter] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
@@ -407,11 +416,24 @@ export function ClientPaymentPage() {
     setInterceptEditable(true)
     setDiscontinuationSubmitted(false)
     setDiscontinuationDetails(null)
+    setPaymentReceiveSubmitted(false)
+    setPaymentReceiveDetails(null)
+    setPaymentReceiveCreatedAt(null)
     type DrawerRes = {
       sent?: { data?: any; editable_24h?: boolean; submitted?: boolean }
       followups?: { items?: any[]; next_followup_no?: number }
       intercept?: { data?: any; submitted?: boolean; editable_24h?: boolean }
       discontinuation?: { data?: any; submitted?: boolean }
+      payment_receive?: {
+        data?: {
+          party_name?: string | null
+          invoice_number?: string | null
+          amount?: number | string | null
+          payment_date?: string | null
+        }
+        submitted?: boolean
+        created_at?: string | null
+      }
     }
     apiClient
       .get<DrawerRes>(`/onboarding/client-payment/${record.id}/drawer`)
@@ -420,6 +442,7 @@ export function ClientPaymentPage() {
         const followupsRes = res.data?.followups
         const interceptRes = res.data?.intercept
         const discontinuationRes = res.data?.discontinuation
+        const paymentReceiveRes = res.data?.payment_receive
         const sentData = sentRes?.data || {}
         setSentSummary({
           email_sent: !!sentData.email_sent,
@@ -480,6 +503,15 @@ export function ClientPaymentPage() {
           mail_sent_on: d.mail_sent_on ?? null,
           remarks: d.remarks ?? null,
         })
+        const pr = paymentReceiveRes?.data || {}
+        setPaymentReceiveSubmitted(!!paymentReceiveRes?.submitted)
+        setPaymentReceiveDetails({
+          party_name: pr.party_name ?? null,
+          invoice_number: pr.invoice_number ?? null,
+          amount: pr.amount ?? null,
+          payment_date: pr.payment_date ?? null,
+        })
+        setPaymentReceiveCreatedAt(paymentReceiveRes?.created_at ?? null)
       })
       .catch(() => message.error('Could not load invoice details'))
       .finally(() => setDrawerStatusLoading(false))
@@ -1225,6 +1257,48 @@ export function ClientPaymentPage() {
               <Text type="secondary" style={{ display: 'block', marginTop: 12 }}>
                 Company and invoice fields can be edited within {CLIENT_PAYMENT_EDIT_DAYS} days of Timestamp (record creation).
               </Text>
+            )}
+            {isCompleted && (
+              <>
+                <Divider>Payment Received Details</Divider>
+                {drawerStatusLoading ? (
+                  <div style={{ padding: 8, color: '#888' }}>Loading…</div>
+                ) : paymentReceiveSubmitted || selectedRecord.payment_received_date ? (
+                  <div style={{ marginBottom: 16 }}>
+                    <Space style={{ marginBottom: 8 }}>
+                      <CheckCircleOutlined style={{ color: '#52c41a' }} />
+                      <span>Payment Received</span>
+                    </Space>
+                    <Descriptions column={1} size="small" bordered>
+                      <Descriptions.Item label="Party Name">{paymentReceiveDetails?.party_name || selectedRecord.company_name || '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Invoice Number">
+                        {paymentReceiveDetails?.invoice_number || selectedRecord.invoice_number || '—'}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Amount">
+                        {paymentReceiveDetails?.amount != null && paymentReceiveDetails.amount !== ''
+                          ? String(paymentReceiveDetails.amount)
+                          : selectedRecord.invoice_amount || '—'}
+                      </Descriptions.Item>
+                      <Descriptions.Item label="Date of Payment">
+                        {paymentReceiveDetails?.payment_date
+                          ? dayjs(paymentReceiveDetails.payment_date).format('DD-MMM-YYYY')
+                          : selectedRecord.payment_received_date
+                            ? dayjs(selectedRecord.payment_received_date).format('DD-MMM-YYYY')
+                            : '—'}
+                      </Descriptions.Item>
+                      {paymentReceiveCreatedAt && (
+                        <Descriptions.Item label="Submitted at">
+                          {dayjs(paymentReceiveCreatedAt).format('DD-MMM-YYYY HH:mm')}
+                        </Descriptions.Item>
+                      )}
+                    </Descriptions>
+                  </div>
+                ) : (
+                  <Text type="secondary" style={{ display: 'block', marginBottom: 16 }}>
+                    No payment receive details on file.
+                  </Text>
+                )}
+              </>
             )}
             <Divider>Invoice Sent details & Follow up</Divider>
             {drawerStatusLoading ? (

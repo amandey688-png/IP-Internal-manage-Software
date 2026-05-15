@@ -7744,7 +7744,91 @@ def get_client_payment_drawer(client_payment_id: str, auth: dict = Depends(get_c
         _log(f"drawer discontinuation: {e}")
         out["discontinuation"] = {"data": {}, "submitted": False}
 
+    # 5) Payment receive (Paym-Rec) — completed invoices
+    try:
+        cp_row = None
+        cr = (
+            supabase.table("onboarding_client_payment")
+            .select(_OCP_LIST_COLUMNS)
+            .eq("id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        cp_row = (cr.data or [None])[0] if cr.data else None
+        out["payment_receive"] = _client_payment_receive_payload(client_payment_id, cp_row)
+    except Exception as e:
+        _log(f"drawer payment_receive: {e}")
+        out["payment_receive"] = {"data": {}, "submitted": False, "created_at": None}
+
     return out
+
+
+def _client_payment_receive_payload(client_payment_id: str, cp_row: dict | None = None) -> dict:
+    """Load Paym-Rec row; fall back to onboarding_client_payment columns when needed."""
+    data = {
+        "party_name": None,
+        "invoice_number": None,
+        "amount": None,
+        "payment_date": None,
+    }
+    submitted = False
+    created_at = None
+    try:
+        r = (
+            supabase.table("onboarding_client_payment_receive")
+            .select("party_name,invoice_number,amount,payment_date,created_at")
+            .eq("client_payment_id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        row = (r.data or [None])[0] if r.data else None
+        if row:
+            submitted = True
+            created_at = row.get("created_at")
+            data = {
+                "party_name": row.get("party_name"),
+                "invoice_number": row.get("invoice_number"),
+                "amount": row.get("amount"),
+                "payment_date": row.get("payment_date"),
+            }
+    except Exception as e:
+        _log(f"payment receive fetch: {e}")
+    if cp_row:
+        prd = cp_row.get("payment_received_date")
+        if prd and not data.get("payment_date"):
+            pd = str(prd)[:10] if isinstance(prd, str) else prd
+            data["payment_date"] = pd
+        if prd:
+            submitted = True
+        if not data.get("party_name"):
+            data["party_name"] = cp_row.get("company_name")
+        if not data.get("invoice_number"):
+            data["invoice_number"] = cp_row.get("invoice_number")
+        if data.get("amount") is None and cp_row.get("invoice_amount") is not None:
+            data["amount"] = cp_row.get("invoice_amount")
+    return {"data": data, "submitted": submitted, "created_at": created_at}
+
+
+@api_router.get("/onboarding/client-payment/{client_payment_id}/payment-receive")
+def get_client_payment_receive(client_payment_id: str, auth: dict = Depends(get_current_user)):
+    """Get Payment Receive Details (Paym-Rec) for a completed invoice."""
+    try:
+        cr = (
+            supabase.table("onboarding_client_payment")
+            .select(_OCP_LIST_COLUMNS)
+            .eq("id", client_payment_id)
+            .limit(1)
+            .execute()
+        )
+        cp_row = (cr.data or [None])[0] if cr.data else None
+        if not cp_row:
+            raise HTTPException(404, "Invoice not found")
+        return _client_payment_receive_payload(client_payment_id, cp_row)
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"get client payment receive: {e}")
+        return {"data": {}, "submitted": False, "created_at": None}
 
 
 @api_router.post("/onboarding/client-payment/{client_payment_id}/discontinuation")
