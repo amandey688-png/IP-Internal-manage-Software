@@ -200,11 +200,14 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 # Feature approval reminder routes (cron + settings)
 from app.feature_approval_reminder_routes import feature_approval_reminder_router
 from app.approval_email_pages import approval_public_router
+from app.escalation_email_routes import escalation_email_router
 
 app.include_router(feature_approval_reminder_router)
 app.include_router(feature_approval_reminder_router, prefix="/api")
 app.include_router(approval_public_router)
 app.include_router(approval_public_router, prefix="/api")
+app.include_router(escalation_email_router)
+app.include_router(escalation_email_router, prefix="/api")
 
 
 @app.on_event("startup")
