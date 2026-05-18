@@ -45,14 +45,29 @@ export type EscalationStats = {
   stages: Record<string, number>
 }
 
+export type EmailDeliveryStatus = {
+  mode: string
+  transport: string
+  credentials_loaded: boolean
+  from_email: string | null
+  smtp_host: string | null
+  message_stream?: string | null
+  test_redirect?: boolean
+}
+
 export const escalationEmailsApi = {
   ping: () =>
     apiClient.get<{ ok: boolean; routes: string }>('/escalation/ping').then((r) => r.data),
 
   getConfig: () =>
     apiClient
-      .get<{ items: EscalationConfig[]; stats: EscalationStats }>('/escalation/config')
+      .get<{ items: EscalationConfig[]; stats: EscalationStats; email_delivery?: EmailDeliveryStatus }>(
+        '/escalation/config'
+      )
       .then((r) => r.data),
+
+  emailStatus: () =>
+    apiClient.get<EmailDeliveryStatus & { last_error?: string | null }>('/escalation/email-status').then((r) => r.data),
 
   patchConfig: (configurationType: string, body: { is_enabled?: boolean }) =>
     apiClient

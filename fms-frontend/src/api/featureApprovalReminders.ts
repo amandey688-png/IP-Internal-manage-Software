@@ -18,7 +18,18 @@ export type FeatureApprovalLog = {
   error_message: string | null
 }
 
+export type ApprovalPublicUrlConfig = {
+  public_api_base: string
+  frontend_base: string
+  on_render: boolean
+  email_links_ok: boolean
+  hint: string | null
+}
+
 export const featureApprovalRemindersApi = {
+  getPublicUrlConfig: () =>
+    apiClient.get<ApprovalPublicUrlConfig>('/approval/public-url-config').then((r) => r.data),
+
   ping: () =>
     apiClient.get<{ ok: boolean; routes: string }>('/feature-approval-reminders/ping').then((r) => r.data),
 

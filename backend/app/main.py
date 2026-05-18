@@ -213,7 +213,10 @@ app.include_router(escalation_email_router, prefix="/api")
 @app.on_event("startup")
 async def _log_email_on_startup():
     from app.utils.email import log_email_smtp_startup
+    from app.public_urls import log_public_urls_startup
+
     log_email_smtp_startup()
+    log_public_urls_startup()
 
 _cache_default = TTLCache(maxsize=512, ttl=60)
 _cache_by_ttl: dict[int, TTLCache] = {}
@@ -1888,6 +1891,33 @@ def _frontend_base_url() -> str:
     return os.getenv("FRONTEND_URL", "http://localhost:3001").rstrip("/")
 
 
+@api_router.get("/approval/public-url-config")
+def approval_public_url_config(auth: dict = Depends(get_current_user)):
+    """Admin: show which base URL is used for email approve/reject links."""
+    role = _get_role_from_profile(auth["id"])
+    if role not in ("admin", "master_admin"):
+        raise HTTPException(status_code=403, detail="Admin only")
+    from app.public_urls import (
+        get_frontend_base,
+        get_public_api_base,
+        running_on_render,
+        is_loopback_url,
+    )
+
+    api = get_public_api_base()
+    return {
+        "public_api_base": api,
+        "frontend_base": get_frontend_base(),
+        "on_render": running_on_render(),
+        "email_links_ok": not is_loopback_url(api),
+        "hint": (
+            None
+            if not is_loopback_url(api)
+            else "Set PUBLIC_API_URL to your Render URL on the backend service, then redeploy."
+        ),
+    }
+
+
 @api_router.post("/approval/create-tokens")
 def create_approval_tokens(
     payload: CreateApprovalTokensRequest,
@@ -1918,12 +1948,11 @@ def create_approval_tokens(
         if row.data and len(row.data) > 0:
             token = row.data[0].get("token")
             if token:
-                from app.feature_approval_reminder_service import _public_api_base
+                from app.public_urls import build_approval_email_action_url
 
-                api_base = _public_api_base()
                 tokens_out.append({
                     "action": action,
-                    "url": f"{api_base}/approval/email-action?token={token}&action={action}",
+                    "url": build_approval_email_action_url(str(token), action),
                 })
     return {"ticket_id": ticket_id, "links": tokens_out, "expires_in_days": 7}
 
