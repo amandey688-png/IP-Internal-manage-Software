@@ -1,12 +1,7 @@
 """
-Unified daily email scheduler.
+Unified email scheduler (cron-job.org style schedules in Settings).
 
-Configure times in Settings (email_job_schedules). Use ONE Render Cron Job:
-  GET https://your-api.onrender.com/scheduler/tick
-  Header: X-Cron-Secret: <FEATURE_APPROVAL_CRON_SECRET>
-  Schedule: every 5 minutes (*/5 * * * *)
-
-More reliable than cron-job.org: same network as your API, no third party.
+Render Cron: GET /scheduler/tick every 5 minutes with X-Cron-Secret.
 """
 from __future__ import annotations
 
@@ -15,6 +10,12 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from app.cron_schedule_utils import (
+    build_cron_expression,
+    normalize_schedule,
+    schedule_summary,
+    validate_schedule_payload,
+)
 from app.supabase_client import supabase
 
 _log = logging.getLogger("email_scheduler")
@@ -32,12 +33,42 @@ JOB_KEYS = (
 )
 
 DEFAULT_JOBS: dict[str, dict[str, Any]] = {
-    "feature_approval": {"label": "Feature Approval Reminder", "hour": 8, "minute": 7},
-    "checklist_daily": {"label": "Checklist Daily Reminder (per doer)", "hour": 8, "minute": 0},
-    "delegation_daily": {"label": "Delegation Daily Reminder (per assignee)", "hour": 8, "minute": 15},
-    "escalation_pending": {"label": "Escalation — Pending Timeframe", "hour": 9, "minute": 0},
-    "escalation_critical": {"label": "Escalation — Critical 72hr+", "hour": 9, "minute": 5},
-    "escalation_stages": {"label": "Escalation — Stage 2 / 3 / 4", "hour": 9, "minute": 10},
+    "feature_approval": {
+        "label": "Feature Approval Reminder",
+        "schedule_type": "daily",
+        "hour": 8,
+        "minute": 7,
+    },
+    "checklist_daily": {
+        "label": "Checklist Daily Reminder (per doer)",
+        "schedule_type": "daily",
+        "hour": 8,
+        "minute": 0,
+    },
+    "delegation_daily": {
+        "label": "Delegation Daily Reminder (per assignee)",
+        "schedule_type": "daily",
+        "hour": 8,
+        "minute": 15,
+    },
+    "escalation_pending": {
+        "label": "Escalation — Pending Timeframe",
+        "schedule_type": "daily",
+        "hour": 9,
+        "minute": 0,
+    },
+    "escalation_critical": {
+        "label": "Escalation — Critical 72hr+",
+        "schedule_type": "daily",
+        "hour": 9,
+        "minute": 5,
+    },
+    "escalation_stages": {
+        "label": "Escalation — Stage 2 / 3 / 4",
+        "schedule_type": "daily",
+        "hour": 9,
+        "minute": 10,
+    },
 }
 
 
@@ -51,6 +82,14 @@ def _get_tz(name: str | None):
         return timezone.utc
 
 
+def _row_to_schedule(job_key: str, row: dict[str, Any]) -> dict[str, Any]:
+    base = {**DEFAULT_JOBS[job_key], "job_key": job_key}
+    sched = normalize_schedule(row, base)
+    sched["cron_expression"] = sched.get("cron_expression") or build_cron_expression(sched)
+    sched["schedule_summary"] = schedule_summary(sched)
+    return sched
+
+
 def list_schedules() -> list[dict[str, Any]]:
     try:
         r = supabase.table("email_job_schedules").select("*").order("job_key").execute()
@@ -58,57 +97,47 @@ def list_schedules() -> list[dict[str, Any]]:
     except Exception as e:
         _log.warning("email_job_schedules missing: %s", e)
         rows = {}
-    out: list[dict[str, Any]] = []
-    for key in JOB_KEYS:
-        base = DEFAULT_JOBS[key]
-        row = rows.get(key) or {}
-        out.append(
-            {
-                "job_key": key,
-                "label": row.get("label") or base["label"],
-                "enabled": row.get("enabled", True) if row else True,
-                "hour": int(row.get("hour", base["hour"])),
-                "minute": int(row.get("minute", base["minute"])),
-                "timezone": row.get("timezone") or DEFAULT_TZ,
-                "updated_at": row.get("updated_at"),
-            }
-        )
-    return out
+    return [_row_to_schedule(key, rows.get(key) or {}) for key in JOB_KEYS]
 
 
 def get_schedule(job_key: str) -> dict[str, Any]:
+    if job_key not in JOB_KEYS:
+        raise ValueError(f"Unknown job_key: {job_key}")
     for s in list_schedules():
         if s["job_key"] == job_key:
             return s
     raise ValueError(f"Unknown job_key: {job_key}")
 
 
-def upsert_schedule(
-    job_key: str,
-    *,
-    enabled: bool,
-    hour: int,
-    minute: int,
-    timezone_name: str,
-) -> dict[str, Any]:
+def upsert_schedule(job_key: str, **fields: Any) -> dict[str, Any]:
     if job_key not in JOB_KEYS:
         raise ValueError(f"Unknown job_key: {job_key}")
-    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
-        raise ValueError("Invalid hour or minute")
-    tz = (timezone_name or DEFAULT_TZ).strip() or DEFAULT_TZ
-    label = DEFAULT_JOBS[job_key]["label"]
+    current = get_schedule(job_key)
+    merged = {**current, **fields, "job_key": job_key}
+    validate_schedule_payload(merged)
+    expr = build_cron_expression(merged)
     row = {
         "job_key": job_key,
-        "label": label,
-        "enabled": enabled,
-        "hour": hour,
-        "minute": minute,
-        "timezone": tz,
+        "label": DEFAULT_JOBS[job_key]["label"],
+        "enabled": bool(merged.get("enabled", True)),
+        "schedule_type": merged["schedule_type"],
+        "interval_minutes": merged.get("interval_minutes"),
+        "hour": int(merged["hour"]),
+        "minute": int(merged["minute"]),
+        "day_of_month": int(merged.get("day_of_month") or 1),
+        "month": int(merged.get("month") or 1),
+        "cron_expression": expr,
+        "timezone": merged["timezone"],
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     supabase.table("email_job_schedules").upsert(row, on_conflict="job_key").execute()
-    if job_key == "feature_approval":
-        _sync_legacy_feature_schedule(enabled, hour, minute, tz)
+    if job_key == "feature_approval" and merged.get("schedule_type") == "daily":
+        _sync_legacy_feature_schedule(
+            bool(merged.get("enabled", True)),
+            int(merged["hour"]),
+            int(merged["minute"]),
+            str(merged["timezone"]),
+        )
     return get_schedule(job_key)
 
 
@@ -130,15 +159,11 @@ def _sync_legacy_feature_schedule(enabled: bool, hour: int, minute: int, tz: str
 
 
 def is_schedule_due(sched: dict[str, Any], *, window_minutes: int = TICK_WINDOW_MINUTES) -> bool:
-    if not sched.get("enabled", True):
-        return False
+    from app.cron_schedule_utils import is_schedule_due as _due
+
     tz = _get_tz(str(sched.get("timezone") or DEFAULT_TZ))
     now = datetime.now(tz)
-    if now.hour != int(sched.get("hour", 0)):
-        return False
-    start_m = int(sched.get("minute", 0))
-    end_m = start_m + window_minutes
-    return start_m <= now.minute < end_m
+    return _due(sched, now, window_minutes=window_minutes)
 
 
 async def _run_job(job_key: str, *, force: bool) -> dict[str, Any]:
@@ -204,10 +229,6 @@ def _summarize_job_result(job_key: str, result: dict[str, Any]) -> dict[str, Any
 
 
 async def run_scheduler_tick(*, force: bool = False, job_key: str | None = None) -> dict[str, Any]:
-    """
-    Called by Render Cron every ~5 minutes. Runs any job whose local time is due.
-    Pass force=true (admin) or job_key to run one job immediately.
-    """
     schedules = list_schedules()
     if job_key:
         schedules = [s for s in schedules if s["job_key"] == job_key]
@@ -218,7 +239,13 @@ async def run_scheduler_tick(*, force: bool = False, job_key: str | None = None)
     for sched in schedules:
         key = sched["job_key"]
         if not force and not is_schedule_due(sched):
-            results.append({"job_key": key, "ran": False, "email_sent": False, "reason": "not_due"})
+            results.append({
+                "job_key": key,
+                "ran": False,
+                "email_sent": False,
+                "reason": "not_due",
+                "schedule_summary": sched.get("schedule_summary"),
+            })
             continue
         try:
             raw = await _run_job(key, force=force)

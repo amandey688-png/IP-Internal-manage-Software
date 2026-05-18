@@ -192,25 +192,32 @@ CREATE TABLE IF NOT EXISTS public.pending_reminder_sent (
   UNIQUE (user_id, reminder_date)
 );
 
--- ---------- 5) EMAIL JOB SCHEDULES (Settings UI + Render Cron) ----------
+-- ---------- 5) EMAIL JOB SCHEDULES (cron-style UI + Render Cron /scheduler/tick) ----------
+-- Full definition: database/EMAIL_JOB_SCHEDULES.sql
+-- If table already exists without schedule_type: run database/EMAIL_JOB_SCHEDULES_V2.sql
 CREATE TABLE IF NOT EXISTS public.email_job_schedules (
   job_key text PRIMARY KEY,
   label text NOT NULL DEFAULT '',
   enabled boolean NOT NULL DEFAULT true,
+  schedule_type text NOT NULL DEFAULT 'daily',
+  interval_minutes int,
   hour int NOT NULL DEFAULT 8 CHECK (hour >= 0 AND hour <= 23),
   minute int NOT NULL DEFAULT 0 CHECK (minute >= 0 AND minute <= 59),
+  day_of_month int DEFAULT 1,
+  month int DEFAULT 1,
+  cron_expression text,
   timezone text NOT NULL DEFAULT 'Asia/Kolkata',
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-INSERT INTO public.email_job_schedules (job_key, label, hour, minute, timezone)
+INSERT INTO public.email_job_schedules (job_key, label, schedule_type, hour, minute, timezone)
 VALUES
-  ('feature_approval', 'Feature Approval Reminder', 8, 7, 'Asia/Kolkata'),
-  ('checklist_daily', 'Checklist Daily Reminder (per doer)', 8, 0, 'Asia/Kolkata'),
-  ('delegation_daily', 'Delegation Daily Reminder (per assignee)', 8, 15, 'Asia/Kolkata'),
-  ('escalation_pending', 'Escalation — Pending Timeframe', 9, 0, 'Asia/Kolkata'),
-  ('escalation_critical', 'Escalation — Critical 72hr+', 9, 5, 'Asia/Kolkata'),
-  ('escalation_stages', 'Escalation — Stage 2 / 3 / 4', 9, 10, 'Asia/Kolkata')
+  ('feature_approval', 'Feature Approval Reminder', 'daily', 8, 7, 'Asia/Kolkata'),
+  ('checklist_daily', 'Checklist Daily Reminder (per doer)', 'daily', 8, 0, 'Asia/Kolkata'),
+  ('delegation_daily', 'Delegation Daily Reminder (per assignee)', 'daily', 8, 15, 'Asia/Kolkata'),
+  ('escalation_pending', 'Escalation — Pending Timeframe', 'daily', 9, 0, 'Asia/Kolkata'),
+  ('escalation_critical', 'Escalation — Critical 72hr+', 'daily', 9, 5, 'Asia/Kolkata'),
+  ('escalation_stages', 'Escalation — Stage 2 / 3 / 4', 'daily', 9, 10, 'Asia/Kolkata')
 ON CONFLICT (job_key) DO NOTHING;
 
 -- =============================================================================

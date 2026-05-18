@@ -1,0 +1,100 @@
+.execution-schedule-picker {
+  margin-top: 12px;
+  padding: 16px 18px;
+  background: #fafafa;
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+}
+
+.execution-schedule-title {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.execution-schedule-radios {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.execution-schedule-radios .ant-radio-wrapper {
+  align-items: flex-start;
+  margin-inline-end: 0;
+}
+
+.execution-schedule-row {
+  width: 100%;
+}
+
+.execution-schedule-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 4px;
+  line-height: 32px;
+  font-size: 14px;
+  color: rgba(0, 0, 0, 0.88);
+}
+
+.execution-schedule-line-wrap {
+  max-width: 100%;
+}
+
+.execution-schedule-colon {
+  margin: 0 2px;
+  font-weight: 500;
+}
+
+.exec-schedule-inline-select .ant-select-selector {
+  padding: 0 4px !important;
+  border: none !important;
+  border-bottom: 1px solid #bfbfbf !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+.exec-schedule-inline-select.ant-select-disabled .ant-select-selector {
+  border-bottom-color: #e8e8e8 !important;
+  color: rgba(0, 0, 0, 0.35);
+}
+
+.execution-schedule-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+  max-width: 420px;
+}
+
+.execution-schedule-cron-input {
+  margin-top: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.execution-schedule-timezone {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed #e8e8e8;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.email-schedule-job-card {
+  margin-bottom: 16px;
+  border-radius: 10px;
+}
+
+.email-schedule-job-card .ant-card-head {
+  min-height: 44px;
+}
+
+.email-schedule-summary {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 4px;
+}

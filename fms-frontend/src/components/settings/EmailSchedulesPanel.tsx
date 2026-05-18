@@ -1,20 +1,28 @@
 import { Fragment, useCallback, useEffect, useState } from 'react'
-import { Alert, Button, InputNumber, Select, Space, Switch, Table, Typography, message } from 'antd'
+import { Alert, Button, Card, Space, Switch, Typography, message } from 'antd'
 import { ClockCircleOutlined, SaveOutlined, ThunderboltOutlined } from '@ant-design/icons'
-import { emailSchedulerApi, type EmailJobSchedule } from '../../api/emailScheduler'
+import { emailSchedulerApi, type EmailJobSchedule, type ScheduleUpdateBody } from '../../api/emailScheduler'
 import { resolveSchedulerTickUrl } from '../../api/axios'
 import { apiErrorMessage } from '../../utils/apiError'
+import { ExecutionSchedulePicker } from './ExecutionSchedulePicker'
 
 const { Text, Paragraph } = Typography
 
-const TIMEZONES = [
-  { value: 'Asia/Kolkata', label: 'Asia/Kolkata (IST)' },
-  { value: 'UTC', label: 'UTC' },
-  { value: 'America/New_York', label: 'America/New_York' },
-  { value: 'Europe/London', label: 'Europe/London' },
-]
-
 type RowState = EmailJobSchedule & { saving?: boolean }
+
+function toUpdateBody(row: EmailJobSchedule): ScheduleUpdateBody {
+  return {
+    enabled: row.enabled,
+    schedule_type: row.schedule_type || 'daily',
+    interval_minutes: row.interval_minutes ?? null,
+    hour: row.hour,
+    minute: row.minute,
+    day_of_month: row.day_of_month ?? 1,
+    month: row.month ?? 1,
+    cron_expression: row.cron_expression ?? null,
+    timezone: row.timezone,
+  }
+}
 
 export function EmailSchedulesPanel() {
   const [rows, setRows] = useState<RowState[]>([])
@@ -28,7 +36,7 @@ export function EmailSchedulesPanel() {
       const res = await emailSchedulerApi.listSchedules()
       setRows(res.items || [])
     } catch (e) {
-      message.error(apiErrorMessage(e, 'Could not load schedules. Run EMAIL_JOB_SCHEDULES.sql on Supabase.'))
+      message.error(apiErrorMessage(e, 'Could not load schedules. Run EMAIL_JOB_SCHEDULES.sql + V2 on Supabase.'))
     } finally {
       setLoading(false)
     }
@@ -45,12 +53,7 @@ export function EmailSchedulesPanel() {
   const saveRow = async (row: RowState) => {
     patchRow(row.job_key, { saving: true })
     try {
-      const updated = await emailSchedulerApi.updateSchedule(row.job_key, {
-        enabled: row.enabled,
-        hour: row.hour,
-        minute: row.minute,
-        timezone: row.timezone,
-      })
+      const updated = await emailSchedulerApi.updateSchedule(row.job_key, toUpdateBody(row))
       patchRow(row.job_key, { ...updated, saving: false })
       message.success(`Saved ${row.label}`)
     } catch (e) {
@@ -65,7 +68,7 @@ export function EmailSchedulesPanel() {
       const res = await emailSchedulerApi.tick({ force: true, job: jobKey })
       const sent = (res.jobs || []).filter((j) => j.email_sent).map((j) => j.job_key)
       if (sent.length) message.success(`Sent: ${sent.join(', ')}`)
-      else message.info(res.jobs?.[0]?.reason || res.jobs?.[0]?.error || 'Completed (no emails sent — check Postmark & recipients)')
+      else message.info(res.jobs?.[0]?.reason || res.jobs?.[0]?.error || 'Completed (no emails sent)')
     } catch (e) {
       message.error(apiErrorMessage(e, 'Run failed'))
     } finally {
@@ -80,99 +83,61 @@ export function EmailSchedulesPanel() {
         Automated email schedules
       </Typography.Title>
       <Paragraph type="secondary">
-        Set the daily send time here. Use <Text strong>one Render Cron Job</Text> (recommended) instead of cron-job.org: call{' '}
-        <Text code copyable>
-          {tickUrl}
-        </Text>{' '}
-        every <Text strong>5 minutes</Text> with header <Text code>X-Cron-Secret</Text>. The server runs each job only when its
-        time matches (within a 10-minute window). Checklist and delegation emails go to each user with pending tasks (one mail per
-        person per day).
+        Configure each job like a cron scheduler (every N minutes, daily, monthly, yearly, or custom cron). Render Cron
+        should call <Text code copyable>{tickUrl}</Text> every <Text strong>5 minutes</Text> with{' '}
+        <Text code>X-Cron-Secret</Text>. Checklist and delegation send <Text strong>one email per user</Text> with pending
+        work.
       </Paragraph>
 
       <Alert
         type="info"
         showIcon
         style={{ marginBottom: 16, maxWidth: 960 }}
-        message="Render Cron setup (more reliable than external cron-job.org)"
+        message="Supabase migration required for cron-style schedules"
         description={
-          <ul style={{ marginBottom: 0, paddingLeft: 20 }}>
-            <li>
-              Render Dashboard → your Web Service → <Text strong>Cron Jobs</Text> → Add cron
-            </li>
-            <li>
-              Schedule: <Text code>*/5 * * * *</Text> (every 5 minutes)
-            </li>
-            <li>
-              Command / URL: HTTP GET <Text code>{tickUrl}</Text>
-            </li>
-            <li>
-              Header: <Text code>X-Cron-Secret</Text> = same as <Text code>FEATURE_APPROVAL_CRON_SECRET</Text> on Render
-            </li>
-          </ul>
+          <span>
+            Run <Text code>database/EMAIL_JOB_SCHEDULES_V2.sql</Text> once if schedules fail to save.
+          </span>
         }
       />
 
-      <Table<RowState>
-        size="small"
-        rowKey="job_key"
-        loading={loading}
-        pagination={false}
-        dataSource={rows}
-        scroll={{ x: 720 }}
-        columns={[
-          { title: 'Job', dataIndex: 'label', key: 'label', width: 280 },
-          {
-            title: 'On',
-            key: 'enabled',
-            width: 64,
-            render: (_, r) => <Switch checked={r.enabled} onChange={(c) => patchRow(r.job_key, { enabled: c })} />,
-          },
-          {
-            title: 'Hour',
-            key: 'hour',
-            width: 88,
-            render: (_, r) => (
-              <InputNumber min={0} max={23} value={r.hour} onChange={(v) => patchRow(r.job_key, { hour: v ?? 0 })} />
-            ),
-          },
-          {
-            title: 'Min',
-            key: 'minute',
-            width: 88,
-            render: (_, r) => (
-              <InputNumber min={0} max={59} value={r.minute} onChange={(v) => patchRow(r.job_key, { minute: v ?? 0 })} />
-            ),
-          },
-          {
-            title: 'Timezone',
-            key: 'timezone',
-            width: 200,
-            render: (_, r) => (
-              <Select
-                style={{ width: '100%' }}
-                value={r.timezone}
-                options={TIMEZONES}
-                onChange={(v) => patchRow(r.job_key, { timezone: v })}
-              />
-            ),
-          },
-          {
-            title: '',
-            key: 'actions',
-            width: 200,
-            render: (_, r) => (
-              <Space>
-                <Button size="small" icon={<SaveOutlined />} loading={r.saving} onClick={() => saveRow(r)}>
-                  Save
-                </Button>
-                <Button size="small" icon={<ThunderboltOutlined />} loading={tickLoading} onClick={() => runTick(r.job_key)}>
-                  Run now
-                </Button>
-              </Space>
-            ),
-          },
-        ]}
-      />
+      {loading && <Text type="secondary">Loading schedules…</Text>}
+
+      {rows.map((row) => (
+        <Card
+          key={row.job_key}
+          className="email-schedule-job-card"
+          size="small"
+          title={
+            <Space>
+              <Switch checked={row.enabled} onChange={(c) => patchRow(row.job_key, { enabled: c })} />
+              <span>{row.label}</span>
+            </Space>
+          }
+          extra={
+            <Space>
+              <Button size="small" icon={<SaveOutlined />} loading={row.saving} onClick={() => saveRow(row)}>
+                Save
+              </Button>
+              <Button size="small" icon={<ThunderboltOutlined />} loading={tickLoading} onClick={() => runTick(row.job_key)}>
+                Run now
+              </Button>
+            </Space>
+          }
+        >
+          {row.schedule_summary && <div className="email-schedule-summary">{row.schedule_summary}</div>}
+          {row.cron_expression && (
+            <div className="email-schedule-summary">
+              Cron: <Text code>{row.cron_expression}</Text>
+            </div>
+          )}
+          <ExecutionSchedulePicker
+            value={row}
+            disabled={!row.enabled}
+            onChange={(patch) => patchRow(row.job_key, patch)}
+          />
+        </Card>
+      ))}
 
       <Button type="primary" style={{ marginTop: 12 }} loading={tickLoading} onClick={() => runTick()}>
         Force run all jobs now (test)

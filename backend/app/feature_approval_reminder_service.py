@@ -210,7 +210,8 @@ def upsert_schedule(*, enabled: bool, hour: int, minute: int, timezone_name: str
         enabled=enabled,
         hour=hour,
         minute=minute,
-        timezone_name=timezone_name,
+        timezone=timezone_name,
+        schedule_type="daily",
     )
     return get_schedule()
 

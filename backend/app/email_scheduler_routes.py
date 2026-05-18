@@ -43,8 +43,16 @@ def _cron_authorized(request: Request) -> bool:
 
 class ScheduleUpdate(BaseModel):
     enabled: bool = True
-    hour: int = Field(..., ge=0, le=23)
-    minute: int = Field(..., ge=0, le=59)
+    schedule_type: str = Field(
+        default="daily",
+        description="every_minutes | daily | monthly | yearly | custom",
+    )
+    interval_minutes: int | None = Field(default=None, ge=5, le=60)
+    hour: int = Field(default=8, ge=0, le=23)
+    minute: int = Field(default=0, ge=0, le=59)
+    day_of_month: int | None = Field(default=1, ge=1, le=31)
+    month: int | None = Field(default=1, ge=1, le=12)
+    cron_expression: str | None = None
     timezone: str = "Asia/Kolkata"
 
 
@@ -75,9 +83,14 @@ def schedule_put(job_key: str, body: ScheduleUpdate, _auth: dict = Depends(_requ
         return upsert_schedule(
             job_key,
             enabled=body.enabled,
+            schedule_type=body.schedule_type,
+            interval_minutes=body.interval_minutes,
             hour=body.hour,
             minute=body.minute,
-            timezone_name=body.timezone,
+            day_of_month=body.day_of_month,
+            month=body.month,
+            cron_expression=body.cron_expression,
+            timezone=body.timezone,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
