@@ -12,20 +12,26 @@
   margin-bottom: 12px;
 }
 
-.execution-schedule-radios {
+.execution-schedule-row {
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
   gap: 10px;
   width: 100%;
+  margin-bottom: 10px;
 }
 
-.execution-schedule-radios .ant-radio-wrapper {
-  align-items: flex-start;
-  margin-inline-end: 0;
+.execution-schedule-row--active .execution-schedule-line {
+  color: rgba(0, 0, 0, 0.88);
 }
 
-.execution-schedule-row {
-  width: 100%;
+.execution-schedule-row .ant-radio {
+  margin-top: 6px;
+  flex-shrink: 0;
+}
+
+.execution-schedule-line {
+  flex: 1;
+  min-width: 0;
 }
 
 .execution-schedule-line {
@@ -47,13 +53,25 @@
   font-weight: 500;
 }
 
+.exec-schedule-select-wrap {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.exec-schedule-select-wrap--inactive .exec-schedule-inline-select .ant-select-selector {
+  opacity: 0.55;
+}
+
 .exec-schedule-inline-select .ant-select-selector {
-  padding: 0 4px !important;
-  border: none !important;
-  border-bottom: 1px solid #bfbfbf !important;
-  border-radius: 0 !important;
+  padding: 0 8px !important;
+  border: 1px solid #d9d9d9 !important;
+  border-radius: 6px !important;
   box-shadow: none !important;
-  background: transparent !important;
+  background: #fff !important;
+}
+
+.exec-schedule-inline-select.ant-select-open .ant-select-selector {
+  border-color: #1677ff !important;
 }
 
 .exec-schedule-inline-select.ant-select-disabled .ant-select-selector {

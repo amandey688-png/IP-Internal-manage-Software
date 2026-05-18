@@ -1,10 +1,9 @@
+import type { ReactNode, SyntheticEvent } from 'react'
 import { Input, Radio, Select, Typography } from 'antd'
-import type { EmailJobSchedule } from '../../api/emailScheduler'
+import type { EmailJobSchedule, ScheduleType } from '../../api/emailScheduler'
 import './execution-schedule-picker.css'
 
 const { Text } = Typography
-
-export type ScheduleType = EmailJobSchedule['schedule_type']
 
 const MINUTE_INTERVALS = [
   { value: 5, label: '5 minutes' },
@@ -42,20 +41,26 @@ const TIMEZONES = [
   { value: 'Europe/London', label: 'Europe/London' },
 ]
 
+type ScheduleValue = Pick<
+  EmailJobSchedule,
+  | 'schedule_type'
+  | 'interval_minutes'
+  | 'hour'
+  | 'minute'
+  | 'day_of_month'
+  | 'month'
+  | 'cron_expression'
+  | 'timezone'
+>
+
 type Props = {
-  value: Pick<
-    EmailJobSchedule,
-    | 'schedule_type'
-    | 'interval_minutes'
-    | 'hour'
-    | 'minute'
-    | 'day_of_month'
-    | 'month'
-    | 'cron_expression'
-    | 'timezone'
-  >
+  value: ScheduleValue
   onChange: (patch: Partial<EmailJobSchedule>) => void
   disabled?: boolean
+}
+
+function stopSelectEvent(e: SyntheticEvent) {
+  e.stopPropagation()
 }
 
 function InlineSelect<T extends string | number>({
@@ -63,167 +68,224 @@ function InlineSelect<T extends string | number>({
   options,
   onChange,
   width,
-  disabled,
+  inactive,
+  panelDisabled,
+  onActivate,
 }: {
   value: T
   options: { value: T; label: string }[]
   onChange: (v: T) => void
   width?: number
-  disabled?: boolean
+  inactive?: boolean
+  panelDisabled?: boolean
+  onActivate: () => void
 }) {
   return (
-    <Select
-      className="exec-schedule-inline-select"
-      variant="borderless"
-      popupMatchSelectWidth={false}
-      disabled={disabled}
-      value={value}
-      options={options}
-      onChange={onChange}
-      style={{ width: width ?? 'auto', minWidth: width }}
-    />
+    <span
+      className={`exec-schedule-select-wrap${inactive ? ' exec-schedule-select-wrap--inactive' : ''}`}
+      onClick={stopSelectEvent}
+      onMouseDown={stopSelectEvent}
+    >
+      <Select
+        className="exec-schedule-inline-select"
+        size="small"
+        popupMatchSelectWidth={false}
+        disabled={panelDisabled}
+        value={value}
+        options={options}
+        getPopupContainer={(trigger) => trigger.parentElement ?? document.body}
+        onDropdownVisibleChange={(open) => {
+          if (open) onActivate()
+        }}
+        onChange={onChange}
+        style={{ width: width ?? 'auto', minWidth: width }}
+      />
+    </span>
+  )
+}
+
+function ScheduleRow({
+  active,
+  panelDisabled,
+  onSelect,
+  children,
+}: {
+  active: boolean
+  panelDisabled?: boolean
+  onSelect: () => void
+  children: ReactNode
+}) {
+  return (
+    <div className={`execution-schedule-row${active ? ' execution-schedule-row--active' : ''}`}>
+      <Radio
+        checked={active}
+        disabled={panelDisabled}
+        onChange={onSelect}
+        onClick={stopSelectEvent}
+        onMouseDown={stopSelectEvent}
+      />
+      <div
+        className="execution-schedule-line"
+        role="presentation"
+        onClick={() => {
+          if (!panelDisabled) onSelect()
+        }}
+      >
+        {children}
+      </div>
+    </div>
   )
 }
 
 export function ExecutionSchedulePicker({ value, onChange, disabled }: Props) {
   const type = value.schedule_type || 'daily'
+  const setType = (schedule_type: ScheduleType) => onChange({ schedule_type })
 
   return (
     <div className="execution-schedule-picker">
       <Text type="secondary" className="execution-schedule-title">
         Execution schedule
       </Text>
-      <Radio.Group
-        className="execution-schedule-radios"
-        value={type}
-        disabled={disabled}
-        onChange={(e) => onChange({ schedule_type: e.target.value as ScheduleType })}
-      >
-        <Radio value="every_minutes" className="execution-schedule-row">
-          <span className="execution-schedule-line">
-            Every{' '}
-            <InlineSelect
-              value={value.interval_minutes ?? 15}
-              options={MINUTE_INTERVALS}
-              disabled={disabled || type !== 'every_minutes'}
-              width={120}
-              onChange={(v) => onChange({ interval_minutes: v, schedule_type: 'every_minutes' })}
-            />
-          </span>
-        </Radio>
 
-        <Radio value="daily" className="execution-schedule-row">
-          <span className="execution-schedule-line">
-            Every day at{' '}
-            <InlineSelect
-              value={value.hour}
-              options={HOURS}
-              disabled={disabled || type !== 'daily'}
-              width={56}
-              onChange={(v) => onChange({ hour: v })}
-            />
-            <span className="execution-schedule-colon">:</span>
-            <InlineSelect
-              value={value.minute}
-              options={MINUTES}
-              disabled={disabled || type !== 'daily'}
-              width={56}
-              onChange={(v) => onChange({ minute: v })}
-            />
-          </span>
-        </Radio>
+      <ScheduleRow active={type === 'every_minutes'} panelDisabled={disabled} onSelect={() => setType('every_minutes')}>
+        Every{' '}
+        <InlineSelect
+          value={value.interval_minutes ?? 15}
+          options={MINUTE_INTERVALS}
+          inactive={type !== 'every_minutes'}
+          panelDisabled={disabled}
+          onActivate={() => setType('every_minutes')}
+          width={128}
+          onChange={(v) => onChange({ interval_minutes: v, schedule_type: 'every_minutes' })}
+        />
+      </ScheduleRow>
 
-        <Radio value="monthly" className="execution-schedule-row">
-          <span className="execution-schedule-line">
-            Every{' '}
-            <InlineSelect
-              value={value.day_of_month ?? 1}
-              options={DAYS}
-              disabled={disabled || type !== 'monthly'}
-              width={56}
-              onChange={(v) => onChange({ day_of_month: v })}
-            />{' '}
-            of the month at{' '}
-            <InlineSelect
-              value={value.hour}
-              options={HOURS}
-              disabled={disabled || type !== 'monthly'}
-              width={56}
-              onChange={(v) => onChange({ hour: v })}
-            />
-            <span className="execution-schedule-colon">:</span>
-            <InlineSelect
-              value={value.minute}
-              options={MINUTES}
-              disabled={disabled || type !== 'monthly'}
-              width={56}
-              onChange={(v) => onChange({ minute: v })}
-            />
-          </span>
-        </Radio>
+      <ScheduleRow active={type === 'daily'} panelDisabled={disabled} onSelect={() => setType('daily')}>
+        Every day at{' '}
+        <InlineSelect
+          value={value.hour}
+          options={HOURS}
+          inactive={type !== 'daily'}
+          panelDisabled={disabled}
+          onActivate={() => setType('daily')}
+          width={64}
+          onChange={(v) => onChange({ hour: v, schedule_type: 'daily' })}
+        />
+        <span className="execution-schedule-colon">:</span>
+        <InlineSelect
+          value={value.minute}
+          options={MINUTES}
+          inactive={type !== 'daily'}
+          panelDisabled={disabled}
+          onActivate={() => setType('daily')}
+          width={64}
+          onChange={(v) => onChange({ minute: v, schedule_type: 'daily' })}
+        />
+      </ScheduleRow>
 
-        <Radio value="yearly" className="execution-schedule-row">
-          <span className="execution-schedule-line execution-schedule-line-wrap">
-            Every year on{' '}
-            <InlineSelect
-              value={value.day_of_month ?? 1}
-              options={DAYS}
-              disabled={disabled || type !== 'yearly'}
-              width={56}
-              onChange={(v) => onChange({ day_of_month: v })}
-            />{' '}
-            <InlineSelect
-              value={value.month ?? 1}
-              options={MONTHS}
-              disabled={disabled || type !== 'yearly'}
-              width={110}
-              onChange={(v) => onChange({ month: v })}
-            />{' '}
-            at{' '}
-            <InlineSelect
-              value={value.hour}
-              options={HOURS}
-              disabled={disabled || type !== 'yearly'}
-              width={56}
-              onChange={(v) => onChange({ hour: v })}
-            />
-            <span className="execution-schedule-colon">:</span>
-            <InlineSelect
-              value={value.minute}
-              options={MINUTES}
-              disabled={disabled || type !== 'yearly'}
-              width={56}
-              onChange={(v) => onChange({ minute: v })}
-            />
-          </span>
-        </Radio>
+      <ScheduleRow active={type === 'monthly'} panelDisabled={disabled} onSelect={() => setType('monthly')}>
+        Every{' '}
+        <InlineSelect
+          value={value.day_of_month ?? 1}
+          options={DAYS}
+          inactive={type !== 'monthly'}
+          panelDisabled={disabled}
+          onActivate={() => setType('monthly')}
+          width={64}
+          onChange={(v) => onChange({ day_of_month: v, schedule_type: 'monthly' })}
+        />{' '}
+        of the month at{' '}
+        <InlineSelect
+          value={value.hour}
+          options={HOURS}
+          inactive={type !== 'monthly'}
+          panelDisabled={disabled}
+          onActivate={() => setType('monthly')}
+          width={64}
+          onChange={(v) => onChange({ hour: v, schedule_type: 'monthly' })}
+        />
+        <span className="execution-schedule-colon">:</span>
+        <InlineSelect
+          value={value.minute}
+          options={MINUTES}
+          inactive={type !== 'monthly'}
+          panelDisabled={disabled}
+          onActivate={() => setType('monthly')}
+          width={64}
+          onChange={(v) => onChange({ minute: v, schedule_type: 'monthly' })}
+        />
+      </ScheduleRow>
 
-        <Radio value="custom" className="execution-schedule-row">
-          <span className="execution-schedule-line execution-schedule-custom">
-            Custom
-            {type === 'custom' && (
-              <Input
-                className="execution-schedule-cron-input"
-                disabled={disabled}
-                placeholder="*/15 * * * *  or  7 8 * * *"
-                value={value.cron_expression ?? ''}
-                onChange={(e) => onChange({ cron_expression: e.target.value })}
-              />
-            )}
-          </span>
-        </Radio>
-      </Radio.Group>
+      <ScheduleRow active={type === 'yearly'} panelDisabled={disabled} onSelect={() => setType('yearly')}>
+        <span className="execution-schedule-line-wrap">
+          Every year on{' '}
+          <InlineSelect
+            value={value.day_of_month ?? 1}
+            options={DAYS}
+            inactive={type !== 'yearly'}
+            panelDisabled={disabled}
+            onActivate={() => setType('yearly')}
+            width={64}
+            onChange={(v) => onChange({ day_of_month: v, schedule_type: 'yearly' })}
+          />{' '}
+          <InlineSelect
+            value={value.month ?? 1}
+            options={MONTHS}
+            inactive={type !== 'yearly'}
+            panelDisabled={disabled}
+            onActivate={() => setType('yearly')}
+            width={120}
+            onChange={(v) => onChange({ month: v, schedule_type: 'yearly' })}
+          />{' '}
+          at{' '}
+          <InlineSelect
+            value={value.hour}
+            options={HOURS}
+            inactive={type !== 'yearly'}
+            panelDisabled={disabled}
+            onActivate={() => setType('yearly')}
+            width={64}
+            onChange={(v) => onChange({ hour: v, schedule_type: 'yearly' })}
+          />
+          <span className="execution-schedule-colon">:</span>
+          <InlineSelect
+            value={value.minute}
+            options={MINUTES}
+            inactive={type !== 'yearly'}
+            panelDisabled={disabled}
+            onActivate={() => setType('yearly')}
+            width={64}
+            onChange={(v) => onChange({ minute: v, schedule_type: 'yearly' })}
+          />
+        </span>
+      </ScheduleRow>
 
-      <div className="execution-schedule-timezone">
+      <ScheduleRow active={type === 'custom'} panelDisabled={disabled} onSelect={() => setType('custom')}>
+        <span className="execution-schedule-custom-label">Custom</span>
+        {type === 'custom' && (
+          <Input
+            className="execution-schedule-cron-input"
+            disabled={disabled}
+            placeholder="*/15 * * * *  or  7 8 * * *"
+            value={value.cron_expression ?? ''}
+            onClick={stopSelectEvent}
+            onMouseDown={stopSelectEvent}
+            onChange={(e) => onChange({ cron_expression: e.target.value, schedule_type: 'custom' })}
+          />
+        )}
+      </ScheduleRow>
+
+      <div className="execution-schedule-timezone" onClick={stopSelectEvent} onMouseDown={stopSelectEvent}>
         <Text type="secondary">Timezone </Text>
         <Select
           className="exec-schedule-inline-select"
-          variant="borderless"
+          size="small"
           disabled={disabled}
           value={value.timezone}
           options={TIMEZONES}
+          getPopupContainer={(trigger) => trigger.parentElement ?? document.body}
           onChange={(tz) => onChange({ timezone: tz })}
-          style={{ minWidth: 200 }}
+          style={{ minWidth: 220 }}
         />
       </div>
     </div>

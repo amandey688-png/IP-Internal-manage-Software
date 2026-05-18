@@ -5,6 +5,7 @@ import { emailSchedulerApi, type EmailJobSchedule, type ScheduleUpdateBody } fro
 import { resolveSchedulerTickUrl } from '../../api/axios'
 import { apiErrorMessage } from '../../utils/apiError'
 import { ExecutionSchedulePicker } from './ExecutionSchedulePicker'
+import { buildCronExpression, buildScheduleSummary } from './scheduleSummary'
 
 const { Text, Paragraph } = Typography
 
@@ -47,7 +48,17 @@ export function EmailSchedulesPanel() {
   }, [load])
 
   const patchRow = (jobKey: string, patch: Partial<RowState>) => {
-    setRows((prev) => prev.map((r) => (r.job_key === jobKey ? { ...r, ...patch } : r)))
+    setRows((prev) =>
+      prev.map((r) => {
+        if (r.job_key !== jobKey) return r
+        const next = { ...r, ...patch }
+        return {
+          ...next,
+          schedule_summary: buildScheduleSummary(next),
+          cron_expression: buildCronExpression(next),
+        }
+      }),
+    )
   }
 
   const saveRow = async (row: RowState) => {
@@ -109,7 +120,7 @@ export function EmailSchedulesPanel() {
           className="email-schedule-job-card"
           size="small"
           title={
-            <Space>
+            <Space onClick={(e) => e.stopPropagation()}>
               <Switch checked={row.enabled} onChange={(c) => patchRow(row.job_key, { enabled: c })} />
               <span>{row.label}</span>
             </Space>
