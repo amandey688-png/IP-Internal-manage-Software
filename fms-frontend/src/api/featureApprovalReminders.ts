@@ -52,11 +52,11 @@ export const featureApprovalRemindersApi = {
 
   testEmail: (to: string) =>
     apiClient
-      .post<{ ok: boolean; to: string }>('/feature-approval-reminders/test-email', { to })
+      .post<{ ok: boolean; to: string }>('/feature-approval-reminders/test-email', { to }, { timeout: 20000 })
       .then((r) => r.data),
 
   run: (force?: boolean) =>
     apiClient
-      .post<Record<string, unknown>>('/feature-approval-reminders/run', { force: !!force }, { timeout: 60000 })
+      .post<Record<string, unknown>>('/feature-approval-reminders/run', { force: !!force }, { timeout: 15000 })
       .then((r) => r.data),
 }

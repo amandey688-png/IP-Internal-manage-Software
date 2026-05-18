@@ -426,25 +426,19 @@ async def send_with_retries(to_email: str, subject: str, html: str, plain: str) 
 
 
 async def send_test_email(to_email: str) -> tuple[bool, str | None]:
+    """Fast test send — no DB token creation, single Postmark API attempt (avoids production timeout)."""
     if not valid_email(to_email):
         return False, "Invalid email"
-    sample = [
-        {
-            "id": "00000000-0000-0000-0000-000000000001",
-            "reference_no": "FE-0000",
-            "title": "Sample feature title",
-            "description": "Sample description for the test email template.",
-            "company_name": "Example Company Ltd",
-            "created_by": None,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "user_name": "Sample User",
-            "submitted_by": "",
-        }
-    ]
-    html = build_reminder_html(sample, DEFAULT_TZ)
+    html = (
+        "<!DOCTYPE html><html><body style=\"font-family:sans-serif;padding:16px\">"
+        "<h2>Feature Approval — Test Email</h2>"
+        "<p>If you received this, Postmark is configured correctly on the backend.</p>"
+        "<p style=\"color:#64748b;font-size:12px\">IP Internal Management Software</p>"
+        "</body></html>"
+    )
     subj = "[Test] Pending Feature Approval Reminder"
-    plain = "Test: Feature approval reminder template — see HTML version."
-    return await send_with_retries(to_email, subj, html, plain)
+    plain = "Feature approval test email — Postmark delivery OK."
+    return await send_email_detail(to_email, subj, html, plain)
 
 
 async def run_feature_approval_reminder_batch(*, force: bool = False) -> dict[str, Any]:
