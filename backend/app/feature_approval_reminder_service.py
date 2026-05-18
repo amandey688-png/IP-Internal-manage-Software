@@ -174,6 +174,20 @@ def delete_recipient(rid: str) -> None:
 
 
 def get_schedule() -> dict[str, Any]:
+    try:
+        from app.email_scheduler_service import get_schedule as get_job_schedule
+
+        s = get_job_schedule("feature_approval")
+        return {
+            "id": 1,
+            "enabled": s["enabled"],
+            "hour": s["hour"],
+            "minute": s["minute"],
+            "timezone": s["timezone"],
+            "updated_at": s.get("updated_at"),
+        }
+    except Exception:
+        pass
     r = supabase.table("feature_approval_schedule").select("*").eq("id", 1).limit(1).execute()
     row = (r.data or [None])[0]
     if not row:
@@ -189,18 +203,15 @@ def get_schedule() -> dict[str, Any]:
 
 
 def upsert_schedule(*, enabled: bool, hour: int, minute: int, timezone_name: str) -> dict[str, Any]:
-    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
-        raise ValueError("Invalid hour or minute")
-    tz = (timezone_name or DEFAULT_TZ).strip() or DEFAULT_TZ
-    row = {
-        "id": 1,
-        "enabled": enabled,
-        "hour": hour,
-        "minute": minute,
-        "timezone": tz,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    supabase.table("feature_approval_schedule").upsert(row, on_conflict="id").execute()
+    from app.email_scheduler_service import upsert_schedule as upsert_job_schedule
+
+    upsert_job_schedule(
+        "feature_approval",
+        enabled=enabled,
+        hour=hour,
+        minute=minute,
+        timezone_name=timezone_name,
+    )
     return get_schedule()
 
 

@@ -7,6 +7,7 @@
 --   2) Feature Approval Email Configuration (reminders)
 --   3) Advanced Pending Escalation Email Configuration
 --   4) Checklist / Delegation / Admin pending digest dedup tables
+--   5) In-app schedules (Render Cron → /scheduler/tick)
 --
 -- NOT required for production URL fix (PUBLIC_API_URL on Render) or Postmark env.
 -- =============================================================================
@@ -190,6 +191,27 @@ CREATE TABLE IF NOT EXISTS public.pending_reminder_sent (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (user_id, reminder_date)
 );
+
+-- ---------- 5) EMAIL JOB SCHEDULES (Settings UI + Render Cron) ----------
+CREATE TABLE IF NOT EXISTS public.email_job_schedules (
+  job_key text PRIMARY KEY,
+  label text NOT NULL DEFAULT '',
+  enabled boolean NOT NULL DEFAULT true,
+  hour int NOT NULL DEFAULT 8 CHECK (hour >= 0 AND hour <= 23),
+  minute int NOT NULL DEFAULT 0 CHECK (minute >= 0 AND minute <= 59),
+  timezone text NOT NULL DEFAULT 'Asia/Kolkata',
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+INSERT INTO public.email_job_schedules (job_key, label, hour, minute, timezone)
+VALUES
+  ('feature_approval', 'Feature Approval Reminder', 8, 7, 'Asia/Kolkata'),
+  ('checklist_daily', 'Checklist Daily Reminder (per doer)', 8, 0, 'Asia/Kolkata'),
+  ('delegation_daily', 'Delegation Daily Reminder (per assignee)', 8, 15, 'Asia/Kolkata'),
+  ('escalation_pending', 'Escalation — Pending Timeframe', 9, 0, 'Asia/Kolkata'),
+  ('escalation_critical', 'Escalation — Critical 72hr+', 9, 5, 'Asia/Kolkata'),
+  ('escalation_stages', 'Escalation — Stage 2 / 3 / 4', 9, 10, 'Asia/Kolkata')
+ON CONFLICT (job_key) DO NOTHING;
 
 -- =============================================================================
 -- VERIFICATION (run after — all should return rows / true)
