@@ -19,11 +19,13 @@ import { useAuth } from '../../hooks/useAuth'
 import { useRole } from '../../hooks/useRole'
 import { usersApi } from '../../api/users'
 import { getInitials } from '../../utils/helpers'
+import { apiErrorMessage } from '../../utils/apiError'
 import { PrintExport } from '../../components/common/PrintExport'
 import {
   featureApprovalRemindersApi,
   type FeatureApprovalRecipient,
   type FeatureApprovalLog,
+  type ApprovalPublicUrlConfig,
 } from '../../api/featureApprovalReminders'
 import { resolveFeatureApprovalCronRunUrl } from '../../api/axios'
 import { EscalationEmailSettings } from './EscalationEmailSettings'
@@ -45,18 +47,21 @@ export const SettingsPage = () => {
   const [testLoading, setTestLoading] = useState(false)
   const [runLoading, setRunLoading] = useState(false)
   const [logs, setLogs] = useState<FeatureApprovalLog[]>([])
+  const [urlConfig, setUrlConfig] = useState<ApprovalPublicUrlConfig | null>(null)
 
   const loadFeatureApproval = useCallback(async () => {
     if (!canAccessSettings) return
     setFaLoading(true)
     try {
       await featureApprovalRemindersApi.ping()
-      const [recRes, logRes] = await Promise.all([
+      const [recRes, logRes, urlCfg] = await Promise.all([
         featureApprovalRemindersApi.listRecipients(),
         featureApprovalRemindersApi.listLogs(25),
+        featureApprovalRemindersApi.getPublicUrlConfig().catch(() => null),
       ])
       setRecipients(recRes.items || [])
       setLogs(logRes.items || [])
+      setUrlConfig(urlCfg)
     } catch (err: unknown) {
       const d = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
       message.error(typeof d === 'string' ? d : 'Could not load Feature Approval settings. Run SQL migration on Supabase.')
@@ -146,8 +151,7 @@ export const SettingsPage = () => {
       await featureApprovalRemindersApi.testEmail(to)
       message.success('Test email sent — check inbox')
     } catch (err: unknown) {
-      const d = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(typeof d === 'string' ? d : 'Test send failed')
+      message.error(apiErrorMessage(err, 'Test send failed'), 10)
     } finally {
       setTestLoading(false)
     }
@@ -255,6 +259,35 @@ export const SettingsPage = () => {
                     GitHub Actions, etc.) to POST to the backend URL below. When Feature tickets are still pending approval, each successful
                     daily run sends <Text strong>one grouped HTML reminder</Text> to enabled recipients.
                   </Paragraph>
+
+                  {urlConfig && !urlConfig.email_links_ok && (
+                    <Alert
+                      type="error"
+                      showIcon
+                      style={{ marginBottom: 16, maxWidth: 900 }}
+                      message="Approve/Reject email links point to localhost"
+                      description={
+                        <span>
+                          Current base: <Text code>{urlConfig.public_api_base}</Text>. On Render set{' '}
+                          <Text code>PUBLIC_API_URL=https://ip-internal-manage-software.onrender.com</Text>, redeploy backend, then send a
+                          new reminder (old emails still have old links).
+                        </span>
+                      }
+                    />
+                  )}
+                  {urlConfig?.email_links_ok && (
+                    <Alert
+                      type="success"
+                      showIcon
+                      style={{ marginBottom: 16, maxWidth: 900 }}
+                      message="Approve/Reject links use production API"
+                      description={
+                        <span>
+                          Email buttons open: <Text code copyable>{urlConfig.public_api_base}/approval/email-action</Text>
+                        </span>
+                      }
+                    />
+                  )}
 
                   <Alert
                     type="info"

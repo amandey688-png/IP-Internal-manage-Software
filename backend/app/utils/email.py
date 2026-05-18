@@ -1,15 +1,12 @@
 """
-Outbound email (Postmark SMTP primary) — aligned with IndustryPrime HRIS email_service.
+Outbound email — Postmark HTTP API (Render-safe) then SMTP fallback.
 
-Env (backend/.env or Render):
-  EMAIL_MODE=postmark | log          # log = dry-run, no SMTP
-  POSTMARK_SMTP_TOKEN=...            # required to send
-  POSTMARK_SMTP_USERNAME=...         # optional PM-T-outbound-* stream
-  POSTMARK_SMTP_HOST=smtp.postmarkapp.com
-  POSTMARK_SMTP_PORT=587             # falls back to 2525 on Postmark
-  POSTMARK_FROM_EMAIL / SMTP_FROM_EMAIL
-  EMAIL_TEST_REDIRECT=you@example.com  # optional — all mail to one inbox
-  EMAIL_PROVIDER=postmark            # prefer Postmark over legacy SMTP_HOST (Brevo)
+Env (Render / backend/.env):
+  POSTMARK_SMTP_TOKEN or POSTMARK_SERVER_TOKEN or POSTMARK_API_TOKEN
+  POSTMARK_SMTP_USERNAME or SMTP_POSTMARK_STREAM  (PM-T-outbound-* or stream name)
+  POSTMARK_FROM_EMAIL or SMTP_FROM_EMAIL
+  EMAIL_MODE=postmark | log
+  EMAIL_PROVIDER=postmark
 """
 from __future__ import annotations
 
@@ -23,6 +20,7 @@ except ImportError:
 
 _last_email_error: str | None = None
 POSTMARK_PORTS = (587, 2525)
+POSTMARK_API_URL = "https://api.postmarkapp.com/email"
 
 
 def get_last_email_error() -> str | None:
@@ -38,16 +36,53 @@ def _env_strip(key: str) -> str:
     return (os.getenv(key) or "").strip()
 
 
-def _resolve_smtp_config() -> dict[str, Any]:
-    postmark_token = _env_strip("POSTMARK_SMTP_TOKEN") or _env_strip("POSTMARK_SERVER_TOKEN")
-    postmark_user = _env_strip("POSTMARK_SMTP_USERNAME")
-    provider = _env_strip("EMAIL_PROVIDER").lower()
-    use_postmark = provider in ("postmark", "smtp", "postmark-smtp") or bool(
-        postmark_token or postmark_user.startswith("PM-T-") or _env_strip("POSTMARK_SMTP_HOST")
+def _postmark_token() -> str:
+    return (
+        _env_strip("POSTMARK_SMTP_TOKEN")
+        or _env_strip("POSTMARK_SERVER_TOKEN")
+        or _env_strip("POSTMARK_API_TOKEN")
     )
 
+
+def _postmark_stream_env() -> str:
+    """SMTP username (PM-T-...) or API MessageStream name (e.g. outbound)."""
+    return (
+        _env_strip("POSTMARK_SMTP_USERNAME")
+        or _env_strip("SMTP_POSTMARK_STREAM")
+        or _env_strip("POSTMARK_MESSAGE_STREAM")
+    )
+
+
+def _api_message_stream(stream_env: str) -> str | None:
+    s = (stream_env or "").strip()
+    if not s:
+        return None
+    if s.startswith("PM-T-"):
+        return "outbound"
+    return s
+
+
+def _resolve_smtp_config() -> dict[str, Any]:
+    postmark_token = _postmark_token()
+    postmark_user = _postmark_stream_env()
     smtp_user = _env_strip("SMTP_USER")
     smtp_pass = _env_strip("SMTP_PASSWORD") or _env_strip("SMTP_PASS")
+    smtp_host = _env_strip("SMTP_HOST")
+    provider = _env_strip("EMAIL_PROVIDER").lower()
+
+    # Legacy: SMTP_HOST=postmark + user/pass both = server token
+    if not postmark_token and smtp_host and "postmarkapp.com" in smtp_host.lower():
+        if smtp_user and smtp_pass and smtp_user == smtp_pass:
+            postmark_token = smtp_user
+        elif smtp_pass:
+            postmark_token = smtp_pass
+
+    use_postmark = provider in ("postmark", "smtp", "postmark-smtp") or bool(
+        postmark_token
+        or postmark_user.startswith("PM-T-")
+        or _env_strip("POSTMARK_SMTP_HOST")
+        or (smtp_host and "postmarkapp.com" in smtp_host.lower())
+    )
 
     if use_postmark:
         if postmark_user and postmark_token:
@@ -56,37 +91,43 @@ def _resolve_smtp_config() -> dict[str, Any]:
             username = password = postmark_token
         else:
             username, password = postmark_user, postmark_token or smtp_pass
-        host = _env_strip("POSTMARK_SMTP_HOST") or "smtp.postmarkapp.com"
-        port_raw = _env_strip("POSTMARK_SMTP_PORT") or "587"
+        host = _env_strip("POSTMARK_SMTP_HOST") or smtp_host or "smtp.postmarkapp.com"
+        port_raw = _env_strip("POSTMARK_SMTP_PORT") or _env_strip("SMTP_PORT") or "587"
         from_email = (
             _env_strip("POSTMARK_FROM_EMAIL")
             or _env_strip("POSTMARK_SMTP_FROM")
             or _env_strip("SMTP_FROM_EMAIL")
         )
+        message_stream = _api_message_stream(postmark_user)
     else:
         username, password = smtp_user, smtp_pass
-        host = _env_strip("SMTP_HOST")
+        host = smtp_host
         port_raw = _env_strip("SMTP_PORT") or "587"
         from_email = _env_strip("SMTP_FROM_EMAIL") or _env_strip("POSTMARK_FROM_EMAIL")
+        message_stream = None
 
     try:
         port = int(port_raw)
     except ValueError:
         port = 587
 
+    has_token = bool(password or postmark_token)
+    configured = bool(from_email and has_token and (use_postmark or (host and username)))
+
     return {
         "host": host,
         "port": port,
         "username": username,
-        "password": password,
+        "password": password or postmark_token,
+        "postmark_token": password or postmark_token,
         "from_email": from_email,
         "use_postmark": use_postmark,
-        "configured": bool(host and username and password and from_email),
+        "message_stream": message_stream,
+        "configured": configured,
     }
 
 
 def get_email_mode() -> str:
-    """postmark | sendgrid | log"""
     explicit = _env_strip("EMAIL_MODE").lower()
     if explicit in ("log", "local", "disabled", "dry_run", "off", "none"):
         return "log"
@@ -105,13 +146,23 @@ def get_email_mode() -> str:
 def get_email_delivery_status() -> dict[str, Any]:
     cfg = _resolve_smtp_config()
     mode = get_email_mode()
+    transport = "none"
+    if mode == "log":
+        transport = "log"
+    elif cfg.get("use_postmark") and cfg.get("postmark_token"):
+        transport = "postmark_api+smtp"
+    elif cfg["configured"]:
+        transport = "smtp"
     return {
         "mode": mode,
-        "credentials_loaded": bool(cfg.get("password")),
+        "transport": transport,
+        "credentials_loaded": bool(cfg.get("postmark_token") or cfg.get("password")),
         "from_email": cfg.get("from_email") or None,
         "smtp_host": cfg.get("host") or None,
         "smtp_ports": list(POSTMARK_PORTS) if cfg.get("use_postmark") else [cfg.get("port")],
+        "message_stream": cfg.get("message_stream"),
         "test_redirect": bool(_env_strip("EMAIL_TEST_REDIRECT")),
+        "httpx_available": bool(httpx),
     }
 
 
@@ -119,17 +170,17 @@ def log_email_smtp_startup() -> None:
     st = get_email_delivery_status()
     _log(
         "Email delivery: "
-        f"mode={st['mode']} "
+        f"mode={st['mode']} transport={st['transport']} "
         f"host={st['smtp_host'] or '-'} "
         f"ports={st['smtp_ports']} "
         f"credentials_loaded={st['credentials_loaded']} "
         f"from={st['from_email'] or '-'} "
+        f"stream={st.get('message_stream') or '-'} "
         f"test_redirect={'yes' if st['test_redirect'] else 'no'}"
     )
 
 
 def resolve_recipient(to_email: str, subject: str) -> tuple[str, str]:
-    """Apply EMAIL_TEST_REDIRECT; prefix subject when redirected."""
     to_email = (to_email or "").strip()
     redirect = _env_strip("EMAIL_TEST_REDIRECT")
     if redirect and redirect.lower() != to_email.lower():
@@ -144,6 +195,63 @@ def _prefer_smtp_over_sendgrid() -> bool:
         return True
     cfg = _resolve_smtp_config()
     return cfg["configured"] and not _env_strip("SENDGRID_API_KEY")
+
+
+async def _postmark_api_send(
+    to_email: str,
+    subject: str,
+    html_content: str,
+    plain: str,
+    cfg: dict[str, Any],
+) -> tuple[bool, str | None]:
+    """Postmark REST API — works on Render without outbound SMTP ports."""
+    token = (cfg.get("postmark_token") or cfg.get("password") or "").strip()
+    from_email = (cfg.get("from_email") or "").strip()
+    if not token:
+        return False, "Postmark server token missing"
+    if not from_email:
+        return False, "From email missing (set SMTP_FROM_EMAIL or POSTMARK_FROM_EMAIL)"
+    if not httpx:
+        return False, "httpx not installed"
+
+    payload: dict[str, Any] = {
+        "From": from_email,
+        "To": to_email,
+        "Subject": subject,
+        "HtmlBody": html_content,
+        "TextBody": plain,
+    }
+    stream = cfg.get("message_stream")
+    if stream:
+        payload["MessageStream"] = stream
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            resp = await client.post(
+                POSTMARK_API_URL,
+                headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json",
+                    "X-Postmark-Server-Token": token,
+                },
+                json=payload,
+            )
+        if resp.status_code == 200:
+            _log(f"Postmark API OK -> {to_email}")
+            return True, None
+        err_body = resp.text[:500]
+        try:
+            j = resp.json()
+            err_body = j.get("Message") or j.get("ErrorCode") or err_body
+        except Exception:
+            pass
+        msg = f"Postmark API HTTP {resp.status_code}: {err_body}"
+        _log(msg)
+        return False, msg
+    except Exception as e:
+        msg = f"Postmark API error: {e}"
+        _log(msg)
+        return False, msg
 
 
 async def _smtp_send(message: Any, cfg: dict[str, Any]) -> None:
@@ -206,9 +314,32 @@ async def send_email_detail(
         _log(f"EMAIL_MODE=log — would send to={to_email} subject={subject[:80]}")
         return True, None
 
+    cfg = _resolve_smtp_config()
+
+    if not cfg["configured"]:
+        missing = []
+        if not (cfg.get("postmark_token") or cfg.get("password")):
+            missing.append("POSTMARK_SMTP_TOKEN (or POSTMARK_SERVER_TOKEN)")
+        if not cfg.get("from_email"):
+            missing.append("SMTP_FROM_EMAIL or POSTMARK_FROM_EMAIL")
+        _last_email_error = (
+            "Email not configured on server — set Postmark token + verified from address in Render env. "
+            f"Missing: {', '.join(missing)}"
+        )
+        _log(_last_email_error)
+        return False, _last_email_error
+
+    # Postmark HTTP API first (recommended for Render/production)
+    if cfg.get("use_postmark") and cfg.get("postmark_token"):
+        ok, err = await _postmark_api_send(to_email, subject, html_content, plain, cfg)
+        if ok:
+            return True, None
+        _last_email_error = err
+        _log(f"Postmark API failed, trying SMTP fallback: {err}")
+
     if not _prefer_smtp_over_sendgrid():
         sg_key = _env_strip("SENDGRID_API_KEY")
-        sg_from = _env_strip("SENDGRID_FROM_EMAIL") or _resolve_smtp_config()["from_email"]
+        sg_from = _env_strip("SENDGRID_FROM_EMAIL") or cfg["from_email"]
         sg_name = _env_strip("SENDGRID_FROM_NAME") or "IP Internal Management"
         if sg_key and httpx and sg_from:
             try:
@@ -235,23 +366,8 @@ async def send_email_detail(
                 _last_email_error = f"SendGrid error: {e}"
                 _log(_last_email_error)
 
-    cfg = _resolve_smtp_config()
-    if not cfg["configured"]:
-        missing = []
-        if not cfg["host"]:
-            missing.append("POSTMARK_SMTP_HOST or SMTP_HOST")
-        if not cfg["username"]:
-            missing.append("POSTMARK_SMTP_TOKEN or SMTP_USER")
-        if not cfg["password"]:
-            missing.append("POSTMARK_SMTP_TOKEN or SMTP_PASSWORD")
-        if not cfg["from_email"]:
-            missing.append("POSTMARK_FROM_EMAIL or SMTP_FROM_EMAIL")
-        _last_email_error = (
-            "SMTP not configured — set POSTMARK_SMTP_TOKEN + POSTMARK_FROM_EMAIL in backend/.env "
-            f"(missing: {', '.join(missing)}). Restart uvicorn after saving."
-        )
-        _log(_last_email_error)
-        return False, _last_email_error
+    if not cfg.get("host") or not cfg.get("username"):
+        return False, _last_email_error or "SMTP not available after API failure"
 
     from email.message import EmailMessage
 
@@ -266,6 +382,9 @@ async def send_email_detail(
         await _smtp_send(message, cfg)
         return True, None
     except Exception as e:
+        api_hint = _last_email_error or ""
         _last_email_error = f"SMTP error ({cfg['host']}): {e}"
+        if api_hint:
+            _last_email_error = f"{api_hint} | {_last_email_error}"
         _log(_last_email_error)
         return False, _last_email_error

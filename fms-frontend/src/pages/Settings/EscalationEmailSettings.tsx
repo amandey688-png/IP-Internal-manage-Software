@@ -37,6 +37,8 @@ import {
   resolveEscalationPendingCronUrl,
   resolveEscalationStageCronUrl,
 } from '../../api/axios'
+import { apiErrorMessage } from '../../utils/apiError'
+import type { EmailDeliveryStatus } from '../../api/escalationEmails'
 
 const { Title, Text, Paragraph } = Typography
 
@@ -84,8 +86,7 @@ function ConfigBox({ cfg, stats, accent, description, onRefresh }: ConfigBoxProp
       setBulk('')
       onRefresh()
     } catch (err: unknown) {
-      const d = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(typeof d === 'string' ? d : 'Could not add emails')
+      message.error(apiErrorMessage(err, 'Could not add emails'))
     } finally {
       setAdding(false)
     }
@@ -129,8 +130,7 @@ function ConfigBox({ cfg, stats, accent, description, onRefresh }: ConfigBoxProp
       }
       onRefresh()
     } catch (err: unknown) {
-      const d = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(typeof d === 'string' ? d : 'Send failed')
+      message.error(apiErrorMessage(err, 'Send failed'), 10)
     } finally {
       setSending(false)
     }
@@ -147,8 +147,7 @@ function ConfigBox({ cfg, stats, accent, description, onRefresh }: ConfigBoxProp
       await escalationEmailsApi.testEmail(cfg.configuration_type, to)
       message.success('Test email sent')
     } catch (err: unknown) {
-      const d = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(typeof d === 'string' ? d : 'Test failed')
+      message.error(apiErrorMessage(err, 'Test failed'), 10)
     } finally {
       setTesting(false)
     }
@@ -258,6 +257,7 @@ export function EscalationEmailSettings() {
   const [triggers, setTriggers] = useState<EscalationManualTrigger[]>([])
   const [logFilter, setLogFilter] = useState('')
   const [retrying, setRetrying] = useState<string | null>(null)
+  const [emailDelivery, setEmailDelivery] = useState<EmailDeliveryStatus | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -270,11 +270,12 @@ export function EscalationEmailSettings() {
       ])
       setConfigs(cfgRes.items || [])
       setStats(cfgRes.stats)
+      setEmailDelivery(cfgRes.email_delivery ?? null)
       setLogs(logRes.items || [])
       setTriggers(trigRes.items || [])
     } catch (err: unknown) {
       const d = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(typeof d === 'string' ? d : 'Run database/ESCALATION_EMAIL_SYSTEM.sql on Supabase.')
+      message.error(apiErrorMessage(err, 'Run database/ESCALATION_EMAIL_SYSTEM.sql on Supabase.'))
     } finally {
       setLoading(false)
     }
@@ -331,6 +332,39 @@ export function EscalationEmailSettings() {
           Automated pending escalation for Chores, Bugs, and Staging. Configure recipients per flow, use external cron jobs on
           production, or force-send instantly from here.
         </Paragraph>
+
+        {emailDelivery && !emailDelivery.credentials_loaded && (
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="Email not configured on production backend"
+            description={
+              <span>
+                Set <Text code>POSTMARK_SMTP_TOKEN</Text> and <Text code>SMTP_FROM_EMAIL</Text> (verified sender in Postmark) on
+                Render, then redeploy. Mode: {emailDelivery.mode}, transport: {emailDelivery.transport}.
+              </span>
+            }
+          />
+        )}
+        {emailDelivery?.credentials_loaded && emailDelivery.mode === 'log' && (
+          <Alert
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message="EMAIL_MODE=log — emails are not actually sent"
+            description='Set EMAIL_MODE=postmark on Render (or remove EMAIL_MODE) and redeploy.'
+          />
+        )}
+        {emailDelivery?.credentials_loaded && emailDelivery.mode !== 'log' && (
+          <Alert
+            type="success"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={`Email ready (${emailDelivery.transport})`}
+            description={`From: ${emailDelivery.from_email || '—'} · Postmark API + SMTP fallback`}
+          />
+        )}
 
         {stats && (
           <motion.div

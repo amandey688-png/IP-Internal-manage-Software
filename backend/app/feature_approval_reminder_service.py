@@ -46,21 +46,15 @@ def _get_tz(tz_name: str | None):
 
 
 def _frontend_base() -> str:
-    import os
+    from app.public_urls import get_frontend_base
 
-    return (os.getenv("FRONTEND_URL", "http://localhost:3001")).rstrip("/")
+    return get_frontend_base()
 
 
 def _public_api_base() -> str:
-    """Backend URL for email action links (no React — direct FastAPI HTML)."""
-    import os
+    from app.public_urls import get_public_api_base
 
-    for key in ("PUBLIC_API_URL", "API_PUBLIC_URL", "BACKEND_PUBLIC_URL"):
-        v = (os.getenv(key) or "").strip().rstrip("/")
-        if v:
-            return v
-    port = (os.getenv("BACKEND_PORT") or "8020").strip()
-    return f"http://127.0.0.1:{port}"
+    return get_public_api_base()
 
 
 def _ticket_link(ticket_id: str) -> str:
@@ -300,7 +294,8 @@ def fetch_pending_feature_tickets() -> list[dict[str, Any]]:
 def _create_email_approval_links(ticket_id: str) -> dict[str, str]:
     """One-time approve/reject links for reminder email (7-day expiry)."""
     expires = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
-    api_base = _public_api_base()
+    from app.public_urls import build_approval_email_action_url
+
     links: dict[str, str] = {}
     try:
         for action in ("approve", "reject"):
@@ -310,9 +305,7 @@ def _create_email_approval_links(ticket_id: str) -> dict[str, str]:
             if ins.data:
                 token = ins.data[0].get("token")
                 if token:
-                    links[action] = (
-                        f"{api_base}/approval/email-action?token={token}&action={action}"
-                    )
+                    links[action] = build_approval_email_action_url(str(token), action)
     except Exception as e:
         _notify(f"approval token create {ticket_id}: {e}")
     return links

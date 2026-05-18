@@ -7,8 +7,17 @@ from fastapi import APIRouter, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
 from app.approval_token_service import execute_approval_by_token
+from app.public_urls import get_public_api_base, is_loopback_url
 
 approval_public_router = APIRouter(tags=["approval-public"])
+
+
+def _email_action_post_url(request: Request) -> str:
+    """Absolute POST target — works behind Render proxy and avoids relative-path issues."""
+    base = str(request.base_url).rstrip("/")
+    if not is_loopback_url(base):
+        return f"{base}/approval/email-action"
+    return f"{get_public_api_base()}/approval/email-action"
 
 
 def _page_shell(title: str, body: str, *, ok: bool = True) -> str:
@@ -83,7 +92,7 @@ def approval_email_action_get(
         except HTTPException as e:
             return HTMLResponse(_error_html(str(e.detail)), status_code=e.status_code)
     if action == "reject":
-        return HTMLResponse(_reject_form_html(token, str(request.url.path)))
+        return HTMLResponse(_reject_form_html(token, _email_action_post_url(request)))
     return HTMLResponse(_error_html("Invalid action."), status_code=400)
 
 
@@ -95,7 +104,7 @@ async def approval_email_action_post(
     remarks: str = Form(""),
 ):
     """Reject form submit — remarks mandatory."""
-    post_url = str(request.url.path)
+    post_url = _email_action_post_url(request)
     if action.strip().lower() != "reject":
         return HTMLResponse(_error_html("Invalid action."), status_code=400)
     if not (remarks or "").strip():

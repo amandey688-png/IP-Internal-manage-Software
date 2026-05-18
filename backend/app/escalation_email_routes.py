@@ -108,10 +108,26 @@ def escalation_ping():
     return {"ok": True, "routes": "escalation-v1", "config_types": list(CONFIG_TYPES)}
 
 
+@escalation_email_router.get("/escalation/email-status")
+def email_delivery_status(_auth: dict = Depends(_require_admin)):
+    from app.utils.email import get_email_delivery_status, get_last_email_error
+
+    return {
+        **get_email_delivery_status(),
+        "last_error": get_last_email_error(),
+    }
+
+
 @escalation_email_router.get("/escalation/config")
 def get_configs(_auth: dict = Depends(_require_admin)):
     try:
-        return {"items": list_all_configs(), "stats": get_pending_stats()}
+        from app.utils.email import get_email_delivery_status
+
+        return {
+            "items": list_all_configs(),
+            "stats": get_pending_stats(),
+            "email_delivery": get_email_delivery_status(),
+        }
     except Exception as e:
         raise HTTPException(
             status_code=503,
