@@ -155,22 +155,40 @@ async def test_email(body: TestEmailBody, _auth: dict = Depends(_require_admin))
     return {"ok": True, "to": str(body.to)}
 
 
+def _queue_reminder_batch(background_tasks: BackgroundTasks, *, force: bool) -> dict:
+    """Run batch in background — avoids Render/Vercel HTTP timeout on large mail builds."""
+
+    def _sync_run() -> None:
+        import asyncio
+
+        asyncio.run(run_feature_approval_reminder_batch(force=force))
+
+    background_tasks.add_task(_sync_run)
+    return {
+        "status": "accepted",
+        "force": force,
+        "message": "Reminder job started. Refresh the send log below in 10–30 seconds.",
+    }
+
+
 @feature_approval_reminder_router.post("/feature-approval-reminders/run")
 async def run_reminder(
     background_tasks: BackgroundTasks,
     _ctx: dict = Depends(_cron_or_admin),
     body: RunBody | None = Body(None),
+    sync: bool = False,
 ):
-    """Cron: POST with X-Cron-Secret (returns immediately). Admins await result. Use force to bypass daily dedup."""
+    """
+    Cron + admin force-send run in background (avoids HTTP timeout on Render).
+    Add ?sync=true to wait for full JSON result (local debugging).
+    """
 
     force_flag = bool(body.force) if body else False
 
-    if _ctx.get("cron"):
-        def _sync_run() -> None:
-            import asyncio
+    if sync and not _ctx.get("cron"):
+        result = await run_feature_approval_reminder_batch(force=force_flag)
+        if result.get("ok") is False:
+            raise HTTPException(status_code=500, detail=result.get("error") or "Run failed")
+        return result
 
-            asyncio.run(run_feature_approval_reminder_batch(force=force_flag))
-
-        background_tasks.add_task(_sync_run)
-        return {"status": "accepted", "force": force_flag}
-    return await run_feature_approval_reminder_batch(force=force_flag)
+    return _queue_reminder_batch(background_tasks, force=force_flag)
