@@ -57,6 +57,6 @@ export const featureApprovalRemindersApi = {
 
   run: (force?: boolean) =>
     apiClient
-      .post<Record<string, unknown>>('/feature-approval-reminders/run', { force: !!force })
+      .post<Record<string, unknown>>('/feature-approval-reminders/run', { force: !!force }, { timeout: 60000 })
       .then((r) => r.data),
 }

@@ -172,11 +172,15 @@ export const SettingsPage = () => {
         status?: string
       }
       if (out.status === 'accepted') {
-        message.success('Run queued (cron mode)')
+        message.success(
+          (out.message as string) || 'Reminder sending started — check Recent send log in 10–30 seconds.',
+          6
+        )
+        window.setTimeout(() => loadFeatureApproval(), 12000)
       } else if (out.skipped) {
         message.info(`Skipped: ${out.reason || '—'}`)
       } else if (out.ok === false) {
-        message.error(out.error || 'Run failed')
+        message.error(String(out.error || 'Run failed'), 10)
       } else {
         message.success(
           `Reminder run: pending ${out.pending ?? '—'}, sent ${out.sent_ok ?? 0}/${out.recipients_attempted ?? 0}` +
@@ -185,8 +189,7 @@ export const SettingsPage = () => {
       }
       loadFeatureApproval()
     } catch (err: unknown) {
-      const d = (err as { response?: { data?: { detail?: string } } })?.response?.data?.detail
-      message.error(typeof d === 'string' ? d : 'Run failed')
+      message.error(apiErrorMessage(err, 'Run failed'), 10)
     } finally {
       setRunLoading(false)
     }
@@ -362,8 +365,9 @@ export const SettingsPage = () => {
                   <Title level={5}>Test email &amp; force send</Title>
                   <Paragraph type="secondary" style={{ marginBottom: 8 }}>
                     <Text strong>Force send</Text> runs the same job from the browser (admin session). It bypasses the{' '}
-                    <Text strong>once-per-day</Text> guard used by external cron so you can trigger an
-                    immediate reminder without changing your server job. It does not replace your external scheduler.
+                    <Text strong>once-per-day</Text> guard used by external cron. The server starts sending in the
+                    background — wait ~15s and check <Text strong>Recent send log</Text> (not an instant toast if many
+                    tickets). It does not replace your external scheduler.
                   </Paragraph>
                   <Space wrap style={{ marginBottom: 12 }} align="start">
                     <Input style={{ width: 280 }} placeholder="Test email address" value={testTo} onChange={(e) => setTestTo(e.target.value)} />

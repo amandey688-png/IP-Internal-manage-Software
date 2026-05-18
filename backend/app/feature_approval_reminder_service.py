@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from app.supabase_client import supabase
-from app.utils.email import send_email_detail
+from app.utils.email import get_last_email_error, send_email_detail
 
 _log = logging.getLogger("feature_approval_reminder")
 
@@ -298,14 +298,17 @@ def _create_email_approval_links(ticket_id: str) -> dict[str, str]:
 
     links: dict[str, str] = {}
     try:
-        for action in ("approve", "reject"):
-            ins = supabase.table("approval_tokens").insert(
-                {"ticket_id": ticket_id, "action": action, "expires_at": expires}
-            ).execute()
-            if ins.data:
-                token = ins.data[0].get("token")
-                if token:
-                    links[action] = build_approval_email_action_url(str(token), action)
+        ins = supabase.table("approval_tokens").insert(
+            [
+                {"ticket_id": ticket_id, "action": "approve", "expires_at": expires},
+                {"ticket_id": ticket_id, "action": "reject", "expires_at": expires},
+            ]
+        ).execute()
+        for row in ins.data or []:
+            action = (row.get("action") or "").strip().lower()
+            token = row.get("token")
+            if action in ("approve", "reject") and token:
+                links[action] = build_approval_email_action_url(str(token), action)
     except Exception as e:
         _notify(f"approval token create {ticket_id}: {e}")
     return links
@@ -498,6 +501,17 @@ async def run_feature_approval_reminder_batch(*, force: bool = False) -> dict[st
 
         if not force and ok_count == 0 and err_count > 0:
             release_dedup(dedup_key)
+
+        last_err = get_last_email_error()
+        if ok_count == 0 and err_count > 0:
+            return {
+                "ok": False,
+                "error": last_err or "All reminder emails failed to send. Check Postmark env on Render.",
+                "pending": len(pending),
+                "recipients_attempted": len(targets),
+                "sent_ok": 0,
+                "failed": err_count,
+            }
 
         return {
             "ok": True,
