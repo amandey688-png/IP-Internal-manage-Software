@@ -21,6 +21,9 @@ except ImportError:
 _last_email_error: str | None = None
 POSTMARK_PORTS = (587, 2525)
 POSTMARK_API_URL = "https://api.postmarkapp.com/email"
+# Render often blocks outbound SMTP; API-only avoids 30s+ hangs on 587/2525.
+HTTP_TIMEOUT = httpx.Timeout(12.0, connect=8.0) if httpx else None
+SMTP_TIMEOUT_SEC = 12
 
 
 def get_last_email_error() -> str | None:
@@ -226,7 +229,7 @@ async def _postmark_api_send(
         payload["MessageStream"] = stream
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT or 12.0) as client:
             resp = await client.post(
                 POSTMARK_API_URL,
                 headers={
@@ -277,6 +280,7 @@ async def _smtp_send(message: Any, cfg: dict[str, Any]) -> None:
                 password=cfg["password"],
                 use_tls=use_tls,
                 start_tls=start_tls,
+                timeout=SMTP_TIMEOUT_SEC,
             )
             _log(f"SMTP OK ({host}:{port}) -> {message['To']}")
             return
@@ -335,6 +339,10 @@ async def send_email_detail(
         if ok:
             return True, None
         _last_email_error = err
+        allow_smtp = _env_strip("EMAIL_SMTP_FALLBACK").lower() in ("1", "true", "yes")
+        if not allow_smtp:
+            _log(f"Postmark API failed (SMTP fallback disabled): {err}")
+            return False, err
         _log(f"Postmark API failed, trying SMTP fallback: {err}")
 
     if not _prefer_smtp_over_sendgrid():

@@ -110,7 +110,7 @@ export const escalationEmailsApi = {
 
   testEmail: (configurationType: string, to: string) =>
     apiClient
-      .post<{ ok: boolean }>('/escalation/test-email', { configuration_type: configurationType, to })
+      .post<{ ok: boolean }>('/escalation/test-email', { configuration_type: configurationType, to }, { timeout: 20000 })
       .then((r) => r.data),
 
   forceSend: (configurationType: string) =>
