@@ -6,6 +6,7 @@
 --   1) Approve/Reject email links (approval_tokens)
 --   2) Feature Approval Email Configuration (reminders)
 --   3) Advanced Pending Escalation Email Configuration
+--   4) Checklist / Delegation / Admin pending digest dedup tables
 --
 -- NOT required for production URL fix (PUBLIC_API_URL on Render) or Postmark env.
 -- =============================================================================
@@ -165,6 +166,31 @@ VALUES
   ('stage_4', 'Stage 4 Pending', true)
 ON CONFLICT (configuration_type) DO NOTHING;
 
+-- ---------- 4) CHECKLIST & DELEGATION DAILY REMINDERS ----------
+CREATE TABLE IF NOT EXISTS public.checklist_reminder_sent (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  reminder_date date NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, reminder_date)
+);
+
+CREATE TABLE IF NOT EXISTS public.delegation_reminder_sent (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  reminder_date date NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, reminder_date)
+);
+
+CREATE TABLE IF NOT EXISTS public.pending_reminder_sent (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  reminder_date date NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, reminder_date)
+);
+
 -- =============================================================================
 -- VERIFICATION (run after — all should return rows / true)
 -- =============================================================================
@@ -183,10 +209,80 @@ SELECT 'escalation_email_config', EXISTS (
   WHERE table_schema = 'public' AND table_name = 'escalation_email_config'
 );
 
-SELECT configuration_type, stage_name, is_enabled
-FROM public.escalation_email_config
-ORDER BY configuration_type;
+-- NOTE: Supabase shows only the LAST query result if you run many SELECTs at once.
+-- Run each block separately, OR use the single "dashboard" query below.
 
-SELECT id, enabled, hour, minute, timezone
+-- ---------- A) One result table (run this alone) ----------
+SELECT 'escalation_profiles' AS section,
+       configuration_type AS detail,
+       stage_name AS extra,
+       is_enabled::text AS ok
+FROM public.escalation_email_config
+UNION ALL
+SELECT 'feature_schedule',
+       (hour::text || ':' || lpad(minute::text, 2, '0') || ' ' || timezone),
+       'enabled=' || enabled::text,
+       'ok'
 FROM public.feature_approval_schedule
-WHERE id = 1;
+WHERE id = 1
+UNION ALL
+SELECT 'pending_feature_tickets',
+       COUNT(*)::text,
+       '',
+       CASE WHEN COUNT(*) > 0 THEN 'ok' ELSE 'no tickets' END
+FROM public.tickets
+WHERE type = 'feature'
+  AND (approval_status IS NULL OR approval_status = '')
+UNION ALL
+SELECT 'feature_approval_recipients',
+       COUNT(*)::text,
+       'enabled only',
+       CASE WHEN COUNT(*) > 0 THEN 'ok' ELSE 'add in Settings or SQL below' END
+FROM public.feature_approval_email_settings
+WHERE is_enabled = true
+UNION ALL
+SELECT 'escalation_receivers',
+       COUNT(*)::text,
+       'enabled across all configs',
+       CASE WHEN COUNT(*) > 0 THEN 'ok' ELSE 'add in Settings or SQL below' END
+FROM public.escalation_email_receivers
+WHERE is_enabled = true
+ORDER BY section;
+
+-- ---------- B) Escalation profiles only (expect 5 rows) ----------
+-- SELECT configuration_type, stage_name, is_enabled
+-- FROM public.escalation_email_config
+-- ORDER BY configuration_type;
+
+-- ---------- C) Feature schedule only (expect 1 row) ----------
+-- SELECT id, enabled, hour, minute, timezone
+-- FROM public.feature_approval_schedule
+-- WHERE id = 1;
+
+-- ---------- D) Add feature approval recipient (change email) ----------
+-- INSERT INTO public.feature_approval_email_settings (email, name, is_enabled)
+-- SELECT 'your@company.com', 'Your Name', true
+-- WHERE NOT EXISTS (
+--   SELECT 1 FROM public.feature_approval_email_settings
+--   WHERE lower(trim(email)) = lower(trim('your@company.com'))
+-- );
+
+-- ---------- E) Add escalation receiver by type (change email + type) ----------
+-- INSERT INTO public.escalation_email_receivers (config_id, email, is_enabled)
+-- SELECT c.id, 'your@company.com', true
+-- FROM public.escalation_email_config c
+-- WHERE c.configuration_type = 'pending_timeframe'
+--   AND NOT EXISTS (
+--     SELECT 1 FROM public.escalation_email_receivers r
+--     WHERE r.config_id = c.id
+--       AND lower(trim(r.email)) = lower(trim('your@company.com'))
+--   );
+
+-- configuration_type options: pending_timeframe | critical_pending | stage_2 | stage_3 | stage_4
+
+-- Re-test cron today (run manually only when testing)
+-- DELETE FROM public.feature_approval_reminder_dedup WHERE dedup_key LIKE 'daily:%';
+-- DELETE FROM public.escalation_reminder_dedup;
+-- DELETE FROM public.checklist_reminder_sent WHERE reminder_date = CURRENT_DATE;
+-- DELETE FROM public.delegation_reminder_sent WHERE reminder_date = CURRENT_DATE;
+-- DELETE FROM public.pending_reminder_sent WHERE reminder_date = CURRENT_DATE;

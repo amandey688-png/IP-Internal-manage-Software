@@ -179,6 +179,29 @@ def _queue_reminder_batch(background_tasks: BackgroundTasks, *, force: bool) -> 
     }
 
 
+def _cron_run_response(result: dict) -> dict:
+    """Cron-job.org: HTTP 200 must include whether an email was actually sent."""
+    if result.get("ok") is False:
+        raise HTTPException(status_code=500, detail=result.get("error") or "Reminder send failed")
+    hints = {
+        "already_sent_today": "No new email — already sent today (use ?force=true once to resend).",
+        "no_pending_tickets": "No email — no feature tickets pending approval.",
+        "no_recipients": "No email — add enabled recipients in Settings.",
+        "schedule disabled": "No email — reminder schedule disabled.",
+    }
+    reason = str(result.get("reason") or "")
+    sent = int(result.get("sent_ok") or 0)
+    return {
+        "status": "completed",
+        "email_sent": sent > 0,
+        "emails_sent": sent,
+        "pending_tickets": result.get("pending", 0),
+        "skipped": bool(result.get("skipped")),
+        "reason": reason or None,
+        "message": hints.get(reason) or (f"Sent {sent} email(s)." if sent else "Completed."),
+    }
+
+
 async def _run_reminder_core(
     background_tasks: BackgroundTasks,
     _ctx: dict,
@@ -186,7 +209,11 @@ async def _run_reminder_core(
     force_flag: bool,
     sync: bool,
 ) -> dict:
-    if sync and not _ctx.get("cron"):
+    # External cron: run to completion and return real outcome (not fire-and-forget).
+    if _ctx.get("cron"):
+        result = await run_feature_approval_reminder_batch(force=force_flag)
+        return _cron_run_response(result)
+    if sync:
         result = await run_feature_approval_reminder_batch(force=force_flag)
         if result.get("ok") is False:
             raise HTTPException(status_code=500, detail=result.get("error") or "Run failed")

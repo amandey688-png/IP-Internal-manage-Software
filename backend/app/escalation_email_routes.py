@@ -239,24 +239,16 @@ async def cron_pending_mails(
     request: Request,
     ctx: dict = Depends(_cron_or_admin),
     body: RunBody | None = Body(None),
+    force: bool = False,
 ):
-    force_flag = bool(body.force) if body else False
-    if ctx.get("cron") and not force_flag:
-
-        def _run() -> None:
-            import asyncio
-
-            asyncio.run(
-                run_escalation_batch(
-                    "pending_timeframe",
-                    force=False,
-                    trigger_source="cron",
-                )
-            )
-
-        background_tasks.add_task(_run)
-        return {"status": "accepted", "job": "pending_timeframe"}
-    uid = ctx.get("id") if not ctx.get("cron") else None
+    force_flag = force or (bool(body.force) if body else False)
+    if ctx.get("cron"):
+        return await run_escalation_batch(
+            "pending_timeframe",
+            force=force_flag,
+            trigger_source="cron",
+        )
+    uid = ctx.get("id")
     return await run_escalation_batch(
         "pending_timeframe",
         force=force_flag,
@@ -271,24 +263,16 @@ async def cron_critical_mails(
     request: Request,
     ctx: dict = Depends(_cron_or_admin),
     body: RunBody | None = Body(None),
+    force: bool = False,
 ):
-    force_flag = bool(body.force) if body else False
-    if ctx.get("cron") and not force_flag:
-
-        def _run() -> None:
-            import asyncio
-
-            asyncio.run(
-                run_escalation_batch(
-                    "critical_pending",
-                    force=False,
-                    trigger_source="cron",
-                )
-            )
-
-        background_tasks.add_task(_run)
-        return {"status": "accepted", "job": "critical_pending"}
-    uid = ctx.get("id") if not ctx.get("cron") else None
+    force_flag = force or (bool(body.force) if body else False)
+    if ctx.get("cron"):
+        return await run_escalation_batch(
+            "critical_pending",
+            force=force_flag,
+            trigger_source="cron",
+        )
+    uid = ctx.get("id")
     return await run_escalation_batch(
         "critical_pending",
         force=force_flag,
@@ -303,18 +287,12 @@ async def cron_stage_mails(
     request: Request,
     ctx: dict = Depends(_cron_or_admin),
     body: RunBody | None = Body(None),
+    force: bool = False,
 ):
-    force_flag = bool(body.force) if body else False
-    if ctx.get("cron") and not force_flag:
-
-        def _run() -> None:
-            import asyncio
-
-            asyncio.run(run_all_stage_batches(force=False))
-
-        background_tasks.add_task(_run)
-        return {"status": "accepted", "job": "stage_2,stage_3,stage_4"}
-    uid = ctx.get("id") if not ctx.get("cron") else None
+    force_flag = force or (bool(body.force) if body else False)
+    if ctx.get("cron"):
+        return await run_all_stage_batches(force=force_flag)
+    uid = ctx.get("id")
     return await run_all_stage_batches(
         force=force_flag,
         triggered_by=uid,
