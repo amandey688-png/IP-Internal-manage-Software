@@ -26,6 +26,7 @@ import {
   type FeatureApprovalLog,
 } from '../../api/featureApprovalReminders'
 import { resolveFeatureApprovalCronRunUrl } from '../../api/axios'
+import { EscalationEmailSettings } from './EscalationEmailSettings'
 
 const { Title, Paragraph, Text } = Typography
 
@@ -364,6 +365,9 @@ export const SettingsPage = () => {
                   />
                 </div>
               </Spin>
+
+              <Divider />
+              <EscalationEmailSettings />
             </>
           )}
         </Space>

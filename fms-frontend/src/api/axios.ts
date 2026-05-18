@@ -106,8 +106,7 @@ function resolveApiBase(): string {
  * Absolute URL for external schedulers (cron, CI, PaaS jobs) to POST the feature-approval reminder run.
  * Uses real backend host from VITE_API_BASE_URL / runtime override — never the Vite dev-server origin (e.g. :3001).
  */
-export function resolveFeatureApprovalCronRunUrl(): string {
-  const path = "/feature-approval-reminders/run"
+function resolveBackendCronUrl(path: string): string {
   const runtime =
     typeof window !== "undefined" && window.__FMS_API_BASE_URL__?.trim()
       ? window.__FMS_API_BASE_URL__.trim().replace(/\/+$/, "")
@@ -123,6 +122,22 @@ export function resolveFeatureApprovalCronRunUrl(): string {
     return `${PRODUCTION_API_FALLBACK.replace(/\/+$/, "")}${path}`
   }
   return `${resolveDefaultLocalBackendUrl().replace(/\/+$/, "")}${path}`
+}
+
+export function resolveFeatureApprovalCronRunUrl(): string {
+  return resolveBackendCronUrl("/feature-approval-reminders/run")
+}
+
+export function resolveEscalationPendingCronUrl(): string {
+  return resolveBackendCronUrl("/escalation/send-pending-mails")
+}
+
+export function resolveEscalationCriticalCronUrl(): string {
+  return resolveBackendCronUrl("/escalation/send-critical-mails")
+}
+
+export function resolveEscalationStageCronUrl(): string {
+  return resolveBackendCronUrl("/escalation/send-stage-mails")
 }
 
 export const API_BASE_URL = resolveApiBase()
