@@ -11283,14 +11283,32 @@ def update_lead(
         raise HTTPException(400, str(e)[:200])
 
 
-async def _send_checklist_reminder_email(to_email: str, task_names: list[str], doer_name: str) -> bool:
-    """Send reminder email via utils/email.py (async SMTP with HTML). Returns True if sent."""
+def _cron_secret_matches(request: Request) -> bool:
+    """Accept any configured cron secret (shared across reminder jobs)."""
+    hdr = (request.headers.get("X-Cron-Secret") or request.headers.get("x-cron-secret") or "").strip()
+    auth_hdr = (request.headers.get("Authorization") or request.headers.get("authorization") or "").strip()
+    bearer = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
+    for key in (
+        "CHECKLIST_CRON_SECRET",
+        "FEATURE_APPROVAL_CRON_SECRET",
+        "NOTIFICATION_CRON_SECRET",
+        "DELEGATION_CRON_SECRET",
+        "PENDING_REMINDER_CRON_SECRET",
+        "ESCALATION_CRON_SECRET",
+    ):
+        secret = (os.getenv(key) or "").strip()
+        if secret and (hdr == secret or bearer == secret):
+            return True
+    return False
+
+
+async def _send_checklist_reminder_email(to_email: str, task_names: list[str], doer_name: str) -> tuple[bool, str | None]:
+    """Send reminder email via Postmark API. Returns (ok, error)."""
     to_email = (to_email or "").strip()
     if not to_email:
-        _log("Checklist reminder: no recipient email, skip send")
-        return False
+        return False, "No recipient email"
 
-    from app.utils.email import send_email
+    from app.utils.email import send_email_detail
 
     task_items = "".join(f"<li>{n}</li>" for n in task_names)
     html_content = f"""
@@ -11310,14 +11328,19 @@ async def _send_checklist_reminder_email(to_email: str, task_names: list[str], d
 """
     plain_fallback = f"You have {len(task_names)} task(s) due today:\n\n" + "\n".join(f"  - {n}" for n in task_names) + "\n\nPlease log in to complete them."
 
-    ok = await send_email(to_email=to_email, subject="Checklist: Tasks due today", html_content=html_content.strip(), plain_fallback=plain_fallback)
+    ok, err = await send_email_detail(
+        to_email=to_email,
+        subject="Checklist: Tasks due today",
+        html_content=html_content.strip(),
+        plain_fallback=plain_fallback,
+    )
     if ok:
         _log(f"Checklist reminder sent to {to_email}")
-    return ok
+    return ok, err
 
 
-async def _run_checklist_reminders_background():
-    """Run checklist daily reminders. Used by cron; logs result. Avoids request timeout."""
+async def _run_checklist_reminders_impl(*, force_resend: bool = False) -> dict:
+    """Run checklist daily reminders; returns summary for cron HTTP response."""
     try:
         from app.checklist_utils import get_occurrence_dates
         today = date.today()
@@ -11349,10 +11372,16 @@ async def _run_checklist_reminders_background():
                             user_map[uid] = {"email": em, "name": profs.get(uid, "User")}
                 except Exception as e2:
                     _log(f"checklist reminder: auth fallback failed: {e2}")
+        if force_resend:
+            try:
+                supabase.table("checklist_reminder_sent").delete().eq("reminder_date", today.isoformat()).execute()
+            except Exception as e:
+                _log(f"checklist reminder force_resend clear: {e}")
         try:
             sent_r = supabase.table("checklist_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
             already_sent = {str(row["user_id"]) for row in (sent_r.data or [])}
-        except Exception:
+        except Exception as e:
+            _log(f"checklist_reminder_sent missing? Run CHECKLIST_DELEGATION_REMINDER_SYSTEM.sql — {e}")
             already_sent = set()
         comp = {}
         try:
@@ -11387,6 +11416,7 @@ async def _run_checklist_reminders_background():
                         by_user.setdefault(doer_id, []).append(task.get("task_name", ""))
                     break
         sent_count = 0
+        failed: list[dict] = []
         for uid, names in by_user.items():
             if not names or uid in already_sent:
                 continue
@@ -11395,7 +11425,8 @@ async def _run_checklist_reminders_background():
             name = u.get("name", "") or "User"
             if not email:
                 continue
-            if await _send_checklist_reminder_email(email, names, name):
+            ok_send, err = await _send_checklist_reminder_email(email, names, name)
+            if ok_send:
                 try:
                     supabase.table("checklist_reminder_sent").insert({
                         "user_id": uid,
@@ -11404,7 +11435,47 @@ async def _run_checklist_reminders_background():
                     sent_count += 1
                 except Exception as e:
                     _log(f"checklist reminder: failed recording send for user_id={uid} date={today.isoformat()}: {e}")
-        _log(f"Checklist reminder background: sent {sent_count} for {today.isoformat()}")
+            else:
+                failed.append({"email": email, "error": err or "send failed"})
+        _log(f"Checklist reminder: sent {sent_count} for {today.isoformat()}")
+        pending_users = {uid for uid in by_user if uid not in already_sent}
+        if not by_user:
+            return {
+                "status": "completed",
+                "email_sent": False,
+                "emails_sent": 0,
+                "message": "No checklist tasks due today for any user.",
+            }
+        if not pending_users and sent_count == 0:
+            return {
+                "status": "completed",
+                "email_sent": False,
+                "emails_sent": 0,
+                "reason": "already_sent_today",
+                "message": "No new email — checklist reminders already sent today (use ?force=true once to resend).",
+            }
+        if sent_count == 0 and failed:
+            raise HTTPException(
+                status_code=500,
+                detail=failed[0].get("error") or "All checklist reminder emails failed",
+            )
+        return {
+            "status": "completed",
+            "email_sent": sent_count > 0,
+            "emails_sent": sent_count,
+            "eligible_users": len(pending_users),
+            "message": f"Sent {sent_count} checklist reminder email(s).",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"Checklist reminder error: {e}")
+        raise HTTPException(status_code=500, detail=str(e)[:500]) from e
+
+
+async def _run_checklist_reminders_background():
+    try:
+        await _run_checklist_reminders_impl(force_resend=False)
     except Exception as e:
         _log(f"Checklist reminder background error: {e}")
 
@@ -11416,26 +11487,23 @@ async def send_checklist_daily_reminders(
     auth: dict | None = Depends(get_current_user_optional),
 ):
     """
-    Start checklist daily reminders in background. Returns immediately to avoid Render timeout.
-    POST or GET. Auth: X-Cron-Secret header or admin login.
-    Result is logged; check server logs for sent count.
+    Checklist daily reminders. Cron: GET/POST + X-Cron-Secret (reports emails_sent in JSON).
+    ?force=true clears today's sent log. Same secret as feature-approval cron is accepted.
     """
-    cron_secret = (os.getenv("CHECKLIST_CRON_SECRET") or "").strip()
-    x_cron = (
-        request.headers.get("X-Cron-Secret") or
-        request.headers.get("x-cron-secret") or
-        ""
-    ).strip()
-    if cron_secret and x_cron and x_cron == cron_secret:
-        pass
-    elif auth:
+    force_resend = request.query_params.get("force", "").strip().lower() in ("1", "true", "yes")
+    if _cron_secret_matches(request):
+        return await _run_checklist_reminders_impl(force_resend=force_resend)
+    if auth:
         role = _get_role_from_profile(auth["id"])
         if role not in ("admin", "master_admin"):
             raise HTTPException(403, "Admin only")
     else:
-        raise HTTPException(401, "Set CHECKLIST_CRON_SECRET in X-Cron-Secret header, or log in as admin")
+        raise HTTPException(
+            401,
+            "Set CHECKLIST_CRON_SECRET or FEATURE_APPROVAL_CRON_SECRET in X-Cron-Secret, or log in as admin.",
+        )
     background_tasks.add_task(_run_checklist_reminders_background)
-    return {"status": "started", "message": "Checklist reminder job started. Check server logs for result."}
+    return {"status": "started", "message": "Checklist reminder started. Check server logs."}
 
 
 class SmtpTestBody(BaseModel):
@@ -11490,14 +11558,13 @@ async def smtp_send_test_email(request: Request, body: SmtpTestBody = SmtpTestBo
 
 
 # ---------- Delegation Daily Reminder (same pattern as Checklist) ----------
-async def _send_delegation_reminder_email(to_email: str, task_titles: list[str], assignee_name: str) -> bool:
-    """Send delegation reminder email via utils/email.py. Returns True if sent."""
+async def _send_delegation_reminder_email(to_email: str, task_titles: list[str], assignee_name: str) -> tuple[bool, str | None]:
+    """Send delegation reminder email. Returns (ok, error)."""
     to_email = (to_email or "").strip()
     if not to_email:
-        _log("Delegation reminder: no recipient email, skip send")
-        return False
+        return False, "No recipient email"
 
-    from app.utils.email import send_email
+    from app.utils.email import send_email_detail
 
     task_items = "".join(f"<li>{t}</li>" for t in task_titles)
     html_content = f"""
@@ -11517,14 +11584,19 @@ async def _send_delegation_reminder_email(to_email: str, task_titles: list[str],
 """
     plain_fallback = f"You have {len(task_titles)} delegation task(s) due or overdue:\n\n" + "\n".join(f"  - {t}" for t in task_titles) + "\n\nPlease log in to complete them."
 
-    ok = await send_email(to_email=to_email, subject="Delegation: Pending tasks due", html_content=html_content.strip(), plain_fallback=plain_fallback)
+    ok, err = await send_email_detail(
+        to_email=to_email,
+        subject="Delegation: Pending tasks due",
+        html_content=html_content.strip(),
+        plain_fallback=plain_fallback,
+    )
     if ok:
         _log(f"Delegation reminder sent to {to_email}")
-    return ok
+    return ok, err
 
 
-async def _run_delegation_reminders_background():
-    """Run delegation daily reminders. One email per assignee with pending/overdue tasks."""
+async def _run_delegation_reminders_impl(*, force_resend: bool = False) -> dict:
+    """Run delegation daily reminders; returns summary for cron HTTP response."""
     try:
         today = date.today()
         del_r = supabase.table("delegation_tasks").select("id, title, assignee_id, due_date").in_("status", ["pending", "in_progress"]).lte("due_date", today.isoformat()).execute()
@@ -11554,18 +11626,26 @@ async def _run_delegation_reminders_background():
                             user_map[uid] = {"email": em, "name": profs.get(uid, "User")}
                 except Exception as e2:
                     _log(f"Delegation reminder: auth fallback failed: {e2}")
+        if force_resend:
+            try:
+                supabase.table("delegation_reminder_sent").delete().eq("reminder_date", today.isoformat()).execute()
+            except Exception as e:
+                _log(f"delegation reminder force_resend clear: {e}")
         try:
             sent_r = supabase.table("delegation_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
             already_sent = {str(row["user_id"]) for row in (sent_r.data or [])}
-        except Exception:
+        except Exception as e:
+            _log(f"delegation_reminder_sent missing? Run CHECKLIST_DELEGATION_REMINDER_SYSTEM.sql — {e}")
             already_sent = set()
         by_user: dict[str, list[str]] = {}
         for task in tasks:
             assignee_id = str(task.get("assignee_id", ""))
-            if not assignee_id or assignee_id in already_sent:
+            if not assignee_id:
                 continue
             by_user.setdefault(assignee_id, []).append(task.get("title") or "Untitled")
+        pending_users = {uid for uid in by_user if uid not in already_sent}
         sent_count = 0
+        failed: list[dict] = []
         for uid, titles in by_user.items():
             if not titles or uid in already_sent:
                 continue
@@ -11574,7 +11654,8 @@ async def _run_delegation_reminders_background():
             name = u.get("name") or "User"
             if not email:
                 continue
-            if await _send_delegation_reminder_email(email, titles, name):
+            ok_send, err = await _send_delegation_reminder_email(email, titles, name)
+            if ok_send:
                 try:
                     supabase.table("delegation_reminder_sent").insert({
                         "user_id": uid,
@@ -11583,7 +11664,46 @@ async def _run_delegation_reminders_background():
                     sent_count += 1
                 except Exception as e:
                     _log(f"Delegation reminder: failed recording send for user_id={uid} date={today.isoformat()}: {e}")
-        _log(f"Delegation reminder background: sent {sent_count} for {today.isoformat()}")
+            else:
+                failed.append({"email": email, "error": err or "send failed"})
+        _log(f"Delegation reminder: sent {sent_count} for {today.isoformat()}")
+        if not by_user:
+            return {
+                "status": "completed",
+                "email_sent": False,
+                "emails_sent": 0,
+                "message": "No pending or overdue delegation tasks.",
+            }
+        if not pending_users and sent_count == 0:
+            return {
+                "status": "completed",
+                "email_sent": False,
+                "emails_sent": 0,
+                "reason": "already_sent_today",
+                "message": "No new email — delegation reminders already sent today (use ?force=true once to resend).",
+            }
+        if sent_count == 0 and failed:
+            raise HTTPException(
+                status_code=500,
+                detail=failed[0].get("error") or "All delegation reminder emails failed",
+            )
+        return {
+            "status": "completed",
+            "email_sent": sent_count > 0,
+            "emails_sent": sent_count,
+            "eligible_users": len(pending_users),
+            "message": f"Sent {sent_count} delegation reminder email(s).",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"Delegation reminder error: {e}")
+        raise HTTPException(status_code=500, detail=str(e)[:500]) from e
+
+
+async def _run_delegation_reminders_background():
+    try:
+        await _run_delegation_reminders_impl(force_resend=False)
     except Exception as e:
         _log(f"Delegation reminder background error: {e}")
 
@@ -11595,26 +11715,23 @@ async def send_delegation_daily_reminders(
     auth: dict | None = Depends(get_current_user_optional),
 ):
     """
-    Start delegation daily reminders in background. Same pattern as checklist.
-    POST or GET. Auth: X-Cron-Secret header or admin login.
-    Sends one email per assignee with pending/overdue delegation tasks.
+    Delegation daily reminders. Cron: GET/POST + X-Cron-Secret (reports emails_sent in JSON).
+    ?force=true clears today's sent log. Same secret as feature-approval cron is accepted.
     """
-    cron_secret = (os.getenv("DELEGATION_CRON_SECRET") or os.getenv("CHECKLIST_CRON_SECRET") or "").strip()
-    x_cron = (
-        request.headers.get("X-Cron-Secret") or
-        request.headers.get("x-cron-secret") or
-        ""
-    ).strip()
-    if cron_secret and x_cron and x_cron == cron_secret:
-        pass
-    elif auth:
+    force_resend = request.query_params.get("force", "").strip().lower() in ("1", "true", "yes")
+    if _cron_secret_matches(request):
+        return await _run_delegation_reminders_impl(force_resend=force_resend)
+    if auth:
         role = _get_role_from_profile(auth["id"])
         if role not in ("admin", "master_admin"):
             raise HTTPException(403, "Admin only")
     else:
-        raise HTTPException(401, "Set DELEGATION_CRON_SECRET or CHECKLIST_CRON_SECRET in X-Cron-Secret header, or log in as admin")
+        raise HTTPException(
+            401,
+            "Set DELEGATION_CRON_SECRET or FEATURE_APPROVAL_CRON_SECRET in X-Cron-Secret, or log in as admin.",
+        )
     background_tasks.add_task(_run_delegation_reminders_background)
-    return {"status": "started", "message": "Delegation reminder job started. Check server logs for result."}
+    return {"status": "started", "message": "Delegation reminder started. Check server logs."}
 
 
 # ---------------------------------------------------------------------------
@@ -11622,71 +11739,24 @@ async def send_delegation_daily_reminders(
 # Sent to admin, master_admin, approver roles only
 # ---------------------------------------------------------------------------
 
-def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) -> bool:
-    """Send pending digest email via SMTP or SendGrid API. Returns True if sent."""
-    subject = "Pending Task Reminder – Checklist, Delegation & Support"
+async def _send_pending_digest_email(to_email: str, body: str, recipient_name: str) -> tuple[bool, str | None]:
+    """Send pending digest via Postmark (utils/email). Returns (ok, error)."""
     to_email = (to_email or "").strip()
     if not to_email:
-        _log("Pending digest: no recipient email, skip send")
-        return False
+        return False, "No recipient email"
+    from app.utils.email import send_email_detail
 
-    smtp_host = (os.getenv("SMTP_HOST") or "").strip()
-    smtp_port = int(os.getenv("SMTP_PORT") or "587")
-    smtp_user = (os.getenv("SMTP_USER") or "").strip()
-    smtp_pass = (os.getenv("SMTP_PASSWORD") or os.getenv("SMTP_PASS") or "").strip()
-    smtp_from = (os.getenv("SMTP_FROM_EMAIL") or os.getenv("SENDGRID_FROM_EMAIL") or os.getenv("AUTOSEND_FROM_EMAIL") or "").strip()
-
-    if smtp_host and smtp_user and smtp_pass and smtp_from:
-        try:
-            import smtplib
-            from email.mime.text import MIMEText
-            from email.mime.multipart import MIMEMultipart
-            msg = MIMEMultipart("alternative")
-            msg["Subject"] = subject
-            msg["From"] = smtp_from
-            msg["To"] = to_email
-            msg.attach(MIMEText(body, "plain"))
-            if smtp_port == 465:
-                with smtplib.SMTP_SSL(smtp_host, smtp_port) as server:
-                    server.login(smtp_user, smtp_pass)
-                    server.sendmail(smtp_from, to_email, msg.as_string())
-            else:
-                with smtplib.SMTP(smtp_host, smtp_port) as server:
-                    server.starttls()
-                    server.login(smtp_user, smtp_pass)
-                    server.sendmail(smtp_from, to_email, msg.as_string())
-            _log(f"Pending digest sent to {to_email} (SMTP)")
-            return True
-        except Exception as e:
-            _log(f"Pending digest SMTP error: {e}")
-            return False
-
-    api_key = (os.getenv("SENDGRID_API_KEY") or "").strip()
-    from_email = (os.getenv("SENDGRID_FROM_EMAIL") or smtp_from or "").strip()
-    from_name = (os.getenv("SENDGRID_FROM_NAME") or "IP Internal Management").strip()
-    if not api_key or not from_email:
-        _log("Pending digest: no SMTP or SENDGRID_API_KEY configured, skip send")
-        return False
-    try:
-        resp = httpx.post(
-            "https://api.sendgrid.com/v3/mail/send",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={
-                "personalizations": [{"to": [{"email": to_email}]}],
-                "from": {"email": from_email, "name": from_name},
-                "subject": subject,
-                "content": [{"type": "text/plain", "value": body}],
-            },
-            timeout=15.0,
-        )
-        if resp.status_code in (200, 202):
-            _log(f"Pending digest sent to {to_email} (SendGrid)")
-            return True
-        _log(f"SendGrid API error: {resp.status_code} {resp.text[:200]}")
-        return False
-    except Exception as e:
-        _log(f"Pending digest SendGrid error: {e}")
-        return False
+    subject = "Pending Task Reminder – Checklist, Delegation & Support"
+    html = f"<html><body><pre style='font-family:sans-serif;font-size:14px'>{body}</pre></body></html>"
+    ok, err = await send_email_detail(
+        to_email=to_email,
+        subject=subject,
+        html_content=html,
+        plain_fallback=body,
+    )
+    if ok:
+        _log(f"Pending digest sent to {to_email}")
+    return ok, err
 
 
 def _get_level1_level2_user_ids() -> list[str]:
@@ -11703,20 +11773,30 @@ def _get_level1_level2_user_ids() -> list[str]:
         return []
 
 
-async def _run_pending_digest_background():
-    """Run pending digest (checklist, delegation, chores/bug, feature). Used by cron; logs result. Avoids request timeout."""
+async def _run_pending_digest_impl(*, force_resend: bool = False) -> dict:
+    """Run pending digest (checklist, delegation, chores/bug, feature); returns cron-friendly summary."""
     try:
         from app.checklist_utils import get_occurrence_dates
         from app.reminder_utils import get_chores_bugs_stage, get_staging_feature_stage, is_chores_bug_pending, is_feature_pending
         today = date.today()
         level12_ids = _get_level1_level2_user_ids()
         if not level12_ids:
-            _log("Pending digest background: no recipients")
-            return
+            return {
+                "status": "completed",
+                "email_sent": False,
+                "emails_sent": 0,
+                "message": "No recipients — add Admin/Master Admin/Approver users with email.",
+            }
+        if force_resend:
+            try:
+                supabase.table("pending_reminder_sent").delete().eq("reminder_date", today.isoformat()).execute()
+            except Exception as e:
+                _log(f"pending digest force_resend clear: {e}")
         try:
             already_sent_r = supabase.table("pending_reminder_sent").select("user_id").eq("reminder_date", today.isoformat()).execute()
             already_sent = {str(r["user_id"]) for r in (already_sent_r.data or [])}
-        except Exception:
+        except Exception as e:
+            _log(f"pending_reminder_sent missing? Run DELEGATION_AND_PENDING_REMINDER.sql — {e}")
             already_sent = set()
         try:
             users_r = supabase.table("users_view").select("id, email, full_name").execute()
@@ -11840,14 +11920,17 @@ Delegation (pending, due today or overdue):
 Please log in to review and take action.
 """
 
+        pending_ids = [uid for uid in level12_ids if uid not in already_sent]
         sent_count = 0
-        for uid in level12_ids:
-            if uid in already_sent:
-                continue
+        failed: list[dict] = []
+        for uid in pending_ids:
             u = user_map.get(uid, {})
             email = u.get("email", "").strip()
             name = u.get("name", "User")
-            if email and _send_pending_digest_email(email, body, name):
+            if not email:
+                continue
+            ok_send, err = await _send_pending_digest_email(email, body, name)
+            if ok_send:
                 try:
                     supabase.table("pending_reminder_sent").insert({
                         "user_id": uid,
@@ -11856,7 +11939,39 @@ Please log in to review and take action.
                     sent_count += 1
                 except Exception:
                     pass
-        _log(f"Pending digest background: sent {sent_count} for {today.isoformat()}")
+            else:
+                failed.append({"email": email, "error": err or "send failed"})
+        _log(f"Pending digest: sent {sent_count} for {today.isoformat()}")
+        if not pending_ids and sent_count == 0:
+            return {
+                "status": "completed",
+                "email_sent": False,
+                "emails_sent": 0,
+                "reason": "already_sent_today",
+                "message": "No new email — digest already sent today (use ?force=true once to resend).",
+            }
+        if sent_count == 0 and failed:
+            raise HTTPException(
+                status_code=500,
+                detail=failed[0].get("error") or "All pending digest emails failed",
+            )
+        return {
+            "status": "completed",
+            "email_sent": sent_count > 0,
+            "emails_sent": sent_count,
+            "eligible_recipients": len(pending_ids),
+            "message": f"Sent {sent_count} pending digest email(s).",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        _log(f"Pending digest error: {e}")
+        raise HTTPException(status_code=500, detail=str(e)[:500]) from e
+
+
+async def _run_pending_digest_background():
+    try:
+        await _run_pending_digest_impl(force_resend=False)
     except Exception as e:
         _log(f"Pending digest background error: {e}")
 
@@ -11868,31 +11983,23 @@ async def send_pending_digest(
     auth: dict | None = Depends(get_current_user_optional),
 ):
     """
-    Start pending reminder digest in background. Returns immediately to avoid Render timeout.
-    Content: Checklist & Delegation + Support Chores&Bug & Feature by stage. Sent to admin, master_admin, approver.
-    Auth: X-Cron-Secret header or admin login. Result is logged; check server logs for sent count.
+    Pending digest: Checklist & Delegation + Support. Cron: GET/POST + X-Cron-Secret.
+    Returns emails_sent in JSON. ?force=true clears today's sent log for retest.
     """
-    cron_secret = (os.getenv("CHECKLIST_CRON_SECRET") or os.getenv("PENDING_REMINDER_CRON_SECRET") or "").strip()
-    x_cron = (
-        request.headers.get("X-Cron-Secret") or
-        request.headers.get("x-cron-secret") or
-        ""
-    ).strip()
-    if cron_secret and x_cron and x_cron == cron_secret:
-        pass
-    elif auth:
+    force_resend = request.query_params.get("force", "").strip().lower() in ("1", "true", "yes")
+    if _cron_secret_matches(request):
+        return await _run_pending_digest_impl(force_resend=force_resend)
+    if auth:
         role = _get_role_from_profile(auth["id"])
         if role not in ("admin", "master_admin"):
             raise HTTPException(403, "Admin only (or use cron secret)")
     else:
-        raise HTTPException(401, "Set PENDING_REMINDER_CRON_SECRET or CHECKLIST_CRON_SECRET in X-Cron-Secret header, or log in as admin")
-
-    level12_ids = _get_level1_level2_user_ids()
-    if not level12_ids:
-        return {"status": "skipped", "message": "No recipients found. Ensure at least one user has role Admin, Master Admin, or Approver and has an email in the system."}
-
+        raise HTTPException(
+            401,
+            "Set PENDING_REMINDER_CRON_SECRET or FEATURE_APPROVAL_CRON_SECRET in X-Cron-Secret, or log in as admin.",
+        )
     background_tasks.add_task(_run_pending_digest_background)
-    return {"status": "started", "message": "Pending digest job started. Check server logs for result."}
+    return {"status": "started", "message": "Pending digest started. Check server logs."}
 
 
 # ---------------------------------------------------------------------------

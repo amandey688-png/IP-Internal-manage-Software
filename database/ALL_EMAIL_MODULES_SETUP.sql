@@ -6,6 +6,7 @@
 --   1) Approve/Reject email links (approval_tokens)
 --   2) Feature Approval Email Configuration (reminders)
 --   3) Advanced Pending Escalation Email Configuration
+--   4) Checklist / Delegation / Admin pending digest dedup tables
 --
 -- NOT required for production URL fix (PUBLIC_API_URL on Render) or Postmark env.
 -- =============================================================================
@@ -165,6 +166,31 @@ VALUES
   ('stage_4', 'Stage 4 Pending', true)
 ON CONFLICT (configuration_type) DO NOTHING;
 
+-- ---------- 4) CHECKLIST & DELEGATION DAILY REMINDERS ----------
+CREATE TABLE IF NOT EXISTS public.checklist_reminder_sent (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  reminder_date date NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, reminder_date)
+);
+
+CREATE TABLE IF NOT EXISTS public.delegation_reminder_sent (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  reminder_date date NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, reminder_date)
+);
+
+CREATE TABLE IF NOT EXISTS public.pending_reminder_sent (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  reminder_date date NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (user_id, reminder_date)
+);
+
 -- =============================================================================
 -- VERIFICATION (run after — all should return rows / true)
 -- =============================================================================
@@ -190,3 +216,20 @@ ORDER BY configuration_type;
 SELECT id, enabled, hour, minute, timezone
 FROM public.feature_approval_schedule
 WHERE id = 1;
+
+-- Health check: pending feature tickets + enabled recipients
+SELECT COUNT(*) AS pending_feature_tickets
+FROM public.tickets
+WHERE type = 'feature'
+  AND (approval_status IS NULL OR approval_status = '');
+
+SELECT COUNT(*) AS enabled_feature_approval_recipients
+FROM public.feature_approval_email_settings
+WHERE is_enabled = true;
+
+-- Re-test cron today (run manually only when testing)
+-- DELETE FROM public.feature_approval_reminder_dedup WHERE dedup_key LIKE 'daily:%';
+-- DELETE FROM public.escalation_reminder_dedup WHERE dedup_key LIKE '%' AND created_at::date = CURRENT_DATE;
+-- DELETE FROM public.checklist_reminder_sent WHERE reminder_date = CURRENT_DATE;
+-- DELETE FROM public.delegation_reminder_sent WHERE reminder_date = CURRENT_DATE;
+-- DELETE FROM public.pending_reminder_sent WHERE reminder_date = CURRENT_DATE;
