@@ -9,4 +9,3 @@ httpx
 psycopg2-binary
 aiosmtplib
 cachetools
-croniter

@@ -34,6 +34,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 import uuid
 import re
+import html as html_module
 import httpx
 from cachetools import TTLCache
 from app.supabase_client import SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_URL, supabase, supabase_auth
@@ -199,7 +200,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Feature approval reminder routes (cron + settings)
 from app.feature_approval_reminder_routes import feature_approval_reminder_router
-from app.email_scheduler_routes import email_scheduler_router
+from app.cron_email_routes import cron_email_router
 from app.approval_email_pages import approval_public_router
 from app.escalation_email_routes import escalation_email_router
 
@@ -209,8 +210,8 @@ app.include_router(approval_public_router)
 app.include_router(approval_public_router, prefix="/api")
 app.include_router(escalation_email_router)
 app.include_router(escalation_email_router, prefix="/api")
-app.include_router(email_scheduler_router)
-app.include_router(email_scheduler_router, prefix="/api")
+app.include_router(cron_email_router)
+app.include_router(cron_email_router, prefix="/api")
 
 
 @app.on_event("startup")
@@ -10457,23 +10458,71 @@ class CreateChecklistTaskRequest(BaseModel):
     start_date: str  # YYYY-MM-DD
 
 
-def _get_holidays_for_year(year: int) -> set:
+def _parse_iso_date(val: Any) -> date | None:
+    """Parse Supabase date/datetime/string to date; None if invalid."""
+    if val is None:
+        return None
+    if isinstance(val, date) and not isinstance(val, datetime):
+        return val
+    if isinstance(val, datetime):
+        return val.date()
+    if isinstance(val, str):
+        s = val.strip()[:10]
+        if len(s) >= 10:
+            try:
+                return date.fromisoformat(s)
+            except ValueError:
+                return None
+    return None
+
+
+def _get_holidays_for_year(year: int) -> set[date]:
     """Return set of holiday dates for the year from checklist_holidays table."""
+    out: set[date] = set()
     try:
         r = supabase.table("checklist_holidays").select("holiday_date").eq("year", year).execute()
-        if not r.data:
-            return set()
-        return {date.fromisoformat(d["holiday_date"]) if isinstance(d["holiday_date"], str) else d["holiday_date"] for d in r.data}
-    except Exception:
-        return set()
+        for row in r.data or []:
+            d = _parse_iso_date(row.get("holiday_date"))
+            if d:
+                out.add(d)
+    except Exception as e:
+        _log(f"checklist holidays load: {e}")
+    return out
+
+
+def _cron_email_failure_response(
+    *,
+    module: str,
+    failed: list[dict],
+    sent_count: int,
+    pending_users: int,
+    extra: dict | None = None,
+) -> dict:
+    """HTTP 200 with error detail so cron-job.org does not treat Postmark/config issues as crash."""
+    err_msg = (failed[0].get("error") if failed else None) or "No emails sent"
+    body: dict[str, Any] = {
+        "status": "completed",
+        "ok": False,
+        "email_sent": False,
+        "emails_sent": sent_count,
+        "eligible_users": pending_users,
+        "reason": "send_failed",
+        "message": err_msg,
+        "send_errors": failed[:10],
+        "module": module,
+    }
+    if extra:
+        body.update(extra)
+    return body
 
 
 def _get_checklist_occurrence_dates(task: dict, year: int) -> list:
     """Get occurrence dates for a checklist task in given year."""
     from app.checklist_utils import get_occurrence_dates
-    start = task.get("start_date")
-    if isinstance(start, str):
-        start = date.fromisoformat(start)
+
+    start = _parse_iso_date(task.get("start_date"))
+    if not start:
+        return []
     freq = task.get("frequency", "D")
     holidays = _get_holidays_for_year(year)
     is_holiday = lambda d: d in holidays
@@ -11356,14 +11405,15 @@ async def _send_checklist_reminder_email(to_email: str, task_names: list[str], d
 
     from app.utils.email import send_email_detail
 
-    task_items = "".join(f"<li>{n}</li>" for n in task_names)
+    safe_name = html_module.escape(str(doer_name or "User"))
+    task_items = "".join(f"<li>{html_module.escape(str(n))}</li>" for n in task_names)
     html_content = f"""
 <!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"></head>
 <body>
   <h3>You have pending checklist tasks</h3>
-  <p>Hi {doer_name or "User"},</p>
+  <p>Hi {safe_name},</p>
   <p>You have <strong>{len(task_names)}</strong> task(s) due today:</p>
   <ul>
     {task_items}
@@ -11440,26 +11490,32 @@ async def _run_checklist_reminders_impl(*, force_resend: bool = False) -> dict:
         except Exception:
             pass
         by_user: dict[str, list[str]] = {}
+        holidays = _get_holidays_for_year(today.year)
+
+        def is_holiday(d: date) -> bool:
+            return d in holidays
+
         for task in tasks:
-            t_id = task["id"]
-            start = task.get("start_date")
-            if isinstance(start, str):
-                start = date.fromisoformat(start)
+            t_id = task.get("id")
+            if not t_id:
+                continue
+            start = _parse_iso_date(task.get("start_date"))
+            if not start:
+                continue
             doer_id = str(task.get("doer_id", ""))
             if not doer_id or doer_id in already_sent:
                 continue
-            freq = task.get("frequency", "D")
-            holidays = _get_holidays_for_year(today.year)
-
-            def is_holiday(d: date, h: set[date] | None = None) -> bool:
-                return d in (h if h is not None else holidays)
-
-            dates = get_occurrence_dates(start, freq, today.year, is_holiday)
+            freq = task.get("frequency", "D") or "D"
+            try:
+                dates = get_occurrence_dates(start, freq, today.year, is_holiday)
+            except Exception as ex:
+                _log(f"checklist reminder: occurrence dates task={t_id}: {ex}")
+                continue
             for d in dates:
                 if d == today:
                     key = (str(t_id), d.isoformat())
                     if not comp.get(key):
-                        by_user.setdefault(doer_id, []).append(task.get("task_name", ""))
+                        by_user.setdefault(doer_id, []).append(task.get("task_name") or "Task")
                     break
         sent_count = 0
         failed: list[dict] = []
@@ -11488,25 +11544,41 @@ async def _run_checklist_reminders_impl(*, force_resend: bool = False) -> dict:
         if not by_user:
             return {
                 "status": "completed",
+                "ok": True,
                 "email_sent": False,
                 "emails_sent": 0,
+                "reason": "no_tasks_due_today",
                 "message": "No checklist tasks due today for any user.",
             }
         if not pending_users and sent_count == 0:
             return {
                 "status": "completed",
+                "ok": True,
                 "email_sent": False,
                 "emails_sent": 0,
                 "reason": "already_sent_today",
                 "message": "No new email — checklist reminders already sent today (use ?force=true once to resend).",
             }
         if sent_count == 0 and failed:
-            raise HTTPException(
-                status_code=500,
-                detail=failed[0].get("error") or "All checklist reminder emails failed",
+            return _cron_email_failure_response(
+                module="checklist_daily",
+                failed=failed,
+                sent_count=0,
+                pending_users=len(pending_users),
             )
+        if sent_count == 0 and pending_users:
+            return {
+                "status": "completed",
+                "ok": True,
+                "email_sent": False,
+                "emails_sent": 0,
+                "eligible_users": len(pending_users),
+                "reason": "no_recipient_email",
+                "message": "Users have due tasks but no email on file (check user_profiles / auth).",
+            }
         return {
             "status": "completed",
+            "ok": True,
             "email_sent": sent_count > 0,
             "emails_sent": sent_count,
             "eligible_users": len(pending_users),
@@ -11515,8 +11587,18 @@ async def _run_checklist_reminders_impl(*, force_resend: bool = False) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        _log(f"Checklist reminder error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)[:500]) from e
+        _log(f"Checklist reminder error: {e!r}")
+        import traceback
+
+        _log(traceback.format_exc())
+        return {
+            "status": "error",
+            "ok": False,
+            "email_sent": False,
+            "emails_sent": 0,
+            "message": str(e)[:500],
+            "error_type": type(e).__name__,
+        }
 
 
 async def _run_checklist_reminders_background():
@@ -11723,18 +11805,32 @@ async def _run_delegation_reminders_impl(*, force_resend: bool = False) -> dict:
         if not pending_users and sent_count == 0:
             return {
                 "status": "completed",
+                "ok": True,
                 "email_sent": False,
                 "emails_sent": 0,
                 "reason": "already_sent_today",
                 "message": "No new email — delegation reminders already sent today (use ?force=true once to resend).",
             }
         if sent_count == 0 and failed:
-            raise HTTPException(
-                status_code=500,
-                detail=failed[0].get("error") or "All delegation reminder emails failed",
+            return _cron_email_failure_response(
+                module="delegation_daily",
+                failed=failed,
+                sent_count=0,
+                pending_users=len(pending_users),
             )
+        if sent_count == 0 and pending_users:
+            return {
+                "status": "completed",
+                "ok": True,
+                "email_sent": False,
+                "emails_sent": 0,
+                "eligible_users": len(pending_users),
+                "reason": "no_recipient_email",
+                "message": "Assignees have due tasks but no email on file.",
+            }
         return {
             "status": "completed",
+            "ok": True,
             "email_sent": sent_count > 0,
             "emails_sent": sent_count,
             "eligible_users": len(pending_users),
@@ -11743,8 +11839,18 @@ async def _run_delegation_reminders_impl(*, force_resend: bool = False) -> dict:
     except HTTPException:
         raise
     except Exception as e:
-        _log(f"Delegation reminder error: {e}")
-        raise HTTPException(status_code=500, detail=str(e)[:500]) from e
+        _log(f"Delegation reminder error: {e!r}")
+        import traceback
+
+        _log(traceback.format_exc())
+        return {
+            "status": "error",
+            "ok": False,
+            "email_sent": False,
+            "emails_sent": 0,
+            "message": str(e)[:500],
+            "error_type": type(e).__name__,
+        }
 
 
 async def _run_delegation_reminders_background():

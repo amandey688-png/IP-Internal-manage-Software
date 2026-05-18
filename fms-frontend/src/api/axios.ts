@@ -128,9 +128,22 @@ export function resolveFeatureApprovalCronRunUrl(): string {
   return resolveBackendCronUrl("/feature-approval-reminders/run")
 }
 
-/** Single Render Cron URL — runs all due email jobs (feature, checklist, delegation, escalation). */
+/** Single cron-job.org URL — runs all email modules (feature, checklist, delegation, escalation). */
+export function resolveCronRunAllEmailsUrl(): string {
+  return resolveBackendCronUrl("/cron/run-all-emails")
+}
+
+/** @deprecated Use resolveCronRunAllEmailsUrl — /scheduler/tick still works as alias */
 export function resolveSchedulerTickUrl(): string {
-  return resolveBackendCronUrl("/scheduler/tick")
+  return resolveCronRunAllEmailsUrl()
+}
+
+export function resolveChecklistCronUrl(): string {
+  return resolveBackendCronUrl("/checklist/send-daily-reminders")
+}
+
+export function resolveDelegationCronUrl(): string {
+  return resolveBackendCronUrl("/delegation/send-daily-reminders")
 }
 
 export function resolveEscalationPendingCronUrl(): string {

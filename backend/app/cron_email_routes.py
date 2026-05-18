@@ -1,0 +1,83 @@
+"""cron-job.org endpoints — no in-app schedule UI or email_job_schedules table."""
+from __future__ import annotations
+
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.auth_middleware import get_current_user_optional
+from app.cron_email_batch import CRON_JOB_KEYS, run_all_cron_emails
+
+cron_email_router = APIRouter(tags=["cron-email"])
+
+
+def _role(user_id: str) -> str:
+    from app.main import _get_role_from_profile
+
+    return _get_role_from_profile(user_id)
+
+
+def _cron_authorized(request: Request) -> bool:
+    hdr = (request.headers.get("X-Cron-Secret") or request.headers.get("x-cron-secret") or "").strip()
+    auth_hdr = (request.headers.get("Authorization") or request.headers.get("authorization") or "").strip()
+    bearer = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else ""
+    for key in (
+        "FEATURE_APPROVAL_CRON_SECRET",
+        "CHECKLIST_CRON_SECRET",
+        "NOTIFICATION_CRON_SECRET",
+        "ESCALATION_CRON_SECRET",
+        "SCHEDULER_CRON_SECRET",
+    ):
+        secret = (os.getenv(key) or "").strip()
+        if secret and (hdr == secret or bearer == secret):
+            return True
+    return False
+
+
+async def _cron_run_all(
+    request: Request,
+    *,
+    force: bool = False,
+    job: str | None = None,
+    auth: dict | None = None,
+) -> dict:
+    is_cron = _cron_authorized(request)
+    is_admin = bool(auth and _role(auth["id"]) in ("admin", "master_admin"))
+    if not is_cron and not is_admin:
+        raise HTTPException(
+            status_code=401,
+            detail="Use X-Cron-Secret (cron-job.org) or sign in as Admin.",
+        )
+    # Always HTTP 200 for cron so cron-job.org logs show JSON (Postmark/config errors are in body).
+    return await run_all_cron_emails(force=force, job_key=job or None)
+
+
+@cron_email_router.api_route("/cron/run-all-emails", methods=["GET", "POST"])
+async def cron_run_all_emails(
+    request: Request,
+    force: bool = False,
+    job: str | None = None,
+    auth: dict | None = Depends(get_current_user_optional),
+):
+    """
+    cron-job.org: call at the times you want (e.g. daily 8:00 IST).
+    Runs feature approval, checklist, delegation, and escalation batches.
+    Optional: ?job=checklist_daily  ?force=true (admin test).
+    """
+    return await _cron_run_all(request, force=force, job=job, auth=auth)
+
+
+@cron_email_router.api_route("/scheduler/tick", methods=["GET", "POST"])
+async def scheduler_tick_legacy(
+    request: Request,
+    force: bool = False,
+    job: str | None = None,
+    auth: dict | None = Depends(get_current_user_optional),
+):
+    """Legacy URL — same as /cron/run-all-emails (in-app scheduler removed)."""
+    return await _cron_run_all(request, force=force, job=job, auth=auth)
+
+
+@cron_email_router.get("/cron/job-keys")
+def cron_job_keys_list():
+    return {"job_keys": list(CRON_JOB_KEYS)}
