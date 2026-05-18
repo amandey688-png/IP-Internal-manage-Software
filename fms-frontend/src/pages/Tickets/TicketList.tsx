@@ -171,8 +171,8 @@ export const TicketList = () => {
   })
   /** Stage filter: applies to table, Export and Print (filters current result set) */
   const [stageFilter, setStageFilter] = useState<string>('')
-  /** Approval Status view: pending (default) | unapproved | all */
-  const [approvalFilter, setApprovalFilter] = useState<string>('pending')
+  /** Approval Status view: pending | unapproved (Unapprove) | rejected */
+  const [approvalFilter, setApprovalFilter] = useState<string>('unapproved')
   /** Chores & Bugs only: filter by Stage 2 status (pending | completed | staging | hold) */
   const [status2Filter, setStatus2Filter] = useState<string>('')
   /** Register of Tickets: mandatory status filter */
@@ -226,7 +226,7 @@ export const TicketList = () => {
     const urlDateFrom = searchParams.get('date_from') || new URLSearchParams(location.search).get('date_from') || ''
     const urlDateTo = searchParams.get('date_to') || new URLSearchParams(location.search).get('date_to') || ''
     const viewApproval = searchParams.get('view') === 'approval' || s === 'approval-status'
-    if (viewApproval) setApprovalFilter('pending')
+    if (viewApproval) setApprovalFilter('unapproved')
     setFilters((f) => {
       const next = { ...f }
       if (viewApproval) {
@@ -928,8 +928,11 @@ export const TicketList = () => {
             width: 120,
             render: (_: unknown, r: Ticket) => {
               const s = r.approval_status ?? 'Pending'
-              const color = s === 'approved' ? 'green' : s === 'unapproved' ? 'orange' : 'default'
-              return <Tag color={color}>{s}</Tag>
+              const label =
+                s === 'approved' ? 'Approved' : s === 'rejected' ? 'Rejected' : s === 'unapproved' ? 'Unapprove' : 'Pending'
+              const color =
+                s === 'approved' ? 'green' : s === 'rejected' ? 'red' : s === 'unapproved' ? 'orange' : 'default'
+              return <Tag color={color}>{label}</Tag>
             },
           },
           {
@@ -1197,16 +1200,16 @@ export const TicketList = () => {
           {isApprovalSection && (
             <Select
               placeholder="Approval"
-              style={{ width: 140 }}
+              style={{ width: 160 }}
               value={approvalFilter}
               onChange={(v) => {
-                setApprovalFilter(v ?? 'pending')
+                setApprovalFilter(v ?? 'unapproved')
               }}
               getPopupContainer={() => document.body}
               options={[
-                { value: 'pending', label: 'Pending' },
-                { value: 'unapproved', label: 'Unapproved' },
-                { value: 'all', label: 'All' },
+                { value: 'unapproved', label: 'Unapprove' },
+                { value: 'rejected', label: 'Rejected' },
+                { value: 'pending', label: 'Pending approval' },
               ]}
             />
           )}

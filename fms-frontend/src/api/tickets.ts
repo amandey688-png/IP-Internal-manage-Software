@@ -40,7 +40,7 @@ export interface Ticket {
   customer_questions?: string
   why_feature?: string
   attachment_url?: string
-  approval_status?: 'approved' | 'unapproved' | null
+  approval_status?: 'approved' | 'unapproved' | 'rejected' | null
   approval_actual_at?: string
   unapproval_actual_at?: string
   approved_by?: string
@@ -143,7 +143,7 @@ export interface UpdateTicketRequest {
   assignee_id?: string
   resolution_notes?: string
   remarks?: string
-  approval_status?: 'approved' | 'unapproved'
+  approval_status?: 'approved' | 'unapproved' | 'rejected'
   approval_actual_at?: string
   unapproval_actual_at?: string
   status_1?: 'yes' | 'no'

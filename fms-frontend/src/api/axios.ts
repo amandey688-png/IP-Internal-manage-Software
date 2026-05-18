@@ -3,7 +3,9 @@ import { storage } from "../utils/storage"
 import { ROUTES } from "../utils/constants"
 import {
   DEFAULT_LOCAL_BACKEND_ORIGIN,
+  getViteApiBaseFromEnv,
   isHttpLoopbackApiUrl,
+  resolveDefaultLocalBackendUrl,
 } from "../utils/localBackend"
 
 export { getLocalUvicornStartCommand } from "../utils/localBackend"
@@ -98,6 +100,29 @@ function resolveApiBase(): string {
   }
 
   return raw
+}
+
+/**
+ * Absolute URL for external schedulers (cron, CI, PaaS jobs) to POST the feature-approval reminder run.
+ * Uses real backend host from VITE_API_BASE_URL / runtime override — never the Vite dev-server origin (e.g. :3001).
+ */
+export function resolveFeatureApprovalCronRunUrl(): string {
+  const path = "/feature-approval-reminders/run"
+  const runtime =
+    typeof window !== "undefined" && window.__FMS_API_BASE_URL__?.trim()
+      ? window.__FMS_API_BASE_URL__.trim().replace(/\/+$/, "")
+      : ""
+  if (runtime.startsWith("http")) {
+    return `${runtime}${path}`
+  }
+  const vite = getViteApiBaseFromEnv()
+  if (vite.startsWith("http")) {
+    return `${vite.replace(/\/+$/, "")}${path}`
+  }
+  if (import.meta.env.PROD) {
+    return `${PRODUCTION_API_FALLBACK.replace(/\/+$/, "")}${path}`
+  }
+  return `${resolveDefaultLocalBackendUrl().replace(/\/+$/, "")}${path}`
 }
 
 export const API_BASE_URL = resolveApiBase()
@@ -209,7 +234,9 @@ apiClient.interceptors.response.use(
       const isPublicAuthEndpoint =
         reqUrl.includes("/auth/login") ||
         reqUrl.includes("/auth/register") ||
-        reqUrl.includes("/auth/verify-otp")
+        reqUrl.includes("/auth/verify-otp") ||
+        reqUrl.includes("/approval/execute-by-token") ||
+        reqUrl.includes("/approval/email-action")
       if (isPublicAuthEndpoint) {
         return Promise.reject(error)
       }
