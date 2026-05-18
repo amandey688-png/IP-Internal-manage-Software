@@ -310,10 +310,9 @@ export const SettingsPage = () => {
                           <Text strong>POST</Text> <Text code copyable>{cronRunUrl}</Text>
                         </div>
                         <div style={{ marginTop: 8 }}>
-                          Header: <Text code>X-Cron-Secret</Text> — must match <Text code>FEATURE_APPROVAL_CRON_SECRET</Text> in backend{' '}
-                          <Text code>.env</Text> (or <Text code>NOTIFICATION_CRON_SECRET</Text> / <Text code>CHECKLIST_CRON_SECRET</Text> as
-                          fallback). Body optional (e.g. empty <Text code>{'{}'}</Text>). When called with the secret, the API responds immediately
-                          and sending continues in the background.
+                          <Text strong>GET or POST</Text> with header <Text code>X-Cron-Secret</Text> (value must match{' '}
+                          <Text code>FEATURE_APPROVAL_CRON_SECRET</Text> on Render). cron-job.org can use <Text strong>GET</Text>. The API
+                          responds immediately; sending continues in the background.
                         </div>
                       </div>
                     }
