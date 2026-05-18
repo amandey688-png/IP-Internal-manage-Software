@@ -234,9 +234,7 @@ async def retry_route(log_id: str, _auth: dict = Depends(_require_admin)):
 
 
 def _cron_escalation_response(result: dict) -> dict:
-    """Cron-job.org: fail loudly when Postmark/recipients block real sends."""
-    if result.get("ok") is False:
-        raise HTTPException(status_code=500, detail=result.get("error") or "Escalation send failed")
+    """Cron-job.org: HTTP 200 with JSON (Postmark errors in message)."""
     hints = {
         "already_sent_today": "No new email — already sent today (use ?force=true once to resend).",
         "no_recipients": "No email — add enabled receivers in Escalation Settings.",
@@ -245,15 +243,20 @@ def _cron_escalation_response(result: dict) -> dict:
     }
     reason = str(result.get("reason") or "")
     sent = int(result.get("sent_ok") or 0)
+    ok = result.get("ok") is not False
+    msg = hints.get(reason) or (f"Sent {sent} email(s)." if sent else "Completed.")
+    if result.get("ok") is False and result.get("error"):
+        msg = str(result.get("error"))[:500]
     return {
-        "status": "completed",
+        "status": "completed" if ok else "error",
+        "ok": ok,
         "email_sent": sent > 0,
         "emails_sent": sent,
         "pending_tickets": result.get("pending", 0),
         "configuration_type": result.get("configuration_type"),
         "skipped": bool(result.get("skipped")),
         "reason": reason or None,
-        "message": hints.get(reason) or (f"Sent {sent} email(s)." if sent else "Completed."),
+        "message": msg,
     }
 
 
@@ -321,16 +324,18 @@ async def cron_stage_mails(
         results = raw.get("results") or {}
         total_sent = sum(int((results.get(k) or {}).get("sent_ok") or 0) for k in results)
         any_fail = any((results.get(k) or {}).get("ok") is False for k in results)
+        err = None
         if any_fail:
             err = next(
                 (results[k].get("error") for k in results if (results.get(k) or {}).get("ok") is False),
                 "Stage escalation send failed",
             )
-            raise HTTPException(status_code=500, detail=err)
         return {
-            "status": "completed",
+            "status": "error" if any_fail else "completed",
+            "ok": not any_fail,
             "email_sent": total_sent > 0,
             "emails_sent": total_sent,
+            "message": err or (f"Sent {total_sent} email(s)." if total_sent else "Completed."),
             "results": results,
         }
     uid = ctx.get("id")

@@ -174,20 +174,6 @@ def delete_recipient(rid: str) -> None:
 
 
 def get_schedule() -> dict[str, Any]:
-    try:
-        from app.email_scheduler_service import get_schedule as get_job_schedule
-
-        s = get_job_schedule("feature_approval")
-        return {
-            "id": 1,
-            "enabled": s["enabled"],
-            "hour": s["hour"],
-            "minute": s["minute"],
-            "timezone": s["timezone"],
-            "updated_at": s.get("updated_at"),
-        }
-    except Exception:
-        pass
     r = supabase.table("feature_approval_schedule").select("*").eq("id", 1).limit(1).execute()
     row = (r.data or [None])[0]
     if not row:
@@ -203,16 +189,15 @@ def get_schedule() -> dict[str, Any]:
 
 
 def upsert_schedule(*, enabled: bool, hour: int, minute: int, timezone_name: str) -> dict[str, Any]:
-    from app.email_scheduler_service import upsert_schedule as upsert_job_schedule
-
-    upsert_job_schedule(
-        "feature_approval",
-        enabled=enabled,
-        hour=hour,
-        minute=minute,
-        timezone=timezone_name,
-        schedule_type="daily",
-    )
+    row = {
+        "id": 1,
+        "enabled": enabled,
+        "hour": hour,
+        "minute": minute,
+        "timezone": timezone_name,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    supabase.table("feature_approval_schedule").upsert(row, on_conflict="id").execute()
     return get_schedule()
 
 

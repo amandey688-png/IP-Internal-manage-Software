@@ -224,9 +224,7 @@ def _queue_reminder_batch(background_tasks: BackgroundTasks, *, force: bool) -> 
 
 
 def _cron_run_response(result: dict) -> dict:
-    """Cron-job.org: HTTP 200 must include whether an email was actually sent."""
-    if result.get("ok") is False:
-        raise HTTPException(status_code=500, detail=result.get("error") or "Reminder send failed")
+    """Cron-job.org: HTTP 200 with JSON body (errors in message, not bare 500)."""
     hints = {
         "already_sent_today": "No new email — already sent today (use ?force=true once to resend).",
         "no_pending_tickets": "No email — no feature tickets pending approval.",
@@ -235,14 +233,19 @@ def _cron_run_response(result: dict) -> dict:
     }
     reason = str(result.get("reason") or "")
     sent = int(result.get("sent_ok") or 0)
+    ok = result.get("ok") is not False
+    msg = hints.get(reason) or (f"Sent {sent} email(s)." if sent else "Completed.")
+    if result.get("ok") is False and result.get("error"):
+        msg = str(result.get("error"))[:500]
     return {
-        "status": "completed",
+        "status": "completed" if ok else "error",
+        "ok": ok,
         "email_sent": sent > 0,
         "emails_sent": sent,
         "pending_tickets": result.get("pending") or result.get("pending_count") or 0,
         "skipped": bool(result.get("skipped")),
         "reason": reason or None,
-        "message": hints.get(reason) or (f"Sent {sent} email(s)." if sent else "Completed."),
+        "message": msg,
     }
 
 
