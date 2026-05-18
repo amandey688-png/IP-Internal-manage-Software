@@ -90,6 +90,50 @@ def feature_approval_reminders_ping():
     return {"ok": True, "routes": "feature-approval-reminders-v1"}
 
 
+@feature_approval_reminder_router.get("/email/cron-delivery-check")
+def cron_email_delivery_check(request: Request):
+    """
+    Cron/auth: GET + X-Cron-Secret — verify Postmark env without sending mail.
+    """
+    if not _cron_or_admin_for_check(request):
+        raise HTTPException(
+            status_code=401,
+            detail="Set FEATURE_APPROVAL_CRON_SECRET in X-Cron-Secret header.",
+        )
+    from app.utils.email import get_email_delivery_status
+
+    st = get_email_delivery_status()
+    rec_count = 0
+    try:
+        rec_count = len([r for r in list_recipients() if r.get("is_enabled")])
+    except Exception:
+        pass
+    return {
+        "ok": bool(st.get("api_token_configured") and st.get("from_email")),
+        "email_delivery": st,
+        "feature_approval_enabled_recipients": rec_count,
+        "fix_checklist": [
+            "Render: POSTMARK_SERVER_TOKEN = Server API Token (not PM-T- SMTP token only)",
+            "Render: POSTMARK_FROM_EMAIL = verified sender in Postmark",
+            "Settings: add Feature Approval recipients",
+            "Settings: add Escalation receivers per configuration",
+        ],
+    }
+
+
+def _cron_or_admin_for_check(request: Request) -> bool:
+    secret = (
+        os.getenv("FEATURE_APPROVAL_CRON_SECRET")
+        or os.getenv("NOTIFICATION_CRON_SECRET")
+        or os.getenv("CHECKLIST_CRON_SECRET")
+        or os.getenv("ESCALATION_CRON_SECRET")
+        or ""
+    ).strip()
+    hdr = (request.headers.get("X-Cron-Secret") or request.headers.get("x-cron-secret") or "").strip()
+    bearer = _extract_bearer(request)
+    return bool(secret and (hdr == secret or bearer == secret))
+
+
 @feature_approval_reminder_router.get("/feature-approval-reminders/recipients")
 def get_recipients(_auth: dict = Depends(_require_admin)):
     try:
@@ -195,7 +239,7 @@ def _cron_run_response(result: dict) -> dict:
         "status": "completed",
         "email_sent": sent > 0,
         "emails_sent": sent,
-        "pending_tickets": result.get("pending", 0),
+        "pending_tickets": result.get("pending") or result.get("pending_count") or 0,
         "skipped": bool(result.get("skipped")),
         "reason": reason or None,
         "message": hints.get(reason) or (f"Sent {sent} email(s)." if sent else "Completed."),

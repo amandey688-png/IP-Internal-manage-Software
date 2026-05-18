@@ -40,11 +40,27 @@ def _env_strip(key: str) -> str:
 
 
 def _postmark_token() -> str:
+    """Any configured Postmark secret (SMTP or API)."""
     return (
-        _env_strip("POSTMARK_SMTP_TOKEN")
-        or _env_strip("POSTMARK_SERVER_TOKEN")
+        _env_strip("POSTMARK_SERVER_TOKEN")
         or _env_strip("POSTMARK_API_TOKEN")
+        or _env_strip("POSTMARK_SMTP_TOKEN")
     )
+
+
+def _postmark_api_token() -> str:
+    """
+    Postmark REST API requires the Server API Token (UUID), not the PM-T- SMTP token.
+    Prefer POSTMARK_SERVER_TOKEN / POSTMARK_API_TOKEN over POSTMARK_SMTP_TOKEN.
+    """
+    for key in ("POSTMARK_SERVER_TOKEN", "POSTMARK_API_TOKEN"):
+        t = _env_strip(key)
+        if t and not t.startswith("PM-T-"):
+            return t
+    t = _postmark_token()
+    if t.startswith("PM-T-"):
+        return ""
+    return t
 
 
 def _postmark_stream_env() -> str:
@@ -66,7 +82,7 @@ def _api_message_stream(stream_env: str) -> str | None:
 
 
 def _resolve_smtp_config() -> dict[str, Any]:
-    postmark_token = _postmark_token()
+    postmark_token = _postmark_api_token() or _postmark_token()
     postmark_user = _postmark_stream_env()
     smtp_user = _env_strip("SMTP_USER")
     smtp_pass = _env_strip("SMTP_PASSWORD") or _env_strip("SMTP_PASS")
@@ -156,16 +172,29 @@ def get_email_delivery_status() -> dict[str, Any]:
         transport = "postmark_api+smtp"
     elif cfg["configured"]:
         transport = "smtp"
+    api_tok = _postmark_api_token()
+    smtp_tok = _env_strip("POSTMARK_SMTP_TOKEN")
+    hint: str | None = None
+    if smtp_tok.startswith("PM-T-") and not api_tok:
+        hint = (
+            "Only PM-T- SMTP token found. Set POSTMARK_SERVER_TOKEN to the Server API Token "
+            "(Postmark → Servers → your server → API Tokens)."
+        )
+    elif not api_tok and not smtp_tok:
+        hint = "Set POSTMARK_SERVER_TOKEN and POSTMARK_FROM_EMAIL on Render."
     return {
         "mode": mode,
         "transport": transport,
         "credentials_loaded": bool(cfg.get("postmark_token") or cfg.get("password")),
+        "api_token_configured": bool(api_tok),
+        "smtp_token_only": bool(smtp_tok.startswith("PM-T-") and not api_tok),
         "from_email": cfg.get("from_email") or None,
         "smtp_host": cfg.get("host") or None,
         "smtp_ports": list(POSTMARK_PORTS) if cfg.get("use_postmark") else [cfg.get("port")],
         "message_stream": cfg.get("message_stream"),
         "test_redirect": bool(_env_strip("EMAIL_TEST_REDIRECT")),
         "httpx_available": bool(httpx),
+        "hint": hint,
     }
 
 
@@ -211,7 +240,14 @@ async def _postmark_api_send(
     token = (cfg.get("postmark_token") or cfg.get("password") or "").strip()
     from_email = (cfg.get("from_email") or "").strip()
     if not token:
-        return False, "Postmark server token missing"
+        smtp_only = _env_strip("POSTMARK_SMTP_TOKEN").startswith("PM-T-")
+        if smtp_only:
+            return (
+                False,
+                "Postmark Server API Token missing. In Render set POSTMARK_SERVER_TOKEN "
+                "(from Postmark → Server → API Tokens). PM-T- SMTP tokens do not work with the HTTP API.",
+            )
+        return False, "Postmark server token missing (set POSTMARK_SERVER_TOKEN on Render)"
     if not from_email:
         return False, "From email missing (set SMTP_FROM_EMAIL or POSTMARK_FROM_EMAIL)"
     if not httpx:
@@ -249,6 +285,11 @@ async def _postmark_api_send(
         except Exception:
             pass
         msg = f"Postmark API HTTP {resp.status_code}: {err_body}"
+        if resp.status_code == 401:
+            msg += (
+                " — Use POSTMARK_SERVER_TOKEN (Server API Token from Postmark dashboard), "
+                "not an expired/wrong key. Verify the sender in POSTMARK_FROM_EMAIL is confirmed in Postmark."
+            )
         _log(msg)
         return False, msg
     except Exception as e:
