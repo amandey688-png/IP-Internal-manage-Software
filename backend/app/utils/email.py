@@ -146,7 +146,8 @@ def _resolve_smtp_config() -> dict[str, Any]:
         "port": port,
         "username": username,
         "password": password or postmark_token,
-        "postmark_token": postmark_token or password,
+        "postmark_token": postmark_token,
+        "smtp_password": smtp_password if (smtp_password or "").startswith("PM-T-") else "",
         "from_email": from_email,
         "use_postmark": use_postmark,
         "message_stream": message_stream,
@@ -176,8 +177,10 @@ def get_email_delivery_status() -> dict[str, Any]:
     transport = "none"
     if mode == "log":
         transport = "log"
-    elif cfg.get("use_postmark") and cfg.get("postmark_token"):
+    elif cfg.get("use_postmark") and _postmark_api_token():
         transport = "postmark_api+smtp"
+    elif cfg.get("use_postmark") and (cfg.get("username") or "").startswith("PM-T-"):
+        transport = "postmark_smtp"
     elif cfg["configured"]:
         transport = "smtp"
     api_tok = _postmark_api_token()
@@ -233,22 +236,25 @@ def _on_render_host() -> bool:
 
 
 def _should_try_postmark_smtp_first(cfg: dict[str, Any]) -> bool:
-    """Local .env often has PM-T username + server token; SMTP works when HTTP API token is stale."""
+    """Use SMTP when only PM-T credentials exist, or no valid Server API token."""
+    user = (cfg.get("username") or "").strip()
+    if not user.startswith("PM-T-") or not cfg.get("password"):
+        return False
+    if not _postmark_api_token():
+        return True
     if _on_render_host():
         return False
-    return (cfg.get("username") or "").startswith("PM-T-") and bool(cfg.get("password"))
+    return True
 
 
 def _allow_postmark_smtp_fallback(err: str | None, cfg: dict[str, Any]) -> bool:
     if _env_strip("EMAIL_SMTP_FALLBACK").lower() in ("1", "true", "yes"):
         return True
-    if _on_render_host():
-        return False
     err_l = (err or "").lower()
-    if "401" not in err_l and "invalid server token" not in err_l:
+    if not any(x in err_l for x in ("401", "invalid server token", "unauthorized", "422")):
         return False
     user = (cfg.get("username") or "").strip()
-    return user.startswith("PM-T-") and bool(cfg.get("password") or cfg.get("postmark_token"))
+    return user.startswith("PM-T-") and bool(cfg.get("password") or cfg.get("smtp_password"))
 
 
 def _prefer_smtp_over_sendgrid() -> bool:
@@ -440,9 +446,10 @@ async def send_email_detail(
             return True, None
         _log(f"Postmark SMTP (local first) failed: {err}")
 
-    # Postmark HTTP API first on Render/production
-    if cfg.get("use_postmark") and cfg.get("postmark_token"):
-        ok, err = await _postmark_api_send(to_email, subject, html_content, plain, cfg)
+    api_tok = _postmark_api_token()
+    if cfg.get("use_postmark") and api_tok:
+        api_cfg = {**cfg, "postmark_token": api_tok}
+        ok, err = await _postmark_api_send(to_email, subject, html_content, plain, api_cfg)
         if ok:
             return True, None
         _last_email_error = err
