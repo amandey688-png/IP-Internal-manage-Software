@@ -168,6 +168,12 @@ PAYMENT_AGEING_ALLOWED_COMPANY_NAMES: tuple[str, ...] = (
     "Dhanbad Fuels Ltd.",
     "Hitech Plastochem Udyog Pvt. Ltd.",
     "Rausheena Udyog Limited",
+    # Invoice master (also on Add Invoice dropdown) — keep ageing in sync
+    "Balmukund Cement & Roofing (P) Ltd.",
+    "Ferro Metals",
+    "Kedia Carbon Pvt. Ltd.",
+    "Super Iron Foundry",
+    "Utkal Hydrocarbon Pvt. Ltd.",
 )
 
 PAYMENT_AGEING_ALLOWED_COMPANY_KEYS: frozenset[str] = frozenset(

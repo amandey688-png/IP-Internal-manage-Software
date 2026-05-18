@@ -293,7 +293,9 @@ export function ClientPaymentPage() {
     if ((!modalOpen && !editInvoiceModalOpen) || companies.length > 0) return
     setCompaniesLoading(true)
     apiClient
-      .get<{ id: string; name: string }[] | { data?: { id: string; name: string }[]; items?: { id: string; name: string }[] }>('/companies')
+      .get<{ id: string; name: string }[] | { data?: { id: string; name: string }[]; items?: { id: string; name: string }[] }>(
+        '/companies/for-invoice',
+      )
       .then((r) => r.data)
       .then((companiesList) => {
         const rows = Array.isArray(companiesList)
@@ -303,7 +305,7 @@ export function ClientPaymentPage() {
             : Array.isArray(companiesList?.items)
               ? companiesList.items
               : []
-        setCompanies((rows || []).filter((c: { id?: string; name?: string }) => c && c.id && c.name))
+        setCompanies((rows || []).filter((c: { id?: string; name?: string }) => c && c.name))
       })
       .catch(() => setCompanies([]))
       .finally(() => setCompaniesLoading(false))
