@@ -233,7 +233,7 @@ async def retry_route(log_id: str, _auth: dict = Depends(_require_admin)):
 # --- Cron endpoints (external scheduler) ---
 
 
-@escalation_email_router.post("/escalation/send-pending-mails")
+@escalation_email_router.api_route("/escalation/send-pending-mails", methods=["GET", "POST"])
 async def cron_pending_mails(
     background_tasks: BackgroundTasks,
     request: Request,
@@ -265,7 +265,7 @@ async def cron_pending_mails(
     )
 
 
-@escalation_email_router.post("/escalation/send-critical-mails")
+@escalation_email_router.api_route("/escalation/send-critical-mails", methods=["GET", "POST"])
 async def cron_critical_mails(
     background_tasks: BackgroundTasks,
     request: Request,
@@ -297,7 +297,7 @@ async def cron_critical_mails(
     )
 
 
-@escalation_email_router.post("/escalation/send-stage-mails")
+@escalation_email_router.api_route("/escalation/send-stage-mails", methods=["GET", "POST"])
 async def cron_stage_mails(
     background_tasks: BackgroundTasks,
     request: Request,

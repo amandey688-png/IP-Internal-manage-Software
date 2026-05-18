@@ -34,6 +34,13 @@ def _require_admin(auth: dict = Depends(get_current_user)) -> dict:
     return auth
 
 
+def _extract_bearer(request: Request) -> str:
+    auth_hdr = (request.headers.get("Authorization") or request.headers.get("authorization") or "").strip()
+    if auth_hdr.lower().startswith("bearer "):
+        return auth_hdr[7:].strip()
+    return ""
+
+
 def _cron_or_admin(request: Request, auth: dict | None = Depends(get_current_user_optional)) -> dict:
     secret = (
         os.getenv("FEATURE_APPROVAL_CRON_SECRET")
@@ -42,13 +49,14 @@ def _cron_or_admin(request: Request, auth: dict | None = Depends(get_current_use
         or ""
     ).strip()
     hdr = (request.headers.get("X-Cron-Secret") or request.headers.get("x-cron-secret") or "").strip()
-    if secret and hdr == secret:
+    bearer = _extract_bearer(request)
+    if secret and (hdr == secret or bearer == secret):
         return {"cron": True}
     if auth and _role(auth["id"]) in ("admin", "master_admin"):
         return auth
     raise HTTPException(
         status_code=401,
-        detail="Set FEATURE_APPROVAL_CRON_SECRET and X-Cron-Secret header, or sign in as Admin.",
+        detail="Set FEATURE_APPROVAL_CRON_SECRET with X-Cron-Secret or Authorization Bearer, or sign in as Admin.",
     )
 
 
@@ -171,24 +179,39 @@ def _queue_reminder_batch(background_tasks: BackgroundTasks, *, force: bool) -> 
     }
 
 
-@feature_approval_reminder_router.post("/feature-approval-reminders/run")
-async def run_reminder(
+async def _run_reminder_core(
     background_tasks: BackgroundTasks,
-    _ctx: dict = Depends(_cron_or_admin),
-    body: RunBody | None = Body(None),
-    sync: bool = False,
-):
-    """
-    Cron + admin force-send run in background (avoids HTTP timeout on Render).
-    Add ?sync=true to wait for full JSON result (local debugging).
-    """
-
-    force_flag = bool(body.force) if body else False
-
+    _ctx: dict,
+    *,
+    force_flag: bool,
+    sync: bool,
+) -> dict:
     if sync and not _ctx.get("cron"):
         result = await run_feature_approval_reminder_batch(force=force_flag)
         if result.get("ok") is False:
             raise HTTPException(status_code=500, detail=result.get("error") or "Run failed")
         return result
-
     return _queue_reminder_batch(background_tasks, force=force_flag)
+
+
+@feature_approval_reminder_router.get("/feature-approval-reminders/run")
+async def run_reminder_get(
+    background_tasks: BackgroundTasks,
+    _ctx: dict = Depends(_cron_or_admin),
+    force: bool = False,
+    sync: bool = False,
+):
+    """cron-job.org default: GET + X-Cron-Secret header."""
+    return await _run_reminder_core(background_tasks, _ctx, force_flag=force, sync=sync)
+
+
+@feature_approval_reminder_router.post("/feature-approval-reminders/run")
+async def run_reminder_post(
+    background_tasks: BackgroundTasks,
+    _ctx: dict = Depends(_cron_or_admin),
+    body: RunBody | None = Body(None),
+    sync: bool = False,
+):
+    """POST with optional JSON { "force": true }."""
+    force_flag = bool(body.force) if body else False
+    return await _run_reminder_core(background_tasks, _ctx, force_flag=force_flag, sync=sync)
