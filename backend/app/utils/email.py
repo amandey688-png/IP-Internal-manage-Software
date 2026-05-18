@@ -36,7 +36,14 @@ def _log(msg: str) -> None:
 
 
 def _env_strip(key: str) -> str:
-    return (os.getenv(key) or "").strip()
+    raw = (os.getenv(key) or "").strip()
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in "\"'":
+        raw = raw[1:-1].strip()
+    return raw
+
+
+def _clean_token(value: str) -> str:
+    return (value or "").strip()
 
 
 def _postmark_token() -> str:
@@ -50,17 +57,14 @@ def _postmark_token() -> str:
 
 def _postmark_api_token() -> str:
     """
-    Postmark REST API requires the Server API Token (UUID), not the PM-T- SMTP token.
-    Prefer POSTMARK_SERVER_TOKEN / POSTMARK_API_TOKEN over POSTMARK_SMTP_TOKEN.
+    Postmark REST API requires the Server API Token, not the PM-T- SMTP username.
+  Checks POSTMARK_SERVER_TOKEN, POSTMARK_API_TOKEN, then POSTMARK_SMTP_TOKEN.
     """
-    for key in ("POSTMARK_SERVER_TOKEN", "POSTMARK_API_TOKEN"):
-        t = _env_strip(key)
+    for key in ("POSTMARK_SERVER_TOKEN", "POSTMARK_API_TOKEN", "POSTMARK_SMTP_TOKEN"):
+        t = _clean_token(_env_strip(key))
         if t and not t.startswith("PM-T-"):
             return t
-    t = _postmark_token()
-    if t.startswith("PM-T-"):
-        return ""
-    return t
+    return ""
 
 
 def _postmark_stream_env() -> str:
@@ -82,8 +86,9 @@ def _api_message_stream(stream_env: str) -> str | None:
 
 
 def _resolve_smtp_config() -> dict[str, Any]:
-    postmark_token = _postmark_api_token() or _postmark_token()
+    postmark_token = _postmark_api_token()
     postmark_user = _postmark_stream_env()
+    smtp_password = _clean_token(_env_strip("POSTMARK_SMTP_TOKEN"))
     smtp_user = _env_strip("SMTP_USER")
     smtp_pass = _env_strip("SMTP_PASSWORD") or _env_strip("SMTP_PASS")
     smtp_host = _env_strip("SMTP_HOST")
@@ -104,12 +109,15 @@ def _resolve_smtp_config() -> dict[str, Any]:
     )
 
     if use_postmark:
-        if postmark_user and postmark_token:
-            username, password = postmark_user, postmark_token
+        if postmark_user and (postmark_token or smtp_password):
+            username = postmark_user
+            password = postmark_token or smtp_password
         elif postmark_token:
             username = password = postmark_token
+        elif smtp_password and smtp_password.startswith("PM-T-"):
+            username = password = smtp_password
         else:
-            username, password = postmark_user, postmark_token or smtp_pass
+            username, password = postmark_user, postmark_token or smtp_password or smtp_pass
         host = _env_strip("POSTMARK_SMTP_HOST") or smtp_host or "smtp.postmarkapp.com"
         port_raw = _env_strip("POSTMARK_SMTP_PORT") or _env_strip("SMTP_PORT") or "587"
         from_email = (
@@ -138,7 +146,7 @@ def _resolve_smtp_config() -> dict[str, Any]:
         "port": port,
         "username": username,
         "password": password or postmark_token,
-        "postmark_token": password or postmark_token,
+        "postmark_token": postmark_token or password,
         "from_email": from_email,
         "use_postmark": use_postmark,
         "message_stream": message_stream,
@@ -218,6 +226,29 @@ def resolve_recipient(to_email: str, subject: str) -> tuple[str, str]:
     if redirect and redirect.lower() != to_email.lower():
         return redirect, f"[TEST redirect] {subject}"
     return to_email, subject
+
+
+def _on_render_host() -> bool:
+    return bool(_env_strip("RENDER") or _env_strip("RENDER_EXTERNAL_URL"))
+
+
+def _should_try_postmark_smtp_first(cfg: dict[str, Any]) -> bool:
+    """Local .env often has PM-T username + server token; SMTP works when HTTP API token is stale."""
+    if _on_render_host():
+        return False
+    return (cfg.get("username") or "").startswith("PM-T-") and bool(cfg.get("password"))
+
+
+def _allow_postmark_smtp_fallback(err: str | None, cfg: dict[str, Any]) -> bool:
+    if _env_strip("EMAIL_SMTP_FALLBACK").lower() in ("1", "true", "yes"):
+        return True
+    if _on_render_host():
+        return False
+    err_l = (err or "").lower()
+    if "401" not in err_l and "invalid server token" not in err_l:
+        return False
+    user = (cfg.get("username") or "").strip()
+    return user.startswith("PM-T-") and bool(cfg.get("password") or cfg.get("postmark_token"))
 
 
 def _prefer_smtp_over_sendgrid() -> bool:
@@ -337,6 +368,33 @@ async def send_email(to_email: str, subject: str, html_content: str, plain_fallb
     return ok
 
 
+def _build_email_message(
+    cfg: dict[str, Any], to_email: str, subject: str, plain: str, html_content: str
+):
+    from email.message import EmailMessage
+
+    message = EmailMessage()
+    message["From"] = cfg["from_email"]
+    message["To"] = to_email
+    message["Subject"] = subject
+    message.set_content(plain)
+    message.add_alternative(html_content, subtype="html")
+    return message
+
+
+async def _try_smtp_send_message(
+    cfg: dict[str, Any], to_email: str, subject: str, plain: str, html_content: str
+) -> tuple[bool, str | None]:
+    if not cfg.get("host") or not cfg.get("username"):
+        return False, "SMTP host/username not configured"
+    try:
+        message = _build_email_message(cfg, to_email, subject, plain, html_content)
+        await _smtp_send(message, cfg)
+        return True, None
+    except Exception as e:
+        return False, f"SMTP error ({cfg.get('host')}): {e}"
+
+
 async def send_email_detail(
     to_email: str,
     subject: str,
@@ -374,17 +432,24 @@ async def send_email_detail(
         _log(_last_email_error)
         return False, _last_email_error
 
-    # Postmark HTTP API first (recommended for Render/production)
+    # Local dev: PM-T SMTP auth often works when Server API token in .env is expired/revoked
+    if cfg.get("use_postmark") and _should_try_postmark_smtp_first(cfg):
+        ok, err = await _try_smtp_send_message(cfg, to_email, subject, plain, html_content)
+        if ok:
+            _log(f"Postmark SMTP OK (local) -> {to_email}")
+            return True, None
+        _log(f"Postmark SMTP (local first) failed: {err}")
+
+    # Postmark HTTP API first on Render/production
     if cfg.get("use_postmark") and cfg.get("postmark_token"):
         ok, err = await _postmark_api_send(to_email, subject, html_content, plain, cfg)
         if ok:
             return True, None
         _last_email_error = err
-        allow_smtp = _env_strip("EMAIL_SMTP_FALLBACK").lower() in ("1", "true", "yes")
-        if not allow_smtp:
+        if not _allow_postmark_smtp_fallback(err, cfg):
             _log(f"Postmark API failed (SMTP fallback disabled): {err}")
             return False, err
-        _log(f"Postmark API failed, trying SMTP fallback: {err}")
+        _log(f"Postmark API failed, trying Postmark SMTP fallback: {err}")
 
     if not _prefer_smtp_over_sendgrid():
         sg_key = _env_strip("SENDGRID_API_KEY")
@@ -415,25 +480,12 @@ async def send_email_detail(
                 _last_email_error = f"SendGrid error: {e}"
                 _log(_last_email_error)
 
-    if not cfg.get("host") or not cfg.get("username"):
-        return False, _last_email_error or "SMTP not available after API failure"
-
-    from email.message import EmailMessage
-
-    message = EmailMessage()
-    message["From"] = cfg["from_email"]
-    message["To"] = to_email
-    message["Subject"] = subject
-    message.set_content(plain)
-    message.add_alternative(html_content, subtype="html")
-
-    try:
-        await _smtp_send(message, cfg)
+    ok, err = await _try_smtp_send_message(cfg, to_email, subject, plain, html_content)
+    if ok:
         return True, None
-    except Exception as e:
-        api_hint = _last_email_error or ""
-        _last_email_error = f"SMTP error ({cfg['host']}): {e}"
-        if api_hint:
-            _last_email_error = f"{api_hint} | {_last_email_error}"
-        _log(_last_email_error)
-        return False, _last_email_error
+    api_hint = _last_email_error or ""
+    _last_email_error = err or "SMTP send failed"
+    if api_hint:
+        _last_email_error = f"{api_hint} | {_last_email_error}"
+    _log(_last_email_error)
+    return False, _last_email_error
