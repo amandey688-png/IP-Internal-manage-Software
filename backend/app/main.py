@@ -199,6 +199,7 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Feature approval reminder routes (cron + settings)
 from app.feature_approval_reminder_routes import feature_approval_reminder_router
+from app.email_scheduler_routes import email_scheduler_router
 from app.approval_email_pages import approval_public_router
 from app.escalation_email_routes import escalation_email_router
 
@@ -208,6 +209,8 @@ app.include_router(approval_public_router)
 app.include_router(approval_public_router, prefix="/api")
 app.include_router(escalation_email_router)
 app.include_router(escalation_email_router, prefix="/api")
+app.include_router(email_scheduler_router)
+app.include_router(email_scheduler_router, prefix="/api")
 
 
 @app.on_event("startup")
@@ -4678,6 +4681,23 @@ def list_companies(
         return _etag_json(payload)
 
 
+@api_router.get("/companies/for-invoice")
+@cached(ttl=60, key_prefix="companies:invoice:")
+def list_invoice_companies(auth: dict = Depends(get_current_user)):
+    """Companies allowed in Add / Edit Invoice (canonical master list, ordered)."""
+    from app import invoice_companies as ic
+
+    try:
+        r = supabase.table("companies").select("id, name").order("name").execute()
+        rows = r.data or []
+    except Exception as e:
+        _log(f"companies/for-invoice: {e}")
+        rows = []
+    data = ic.build_invoice_company_options(rows)
+    payload = {"data": data, "total": len(data)}
+    return _etag_json(payload)
+
+
 @api_router.get("/pages")
 @cached(ttl=30, key_prefix="pages:")
 def list_pages(
@@ -6388,9 +6408,24 @@ def post_payment_ageing_summary_upload(payload: dict, auth: dict = Depends(get_c
 @api_router.post("/onboarding/client-payment")
 def create_client_payment(payload: dict, auth: dict = Depends(get_current_user)):
     """Create a client payment 'Raised Invoice' entry."""
+    from app import invoice_companies as ic
+
     company_name = (payload.get("company_name") or "").strip()
     if not company_name:
         raise HTTPException(400, "company_name is required")
+    try:
+        cr = supabase.table("companies").select("id, name").execute()
+        company_rows = cr.data or []
+    except Exception:
+        company_rows = []
+    resolved = ic.resolve_invoice_company_name(company_name, company_rows)
+    if not resolved:
+        raise HTTPException(
+            400,
+            "company_name must be one of the allowed invoice clients. "
+            "Run database/INVOICE_COMPANY_MASTER.sql in Supabase if the list was recently updated.",
+        )
+    company_name = resolved
     invoice_date = payload.get("invoice_date")
     invoice_amount = (payload.get("invoice_amount") or "").strip()
     invoice_number = (payload.get("invoice_number") or "").strip()
@@ -6514,9 +6549,20 @@ def update_client_payment(client_payment_id: str, payload: dict, auth: dict = De
                 f"Edit window expired: company / invoice fields can only be changed within {_CLIENT_PAYMENT_RESPONSE_EDIT_DAYS} days of creation (Timestamp)",
             )
 
+        from app import invoice_companies as ic
+
         company_name = (payload.get("company_name") or "").strip()
         if not company_name:
             raise HTTPException(400, "company_name is required")
+        try:
+            cr = supabase.table("companies").select("id, name").execute()
+            company_rows = cr.data or []
+        except Exception:
+            company_rows = []
+        resolved = ic.resolve_invoice_company_name(company_name, company_rows)
+        if not resolved:
+            raise HTTPException(400, "company_name must be one of the allowed invoice clients")
+        company_name = resolved
         invoice_date = payload.get("invoice_date")
         invoice_amount = (payload.get("invoice_amount") or "").strip()
         invoice_number = (payload.get("invoice_number") or "").strip()

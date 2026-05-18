@@ -7,6 +7,7 @@
 --   2) Feature Approval Email Configuration (reminders)
 --   3) Advanced Pending Escalation Email Configuration
 --   4) Checklist / Delegation / Admin pending digest dedup tables
+--   5) In-app schedules (Render Cron → /scheduler/tick)
 --
 -- NOT required for production URL fix (PUBLIC_API_URL on Render) or Postmark env.
 -- =============================================================================
@@ -190,6 +191,52 @@ CREATE TABLE IF NOT EXISTS public.pending_reminder_sent (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (user_id, reminder_date)
 );
+
+-- ---------- 5) EMAIL JOB SCHEDULES (cron-style UI + Render Cron /scheduler/tick) ----------
+CREATE TABLE IF NOT EXISTS public.email_job_schedules (
+  job_key text PRIMARY KEY,
+  label text NOT NULL DEFAULT '',
+  enabled boolean NOT NULL DEFAULT true,
+  hour int NOT NULL DEFAULT 8 CHECK (hour >= 0 AND hour <= 23),
+  minute int NOT NULL DEFAULT 0 CHECK (minute >= 0 AND minute <= 59),
+  timezone text NOT NULL DEFAULT 'Asia/Kolkata',
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+-- Upgrade existing tables (safe if you already ran an older version of this script)
+ALTER TABLE public.email_job_schedules
+  ADD COLUMN IF NOT EXISTS schedule_type text NOT NULL DEFAULT 'daily';
+ALTER TABLE public.email_job_schedules
+  ADD COLUMN IF NOT EXISTS interval_minutes int;
+ALTER TABLE public.email_job_schedules
+  ADD COLUMN IF NOT EXISTS day_of_month int DEFAULT 1;
+ALTER TABLE public.email_job_schedules
+  ADD COLUMN IF NOT EXISTS month int DEFAULT 1;
+ALTER TABLE public.email_job_schedules
+  ADD COLUMN IF NOT EXISTS cron_expression text;
+
+ALTER TABLE public.email_job_schedules
+  DROP CONSTRAINT IF EXISTS email_job_schedules_type_chk;
+ALTER TABLE public.email_job_schedules
+  ADD CONSTRAINT email_job_schedules_type_chk CHECK (
+    schedule_type IN ('every_minutes', 'daily', 'monthly', 'yearly', 'custom')
+  );
+
+UPDATE public.email_job_schedules
+SET schedule_type = COALESCE(NULLIF(schedule_type, ''), 'daily')
+WHERE schedule_type IS NULL OR schedule_type = '';
+
+INSERT INTO public.email_job_schedules (
+  job_key, label, enabled, schedule_type, hour, minute, timezone, cron_expression
+)
+VALUES
+  ('feature_approval', 'Feature Approval Reminder', true, 'daily', 8, 7, 'Asia/Kolkata', '7 8 * * *'),
+  ('checklist_daily', 'Checklist Daily Reminder (per doer)', true, 'daily', 8, 0, 'Asia/Kolkata', '0 8 * * *'),
+  ('delegation_daily', 'Delegation Daily Reminder (per assignee)', true, 'daily', 8, 15, 'Asia/Kolkata', '15 8 * * *'),
+  ('escalation_pending', 'Escalation — Pending Timeframe', true, 'daily', 9, 0, 'Asia/Kolkata', '0 9 * * *'),
+  ('escalation_critical', 'Escalation — Critical 72hr+', true, 'daily', 9, 5, 'Asia/Kolkata', '5 9 * * *'),
+  ('escalation_stages', 'Escalation — Stage 2 / 3 / 4', true, 'daily', 9, 10, 'Asia/Kolkata', '10 9 * * *')
+ON CONFLICT (job_key) DO NOTHING;
 
 -- =============================================================================
 -- VERIFICATION (run after — all should return rows / true)

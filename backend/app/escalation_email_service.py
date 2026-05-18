@@ -698,6 +698,20 @@ async def run_escalation_batch(
         if not force and ok_count == 0 and err_count > 0:
             release_dedup(dedup_key)
 
+        from app.utils.email import get_last_email_error
+
+        last_err = get_last_email_error()
+        if ok_count == 0 and err_count > 0:
+            return {
+                "ok": False,
+                "error": last_err or "All escalation emails failed. Check Postmark on Render.",
+                "configuration_type": configuration_type,
+                "pending": total,
+                "recipients_attempted": len(recipients),
+                "sent_ok": 0,
+                "failed": err_count,
+            }
+
         result = {
             "ok": True,
             "configuration_type": configuration_type,

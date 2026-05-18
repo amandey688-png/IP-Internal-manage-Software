@@ -128,6 +128,11 @@ export function resolveFeatureApprovalCronRunUrl(): string {
   return resolveBackendCronUrl("/feature-approval-reminders/run")
 }
 
+/** Single Render Cron URL — runs all due email jobs (feature, checklist, delegation, escalation). */
+export function resolveSchedulerTickUrl(): string {
+  return resolveBackendCronUrl("/scheduler/tick")
+}
+
 export function resolveEscalationPendingCronUrl(): string {
   return resolveBackendCronUrl("/escalation/send-pending-mails")
 }

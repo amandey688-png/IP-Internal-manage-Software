@@ -233,6 +233,30 @@ async def retry_route(log_id: str, _auth: dict = Depends(_require_admin)):
 # --- Cron endpoints (external scheduler) ---
 
 
+def _cron_escalation_response(result: dict) -> dict:
+    """Cron-job.org: fail loudly when Postmark/recipients block real sends."""
+    if result.get("ok") is False:
+        raise HTTPException(status_code=500, detail=result.get("error") or "Escalation send failed")
+    hints = {
+        "already_sent_today": "No new email — already sent today (use ?force=true once to resend).",
+        "no_recipients": "No email — add enabled receivers in Escalation Settings.",
+        "no_tickets": "No email — no tickets match this escalation rule.",
+        "disabled": "No email — this escalation configuration is disabled.",
+    }
+    reason = str(result.get("reason") or "")
+    sent = int(result.get("sent_ok") or 0)
+    return {
+        "status": "completed",
+        "email_sent": sent > 0,
+        "emails_sent": sent,
+        "pending_tickets": result.get("pending", 0),
+        "configuration_type": result.get("configuration_type"),
+        "skipped": bool(result.get("skipped")),
+        "reason": reason or None,
+        "message": hints.get(reason) or (f"Sent {sent} email(s)." if sent else "Completed."),
+    }
+
+
 @escalation_email_router.api_route("/escalation/send-pending-mails", methods=["GET", "POST"])
 async def cron_pending_mails(
     background_tasks: BackgroundTasks,
@@ -243,11 +267,12 @@ async def cron_pending_mails(
 ):
     force_flag = force or (bool(body.force) if body else False)
     if ctx.get("cron"):
-        return await run_escalation_batch(
+        result = await run_escalation_batch(
             "pending_timeframe",
             force=force_flag,
             trigger_source="cron",
         )
+        return _cron_escalation_response(result)
     uid = ctx.get("id")
     return await run_escalation_batch(
         "pending_timeframe",
@@ -267,11 +292,12 @@ async def cron_critical_mails(
 ):
     force_flag = force or (bool(body.force) if body else False)
     if ctx.get("cron"):
-        return await run_escalation_batch(
+        result = await run_escalation_batch(
             "critical_pending",
             force=force_flag,
             trigger_source="cron",
         )
+        return _cron_escalation_response(result)
     uid = ctx.get("id")
     return await run_escalation_batch(
         "critical_pending",
@@ -291,7 +317,22 @@ async def cron_stage_mails(
 ):
     force_flag = force or (bool(body.force) if body else False)
     if ctx.get("cron"):
-        return await run_all_stage_batches(force=force_flag)
+        raw = await run_all_stage_batches(force=force_flag)
+        results = raw.get("results") or {}
+        total_sent = sum(int((results.get(k) or {}).get("sent_ok") or 0) for k in results)
+        any_fail = any((results.get(k) or {}).get("ok") is False for k in results)
+        if any_fail:
+            err = next(
+                (results[k].get("error") for k in results if (results.get(k) or {}).get("ok") is False),
+                "Stage escalation send failed",
+            )
+            raise HTTPException(status_code=500, detail=err)
+        return {
+            "status": "completed",
+            "email_sent": total_sent > 0,
+            "emails_sent": total_sent,
+            "results": results,
+        }
     uid = ctx.get("id")
     return await run_all_stage_batches(
         force=force_flag,

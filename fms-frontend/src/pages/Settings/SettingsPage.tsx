@@ -29,6 +29,8 @@ import {
 } from '../../api/featureApprovalReminders'
 import { resolveFeatureApprovalCronRunUrl } from '../../api/axios'
 import { EscalationEmailSettings } from './EscalationEmailSettings'
+import { EmailSchedulesPanel } from '../../components/settings/EmailSchedulesPanel'
+import { ChecklistDelegationEmailSettings } from './ChecklistDelegationEmailSettings'
 
 const { Title, Paragraph, Text } = Typography
 
@@ -251,6 +253,10 @@ export const SettingsPage = () => {
           {canAccessSettings && (
             <>
               <Divider />
+              <EmailSchedulesPanel />
+              <Divider />
+              <ChecklistDelegationEmailSettings />
+              <Divider />
               <Spin spinning={faLoading}>
                 <div>
                   <Title level={4}>
@@ -258,9 +264,9 @@ export const SettingsPage = () => {
                     Feature Approval Email Configuration
                   </Title>
                   <Paragraph type="secondary">
-                    This app does <Text strong>not</Text> run jobs by itself. Use your own external scheduler (server cron, Render cron,
-                    GitHub Actions, etc.) to POST to the backend URL below. When Feature tickets are still pending approval, each successful
-                    daily run sends <Text strong>one grouped HTML reminder</Text> to enabled recipients.
+                    When Feature tickets are pending approval, each daily run sends <Text strong>one grouped HTML reminder</Text> to enabled
+                    recipients below. Set send time under <Text strong>Automated email schedules</Text> (
+                    <Text code>feature_approval</Text>). Render Cron should call <Text code>/scheduler/tick</Text> every 5 minutes.
                   </Paragraph>
 
                   {urlConfig && !urlConfig.email_links_ok && (
