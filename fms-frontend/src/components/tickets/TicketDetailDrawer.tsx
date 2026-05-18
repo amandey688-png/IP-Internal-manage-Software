@@ -68,7 +68,7 @@ interface TicketDetailDrawerProps {
   onClose: () => void
   onUpdate?: () => void
   readOnly?: boolean
-  /** When true (Approval Status section), show Approve / Unapprove with actual time and optional remarks for Unapprove */
+  /** When true (Approval Status section), show Approve / Rejected with remarks required on reject */
   approvalMode?: boolean
 }
 
@@ -80,8 +80,8 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [unapproveModalOpen, setUnapproveModalOpen] = useState(false)
-  const [unapproveRemarks, setUnapproveRemarks] = useState('')
+  const [rejectModalOpen, setRejectModalOpen] = useState(false)
+  const [rejectRemarks, setRejectRemarks] = useState('')
   const [approvalActionLoading, setApprovalActionLoading] = useState(false)
 
   const handleFeatureStageUpdate = async (updates: Partial<Ticket>) => {
@@ -135,7 +135,7 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
       const fresh = await ticketsApi.get(ticketId)
       setTicket(fresh && typeof fresh === 'object' ? (fresh as Ticket) : null)
       onUpdate?.()
-      message.success('Ticket approved.')
+      message.success('Feature ticket approved. Thank you, Approver.')
       onClose()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
@@ -145,32 +145,32 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
     }
   }
 
-  const handleUnapproveOpen = () => {
-    setUnapproveRemarks('')
-    setUnapproveModalOpen(true)
+  const handleRejectOpen = () => {
+    setRejectRemarks('')
+    setRejectModalOpen(true)
   }
 
-  const handleUnapproveSubmit = async () => {
-    if (!ticketId || !unapproveRemarks.trim()) {
-      message.error('Remarks are required for Unapprove')
+  const handleRejectSubmit = async () => {
+    if (!ticketId || !rejectRemarks.trim()) {
+      message.error('Remarks are required when rejecting a feature request')
       return
     }
     setApprovalActionLoading(true)
     try {
       await ticketsApi.update(ticketId, {
-        approval_status: 'unapproved',
-        remarks: unapproveRemarks.trim(),
+        approval_status: 'rejected',
+        remarks: rejectRemarks.trim(),
       })
       const fresh = await ticketsApi.get(ticketId)
       setTicket(fresh && typeof fresh === 'object' ? (fresh as Ticket) : null)
       onUpdate?.()
-      message.success('Ticket unapproved.')
-      setUnapproveModalOpen(false)
-      setUnapproveRemarks('')
+      message.success('Feature ticket rejected. Remarks saved.')
+      setRejectModalOpen(false)
+      setRejectRemarks('')
       onClose()
     } catch (e: unknown) {
       const err = e as { response?: { data?: { detail?: string } } }
-      message.error(err?.response?.data?.detail || 'Failed to unapprove')
+      message.error(err?.response?.data?.detail || 'Failed to reject')
     } finally {
       setApprovalActionLoading(false)
     }
@@ -214,9 +214,30 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
               <>
                 <Descriptions.Item label="Actual Time">{formatDuration(ticket.actual_time_seconds)}</Descriptions.Item>
                 <Descriptions.Item label="Approval Status">
-                  <Tag color={ticket.approval_status === 'approved' ? 'green' : ticket.approval_status === 'unapproved' ? 'orange' : 'default'}>
-                    {ticket.approval_status ?? 'Pending'}
+                  <Tag
+                    color={
+                      ticket.approval_status === 'approved'
+                        ? 'green'
+                        : ticket.approval_status === 'rejected'
+                          ? 'red'
+                          : ticket.approval_status === 'unapproved'
+                            ? 'orange'
+                            : 'default'
+                    }
+                  >
+                    {ticket.approval_status === 'rejected'
+                      ? 'Rejected'
+                      : ticket.approval_status === 'unapproved'
+                        ? 'Unapprove'
+                        : ticket.approval_status === 'approved'
+                          ? 'Approved'
+                          : 'Pending'}
                   </Tag>
+                  {ticket.remarks && (ticket.approval_status === 'rejected' || ticket.approval_status === 'unapproved') && (
+                    <div style={{ marginTop: 4 }}>
+                      <Text type="secondary">Remarks: {ticket.remarks}</Text>
+                    </div>
+                  )}
                   {ticket.approval_actual_at && (
                     <div style={{ marginTop: 4 }}>
                       <Text type="secondary">Approved at: {formatDateTable(ticket.approval_actual_at)}</Text>
@@ -243,9 +264,9 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
                         danger
                         icon={<CloseOutlined />}
                         loading={approvalActionLoading}
-                        onClick={handleUnapproveOpen}
+                        onClick={handleRejectOpen}
                       >
-                        Unapprove
+                        Rejected
                       </Button>
                     </Space>
                   </Descriptions.Item>
@@ -366,21 +387,21 @@ export const TicketDetailDrawer = ({ ticketId, open, onClose, onUpdate, readOnly
       )}
 
       <Modal
-        title="Unapprove – Remarks required"
-        open={unapproveModalOpen}
-        onCancel={() => setUnapproveModalOpen(false)}
-        onOk={handleUnapproveSubmit}
-        okText="Unapprove"
+        title="Rejected – Remarks required"
+        open={rejectModalOpen}
+        onCancel={() => setRejectModalOpen(false)}
+        onOk={handleRejectSubmit}
+        okText="Confirm rejection"
         confirmLoading={approvalActionLoading}
         destroyOnClose
-        okButtonProps={{ disabled: !unapproveRemarks.trim() }}
+        okButtonProps={{ disabled: !rejectRemarks.trim() }}
       >
         <Text strong>Remarks *</Text>
         <TextArea
           rows={4}
-          value={unapproveRemarks}
-          onChange={(e) => setUnapproveRemarks(e.target.value)}
-          placeholder="Enter remarks (required for unapprove)"
+          value={rejectRemarks}
+          onChange={(e) => setRejectRemarks(e.target.value)}
+          placeholder="Enter remarks (required for rejection)"
           style={{ marginTop: 8, width: '100%' }}
         />
       </Modal>

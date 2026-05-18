@@ -197,6 +197,21 @@ FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "*").strip() or "*"
 app = FastAPI(title="IP Internal manage Software Backend")
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
+# Feature approval reminder routes (cron + settings)
+from app.feature_approval_reminder_routes import feature_approval_reminder_router
+from app.approval_email_pages import approval_public_router
+
+app.include_router(feature_approval_reminder_router)
+app.include_router(feature_approval_reminder_router, prefix="/api")
+app.include_router(approval_public_router)
+app.include_router(approval_public_router, prefix="/api")
+
+
+@app.on_event("startup")
+async def _log_email_on_startup():
+    from app.utils.email import log_email_smtp_startup
+    log_email_smtp_startup()
+
 _cache_default = TTLCache(maxsize=512, ttl=60)
 _cache_by_ttl: dict[int, TTLCache] = {}
 _cache_lock = threading.Lock()
@@ -1622,9 +1637,11 @@ def list_tickets(
             q = q.is_("approval_status", "null")
         elif approval_filter == "unapproved":
             q = q.eq("approval_status", "unapproved")
+        elif approval_filter == "rejected":
+            q = q.eq("approval_status", "rejected")
         else:
-            # all (default): show both pending and unapproved
-            q = q.or_("approval_status.is.null,approval_status.eq.unapproved")
+            # all: pending + unapproved + rejected (not approved)
+            q = q.or_("approval_status.is.null,approval_status.eq.unapproved,approval_status.eq.rejected")
     elif apply_section_filter and types_in:
         types_list = [t.strip() for t in types_in.split(",") if t.strip()]
         if types_list:
@@ -1731,7 +1748,7 @@ def _apply_approval_actual_times(data: dict) -> dict:
     now = datetime.utcnow().isoformat()
     if data.get("approval_status") == "approved" and "approval_actual_at" not in data:
         data["approval_actual_at"] = now
-    if data.get("approval_status") == "unapproved" and "unapproval_actual_at" not in data:
+    if data.get("approval_status") in ("unapproved", "rejected") and "unapproval_actual_at" not in data:
         data["unapproval_actual_at"] = now
     return data
 
@@ -1785,7 +1802,13 @@ def update_ticket(ticket_id: str, payload: UpdateTicketRequest, auth: dict = Dep
     # Log approval/rejection for audit
     if "approval_status" in data:
         try:
-            status_log = "approved" if data["approval_status"] == "approved" else "rejected"
+            status_log = (
+                "approved"
+                if data["approval_status"] == "approved"
+                else "rejected"
+                if data["approval_status"] in ("rejected", "unapproved")
+                else "rejected"
+            )
             supabase.table("approval_logs").insert({
                 "ticket_id": ticket_id,
                 "approved_by": auth["id"],
@@ -1846,41 +1869,12 @@ def staging_back(ticket_id: str, auth: dict = Depends(get_current_user)):
     return out.data[0] if out.data else {}
 
 
-# ---------- Approval Settings (Role 1 / Admin only) ----------
-class ApprovalSettingsResponse(BaseModel):
-    approval_emails: str
-
-
-class ApprovalSettingsUpdate(BaseModel):
-    approval_emails: str
-
-
-@api_router.get("/approval-settings", response_model=ApprovalSettingsResponse)
-def get_approval_settings(auth: dict = Depends(require_roles(["admin", "master_admin"]))):
-    """Get approval email addresses. Admin only."""
-    r = supabase.table("approval_settings").select("value").eq("key", "approval_emails").limit(1).execute()
-    value = (r.data[0]["value"] or "") if r.data else ""
-    return ApprovalSettingsResponse(approval_emails=value)
-
-
-@api_router.put("/approval-settings")
-def update_approval_settings(
-    payload: ApprovalSettingsUpdate,
-    auth: dict = Depends(require_roles(["admin", "master_admin"])),
-):
-    """Set approval email addresses (comma-separated). Admin only."""
-    supabase.table("approval_settings").update({
-        "value": payload.approval_emails.strip(),
-        "updated_at": datetime.utcnow().isoformat(),
-        "updated_by": auth["id"],
-    }).eq("key", "approval_emails").execute()
-    return {"message": "Approval emails updated"}
-
-
+# ---------- (legacy approval_settings removed — use feature_approval_email_settings + /feature-approval-reminders/*) ----------
 # ---------- Email-based approval (tokenized, one-time) ----------
 class ApprovalByTokenRequest(BaseModel):
     token: str
     action: str  # approve | reject
+    remarks: str | None = None
 
 
 class CreateApprovalTokensRequest(BaseModel):
@@ -1921,54 +1915,22 @@ def create_approval_tokens(
         if row.data and len(row.data) > 0:
             token = row.data[0].get("token")
             if token:
-                tokens_out.append({"action": action, "url": f"{base}/approval/confirm?token={token}&action={action}"})
+                from app.feature_approval_reminder_service import _public_api_base
+
+                api_base = _public_api_base()
+                tokens_out.append({
+                    "action": action,
+                    "url": f"{api_base}/approval/email-action?token={token}&action={action}",
+                })
     return {"ticket_id": ticket_id, "links": tokens_out, "expires_in_days": 7}
 
 
 @api_router.post("/approval/execute-by-token")
 def approval_execute_by_token(payload: ApprovalByTokenRequest):
-    """
-    Execute approve/reject from email link. No auth required; token is one-time and time-limited.
-    """
-    import uuid
-    try:
-        token_uuid = uuid.UUID(payload.token)
-    except (ValueError, TypeError):
-        raise HTTPException(status_code=400, detail="Invalid token")
-    r = supabase.table("approval_tokens").select("*").eq("token", str(token_uuid)).is_("used_at", "null").execute()
-    if not r.data or len(r.data) == 0:
-        raise HTTPException(status_code=400, detail="Token already used or invalid")
-    row = r.data[0]
-    if row["action"] != payload.action:
-        raise HTTPException(status_code=400, detail="Token action mismatch")
-    from datetime import datetime as dt, timezone
-    exp = row["expires_at"]
-    try:
-        exp_dt = dt.fromisoformat(str(exp).replace("Z", "+00:00")) if isinstance(exp, str) else exp
-        if exp_dt and dt.now(timezone.utc) > exp_dt:
-            raise HTTPException(status_code=400, detail="Token expired")
-    except (TypeError, ValueError):
-        pass
-    ticket_id = row["ticket_id"]
-    now = datetime.utcnow().isoformat()
-    status = "approved" if payload.action == "approve" else "unapproved"
-    update_data = {
-        "approval_status": status,
-        "approval_source": "email",
-        "approved_by": None,
-        "approval_actual_at": now if status == "approved" else None,
-        "unapproval_actual_at": now if status == "unapproved" else None,
-    }
-    supabase.table("tickets").update(update_data).eq("id", ticket_id).execute()
-    supabase.table("approval_tokens").update({"used_at": now}).eq("id", row["id"]).execute()
-    supabase.table("approval_logs").insert({
-        "ticket_id": ticket_id,
-        "approved_by": None,
-        "approved_at": now,
-        "status": "approved" if status == "approved" else "rejected",
-        "source": "email",
-    }).execute()
-    return {"success": True, "status": status, "ticket_id": ticket_id}
+    """Execute approve/reject from email link. No auth required; token is one-time and time-limited."""
+    from app.approval_token_service import execute_approval_by_token
+
+    return execute_approval_by_token(payload.token, payload.action, payload.remarks)
 
 
 @api_router.get("/tickets/{ticket_id}/responses")
@@ -11467,15 +11429,21 @@ async def smtp_send_test_email(request: Request, body: SmtpTestBody = SmtpTestBo
     if hdr != secret:
         raise HTTPException(403, "Missing or invalid X-SMTP-Test-Secret header.")
 
-    to = str(body.to).strip() if body.to else (os.getenv("SMTP_FROM_EMAIL") or "").strip()
+    to = str(body.to).strip() if body.to else ""
+    if not to:
+        to = (
+            (os.getenv("SMTP_FROM_EMAIL") or "")
+            or (os.getenv("POSTMARK_FROM_EMAIL") or "")
+            or (os.getenv("POSTMARK_SMTP_FROM") or "")
+        ).strip()
     if not to:
         raise HTTPException(
             400,
-            'Set SMTP_FROM_EMAIL in .env or POST JSON {"to": "you@example.com"}.',
+            'Set POSTMARK_FROM_EMAIL / SMTP_FROM_EMAIL in .env or POST JSON {"to": "you@example.com"}.',
         )
-    from app.utils.email import send_email
+    from app.utils.email import get_last_email_error, send_email_detail
 
-    ok = await send_email(
+    ok, err = await send_email_detail(
         to_email=to,
         subject="FMS backend: SMTP test",
         html_content=(
@@ -11485,11 +11453,7 @@ async def smtp_send_test_email(request: Request, body: SmtpTestBody = SmtpTestBo
         plain_fallback="FMS SMTP test: plain text OK means send_email ran.",
     )
     if not ok:
-        raise HTTPException(
-            500,
-            "send_email returned false. Check server logs ([email] lines). "
-            "If you use Brevo SMTP only, leave SENDGRID_API_KEY unset.",
-        )
+        raise HTTPException(500, err or get_last_email_error() or "send_email failed")
     return {"ok": True, "to": to, "message": "Test email sent — check inbox and spam."}
 
 
